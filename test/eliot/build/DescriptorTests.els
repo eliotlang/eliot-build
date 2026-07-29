@@ -1,0 +1,107 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.Descriptor
+import eliot.build.Lists
+import eliot.build.Strings
+
+def testCases: Test = {
+   "parseDescriptor" should "read the minimal library descriptor of the design" in {
+      roundTrip("dep github.com/eliot-lang/eliot//stdlib v1\ndep github.com/somelib/collections v1.3")
+   }
+   "parseDescriptor" should "keep a module selector apart from the URL it narrows" in {
+      parsed("dep github.com/eliot-lang/eliot//stdlib v1.2")
+         shouldBe "dep github.com/eliot-lang/eliot//stdlib v1.2"
+   }
+   "parseDescriptor" should "read a sibling module reference, which carries no version" in {
+      parsed("module jvm {\n   dep //stdlib\n}") shouldBe "module jvm {\n  dep //stdlib\n}"
+   }
+   "parseDescriptor" should "read an application targeting two platforms" in {
+      roundTrip(
+         "dep github.com/somelib/sensor-api v2\n" ++
+         "artifact controller-jvm {\n" ++
+         "  dep github.com/eliot-lang/eliot//jvm v1\n" ++
+         "  backend {\n    kind exe-jar\n    main Controller\n  }\n" ++
+         "}"
+      )
+   }
+   "parseDescriptor" should "read a backend written inline" in {
+      parsed("artifact hello {\n   backend { kind exe-jar, main HelloWorld }\n}")
+         shouldBe "artifact hello {\n  backend {\n    kind exe-jar\n    main HelloWorld\n  }\n}"
+   }
+   "parseDescriptor" should "read the eliot repository's own multi-module shape" in {
+      roundTrip(
+         "module lang {\n" ++
+         "  plugin com.vanillasource:eliot-lang:0.5.0 {\n" ++
+         "    jar org.ow2.asm:asm:9.9 sha256 9f2ca9b1\n  }\n}\n" ++
+         "module examples {\n  internal\n  dep //jvm\n}"
+      )
+   }
+   "parseDescriptor" should "read a test block" in {
+      roundTrip("test {\n  dep github.com/eliot-lang/eliot-test v1\n}")
+   }
+   "parseDescriptor" should "read a root replacement" in {
+      roundTrip("replace github.com/x/foo with ../foo-local")
+   }
+   "parseDescriptor" should "treat a module as exported unless it says otherwise" in {
+      parsed("module lang {\n   dep //other\n}") shouldBe "module lang {\n  dep //other\n}"
+   }
+   "parseDescriptor" should "yield nothing for a file of comments alone" in {
+      parsed("-- nothing to declare\n\n-- really") shouldBe ""
+   }
+   "parseDescriptor" should "reject an unknown top-level clause, pointing at the upgrade" in {
+      parsed("registry https://example.com")
+         shouldBe "unknown clause 'registry'; this descriptor may need a newer eliot in 'registry https://example.com'"
+   }
+   "parseDescriptor" should "reject an unknown clause inside a module" in {
+      parsed("module lang {\n   exports everything\n}")
+         shouldBe "unknown clause 'exports'; this descriptor may need a newer eliot in 'exports everything'"
+   }
+   "parseDescriptor" should "reject a dependency URL carrying a scheme" in {
+      parsed("dep https://github.com/x/foo v1")
+         shouldBe "a dependency URL carries no scheme in 'dep https://github.com/x/foo v1'"
+   }
+   "parseDescriptor" should "reject a version that is not a tag" in {
+      parsed("dep github.com/x/foo 1.3") shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo 1.3'"
+   }
+   "parseDescriptor" should "reject a version range, which the model has no way to mean" in {
+      parsed("dep github.com/x/foo >=v1.3")
+         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo >=v1.3'"
+   }
+   "parseDescriptor" should "reject a dep with no URL at all" in {
+      parsed("dep") shouldBe "a dep needs a package URL in 'dep'"
+   }
+   "parseDescriptor" should "reject a dep carrying more than a URL and a version" in {
+      parsed("dep github.com/x/foo v1 extra") shouldBe "too many arguments in 'dep github.com/x/foo v1 extra'"
+   }
+   "parseDescriptor" should "reject a jar pin without its hash" in {
+      parsed("module lang {\n  plugin a:b:1 {\n    jar c:d:2\n  }\n}")
+         shouldBe "a jar needs 'sha256 <hex>' in 'jar c:d:2'"
+   }
+   "parseDescriptor" should "reject a replace that does not read 'with'" in {
+      parsed("replace github.com/x/foo by ../foo-local")
+         shouldBe "a replace reads 'replace <url> with <target>' in 'replace github.com/x/foo by ../foo-local'"
+   }
+   "parseDescriptor" should "report a syntax error as such" in {
+      parsed("dep a v1\n}") shouldBe "line 2: unmatched '}' in '}'"
+   }
+}
+
+/**
+ * The descriptor `text` spells, rendered back into `eliot.pkg` syntax — or the error it fails with,
+ * so both outcomes are asserted the same way.
+ */
+private def parsed(text: String): String =
+   foldEither(
+      error -> show(error),
+      descriptor -> renderDescriptor(descriptor),
+      runId(runThrow[DescriptorError](parseDescriptor(split("\n", text))))
+   )
+
+/**
+ * Assert that `text` survives being read into the model and written back out unchanged — the
+ * strongest statement available without an `Eq` for the model: every clause was understood, and
+ * nothing was invented.
+ */
+private def roundTrip(text: String): {Throw[AssertionError]} Unit = parsed(text) shouldBe text

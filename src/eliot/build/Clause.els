@@ -1,0 +1,212 @@
+import eliot.collection.List
+import eliot.build.Lists
+import eliot.build.Strings
+
+/**
+ * The generic clause tree an `eliot.pkg` file is, and the parser that reads one.
+ *
+ * The whole grammar is one rule — a clause is `keyword args…`, optionally followed by a `{ … }`
+ * block of sub-clauses — so parsing is deliberately separated from *interpreting*: this module
+ * decides only what the file's shape is, and `eliot.build.Descriptor` decides what the shapes mean.
+ * That split is what lets the descriptor stay inert data readable by tools that know nothing of the
+ * build model, and it keeps every "unknown clause" diagnostic in one place instead of scattered
+ * through the syntax.
+ *
+ * Nesting is held in a **stack of open clauses**, the innermost one last, rather than in a recursive
+ * descent no total language can write: closing a block pops the top and hangs it under its parent.
+ * Depth is data, so the tree may nest arbitrarily even though the parser never recurses.
+ */
+data Clause(keyword: String, arguments: List[String], children: List[Clause])
+
+/**
+ * A syntax error, carrying the line it was found on so a diagnostic can point at it. Interpretation
+ * errors — an unknown keyword, a missing argument — are `eliot.build.Descriptor`'s to raise; this
+ * type is only about shape.
+ */
+data ClauseError(lineNumber: Int, line: String, reason: String)
+
+implement Show[ClauseError] {
+   def show(value: ClauseError): String =
+      "line " ++ show(value.lineNumber) ++ ": " ++ value.reason ++ " in '" ++ value.line ++ "'"
+}
+
+/**
+ * The clause tree `lines` spells, raising on the first syntax error.
+ *
+ * ```eliot
+ * val clauses = parseClauses(readLines(root / "eliot.pkg"))
+ * ```
+ */
+def parseClauses(lines: List[String]): {Throw[ClauseError]} List[Clause] =
+   orRaise(closed(lines.foldLeft(openState, line -> state -> stepLine(line, state))))
+
+/**
+ * The `index`-th argument of `clause`, aborting when it has no such argument — so a clause reader
+ * answers a missing argument with `else` or lets it propagate.
+ */
+def argument(index: Int, clause: Clause): {Abort} String =
+   orAbort(clause.arguments.foldLeft(Pair(0, None), e -> acc -> takeAt(index, e, acc)).second)
+
+/**
+ * The direct children of `clause` whose keyword is `keyword` — how an interpreter reads the `dep`
+ * lines of a `module` block without caring what else is in it.
+ */
+def childrenNamed(name: String, clause: Clause): List[Clause] =
+   clause.children.filter(child -> child.keyword == name)
+
+/**
+ * `clause` and its children rendered as an indented block, for diagnostics.
+ *
+ * Bounded to three levels of nesting — the depth the descriptor grammar actually reaches
+ * (`module` › `plugin` › `jar`) — because a renderer that followed the tree to any depth would have
+ * to recurse, which user code cannot do. Deeper children are elided rather than silently dropped.
+ */
+def render(clause: Clause): String = renderTop(clause)
+
+/**
+ * The parser's state: the stack of open clauses (a synthetic root first, the innermost open clause
+ * last), the number of the line just read, and the first error seen — once set, every later line is
+ * carried past untouched, so the reported error is the first one rather than the last.
+ */
+data ClauseState(stack: List[Clause], atLine: Int, failure: Option[ClauseError])
+
+private def openState: ClauseState = ClauseState(singleton(Clause("", empty, empty)), 0, None)
+
+/**
+ * The parsed clauses once every line has been read: the root's children, provided no block was left
+ * open.
+ */
+private def closed(state: ClauseState): Either[ClauseError, List[Clause]] =
+   state.failure.foldOption(closedStack(state), error -> Left(error))
+
+private def closedStack(state: ClauseState): Either[ClauseError, List[Clause]] =
+   fold(
+      state.stack.size <= 1,
+      Right(state.stack.last.foldOption(empty, root -> root.children)),
+      Left(ClauseError(state.atLine, "", "unclosed '{'"))
+   )
+
+private def stepLine(line: String, state: ClauseState): ClauseState = {
+   val advanced = ClauseState(state.stack, state.atLine + 1, None)
+
+   state.failure.foldOption(stepContent(line, advanced), _ -> state)
+}
+
+/**
+ * Strip the comment and the surrounding blank space; a line with nothing left carries no clause.
+ */
+private def stepContent(line: String, state: ClauseState): ClauseState = {
+   val content = before("--", line).trim
+
+   fold(content == "", state, stepClause(content, state))
+}
+
+private def stepClause(content: String, state: ClauseState): ClauseState =
+   fold(content == "}", closeBlock(content, state), openClause(content, state))
+
+private def openClause(content: String, state: ClauseState): ClauseState =
+   fold(
+      content.endsWith("{"),
+      openBlock(content, state),
+      fold(content.contains("{"), inlineBlock(content, state), leafClause(content, state))
+   )
+
+/**
+ * `keyword args {` — push a clause that later lines will fill.
+ */
+private def openBlock(content: String, state: ClauseState): ClauseState = {
+   val header = words(before("{", content))
+
+   fold(
+      isEmpty(header),
+      failedAt("a block needs a keyword", content, state),
+      ClauseState(append(state.stack, clauseOf(header, empty)), state.atLine, None)
+   )
+}
+
+/**
+ * `keyword args { sub a, sub b }` — a block written on one line, its sub-clauses separated by
+ * commas. The same tree as the multi-line form; only the spelling differs.
+ */
+private def inlineBlock(content: String, state: ClauseState): ClauseState = {
+   val header = words(before("{", content))
+   val inner = before("}", after("{", content))
+   val subClauses = split(",", inner).map(words).filter(tokens -> !isEmpty(tokens)).map(tokens -> clauseOf(tokens, empty))
+
+   fold(
+      !endsWith("}", content) || isEmpty(header),
+      failedAt("an inline block must read 'keyword args { sub, sub }'", content, state),
+      attached(clauseOf(header, subClauses), state)
+   )
+}
+
+/**
+ * `keyword args` — a clause with no block, hung directly under whatever is open.
+ */
+private def leafClause(content: String, state: ClauseState): ClauseState =
+   attached(clauseOf(words(content), empty), state)
+
+/**
+ * `}` — pop the innermost open clause and hang it under its parent.
+ */
+private def closeBlock(content: String, state: ClauseState): ClauseState =
+   fold(
+      state.stack.size <= 1,
+      failedAt("unmatched '}'", content, state),
+      ClauseState(withChild(state.stack.last, state.stack.dropLast), state.atLine, None)
+   )
+
+/**
+ * `state` with `clause` hung under the innermost open clause.
+ */
+private def attached(clause: Clause, state: ClauseState): ClauseState =
+   ClauseState(withChild(Some(clause), state.stack), state.atLine, None)
+
+/**
+ * `stack` with `child` appended to the children of its top entry.
+ */
+private def withChild(child: Option[Clause], stack: List[Clause]): List[Clause] =
+   child.foldOption(stack, added -> stack.replaceLast(parentWith(added, stack)))
+
+private def parentWith(child: Clause, stack: List[Clause]): Clause =
+   stack.last.foldOption(child, parent -> Clause(parent.keyword, parent.arguments, append(parent.children, child)))
+
+private def clauseOf(tokens: List[String], children: List[Clause]): Clause =
+   Clause(tokens.head.foldOption("", keyword -> keyword), tokens.tail, children)
+
+private def failedAt(reason: String, content: String, state: ClauseState): ClauseState =
+   ClauseState(state.stack, state.atLine, Some(ClauseError(state.atLine, content, reason)))
+
+/**
+ * One step of `argument`'s fold: keep the element whose position is `index`, counting as it goes.
+ * A positional index rather than `List` indexing, which does not exist.
+ */
+private def takeAt(index: Int, element: String, acc: Pair[Int, Option[String]]): Pair[Int, Option[String]] =
+   Pair(acc.first + 1, acc.second.foldOption(atIndex(index, acc.first, element), found -> Some(found)))
+
+private def atIndex(index: Int, position: Int, element: String): Option[String] =
+   fold(index <= position && position <= index, Some(element), None)
+
+/**
+ * The three nesting levels, written out one per definition rather than as one function calling
+ * itself: a renderer that followed the tree to any depth would be recursive, and user code cannot
+ * recurse. The unrolling is what makes the bound in `render`'s documentation literally true.
+ */
+private def renderTop(clause: Clause): String =
+   header(0, clause) ++ block(0, clause.children.map(renderMiddle))
+
+private def renderMiddle(clause: Clause): String =
+   header(1, clause) ++ block(1, clause.children.map(renderLeaf))
+
+private def renderLeaf(clause: Clause): String = header(2, clause)
+
+private def header(depth: Int, clause: Clause): String =
+   indent(depth) ++ clause.keyword ++ argumentText(clause)
+
+private def block(depth: Int, rendered: List[String]): String =
+   fold(isEmpty(rendered), "", " {\n" ++ rendered.joined("\n") ++ "\n" ++ indent(depth) ++ "}")
+
+private def argumentText(clause: Clause): String =
+   fold(isEmpty(clause.arguments), "", " " ++ clause.arguments.joined(" "))
+
+private def indent(depth: Int): String = "  ".repeat(depth)

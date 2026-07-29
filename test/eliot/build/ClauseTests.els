@@ -1,0 +1,91 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.Clause
+import eliot.build.Lists
+import eliot.build.Strings
+
+def testCases: Test = {
+   "parseClauses" should "read a flat sequence of clauses" in {
+      parsed("dep github.com/x/foo v1.3\ndep github.com/y/bar v2")
+         shouldBe "dep github.com/x/foo v1.3\ndep github.com/y/bar v2"
+   }
+   "parseClauses" should "drop comment lines, trailing comments and blank lines" in {
+      parsed("-- the language itself\n\ndep github.com/x/foo v1.3  -- pinned low\n")
+         shouldBe "dep github.com/x/foo v1.3"
+   }
+   "parseClauses" should "collapse runs of whitespace between tokens" in {
+      parsed("dep    github.com/x/foo\t v1.3") shouldBe "dep github.com/x/foo v1.3"
+   }
+   "parseClauses" should "hang a block's lines under its keyword" in {
+      parsed("module lang {\n   internal\n   dep //other-module\n}")
+         shouldBe "module lang {\n  internal\n  dep //other-module\n}"
+   }
+   "parseClauses" should "nest a block inside a block" in {
+      parsed("module lang {\n   plugin com.vanillasource:eliot-lang:0.5.0 {\n      jar org.ow2.asm:asm:9.9 sha256 9f2c\n   }\n}")
+         shouldBe "module lang {\n  plugin com.vanillasource:eliot-lang:0.5.0 {\n    jar org.ow2.asm:asm:9.9 sha256 9f2c\n  }\n}"
+   }
+   "parseClauses" should "keep sibling blocks apart" in {
+      parsed("artifact one {\n   dep a v1\n}\nartifact two {\n   dep b v2\n}")
+         shouldBe "artifact one {\n  dep a v1\n}\nartifact two {\n  dep b v2\n}"
+   }
+   "parseClauses" should "read a block written inline with comma-separated sub-clauses" in {
+      parsed("backend { kind exe-jar, main Controller }")
+         shouldBe "backend {\n  kind exe-jar\n  main Controller\n}"
+   }
+   "parseClauses" should "read a keyword-only clause" in {
+      parsed("module lang {\n   internal\n}") shouldBe "module lang {\n  internal\n}"
+   }
+   "parseClauses" should "report an unmatched closing brace, with its line" in {
+      parsed("dep a v1\n}") shouldBe "line 2: unmatched '}' in '}'"
+   }
+   "parseClauses" should "report a block that is never closed" in {
+      parsed("module lang {\n   dep a v1") shouldBe "line 2: unclosed '{' in ''"
+   }
+   "parseClauses" should "report a block opened without a keyword" in {
+      parsed("{\n}") shouldBe "line 1: a block needs a keyword in '{'"
+   }
+   "parseClauses" should "report the first error rather than the last" in {
+      parsed("}\ndep a v1\n}") shouldBe "line 1: unmatched '}' in '}'"
+   }
+   "argument" should "yield the argument at a position" in {
+      argumentOf(1, "dep github.com/x/foo v1.3") shouldBe "v1.3"
+   }
+   "argument" should "abort past the last argument" in {
+      argumentOf(1, "dep github.com/x/foo") shouldBe "<absent>"
+   }
+   "childrenNamed" should "select the children carrying one keyword" in {
+      depNames("module lang {\n   internal\n   dep a v1\n   dep b v2\n}") shouldBe "a,b"
+   }
+}
+
+/**
+ * The clause tree `text` spells, rendered back out — a round trip that pins down the shape without
+ * needing an `Eq` for the tree. A syntax error renders as its message instead, so the failure cases
+ * are written the same way as the successful ones.
+ */
+private def parsed(text: String): String =
+   runId(runThrow[ClauseError](parseClauses(split("\n", text))))
+      .foldEither(error -> show(error), clauses -> clauses.map(render).joined("\n"))
+
+private def firstClause(text: String): Option[Clause] =
+   foldEither(_ -> None, clauses -> clauses.head, clausesOf(text))
+
+private def clausesOf(text: String): Either[ClauseError, List[Clause]] =
+   runId(runThrow[ClauseError](parseClauses(split("\n", text))))
+
+/**
+ * The `index`-th argument of `text`'s first clause. The `{Abort}` discharge sits in its own
+ * definition rather than inside the `foldOption` arm, where the arm's effect row and the discharged
+ * carrier cannot be reconciled.
+ */
+private def argumentOf(index: Int, text: String): String =
+   foldOption("<none>", clause -> argumentText(index, clause), firstClause(text))
+
+private def argumentText(index: Int, clause: Clause): String = argument(index, clause) else "<absent>"
+
+private def depNames(text: String): String =
+   foldOption("<none>", clause -> clause.childrenNamed("dep").map(firstArgument).joined(","), firstClause(text))
+
+private def firstArgument(clause: Clause): String = argument(0, clause) else "?"

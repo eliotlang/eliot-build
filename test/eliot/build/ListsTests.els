@@ -1,0 +1,83 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.Lists
+
+def testCases: Test = {
+   "size" should "count the elements" in {
+      show(size(sample)) shouldBe "3"
+   }
+   "isEmpty" should "tell the empty list from a populated one" in {
+      (rendered(isEmpty(empty)) ++ " " ++ rendered(isEmpty(sample))) shouldBe "true false"
+   }
+   "map" should "keep the order of the elements" in {
+      joined(",", sample.map(toUpperCase)) shouldBe "BETA,ALPHA,GAMMA"
+   }
+   "filter" should "keep only the matching elements" in {
+      joined(",", sample.filter(word -> word.startsWith("a"))) shouldBe "alpha"
+   }
+   "find" should "yield the first match rather than the last" in {
+      sample.find(word -> word.contains("a")).foldOption("<none>", word -> word) shouldBe "beta"
+   }
+   "find" should "yield None when nothing matches" in {
+      sample.find(word -> word == "delta").foldOption("<none>", word -> word) shouldBe "<none>"
+   }
+   "any" should "hold exactly when some element matches" in {
+      (rendered(sample.any(word -> word == "alpha")) ++ " " ++ rendered(sample.any(word -> word == "delta"))) shouldBe "true false"
+   }
+   "all" should "hold exactly when every element matches" in {
+      (rendered(sample.all(word -> word.contains("a"))) ++ " " ++ rendered(sample.all(word -> word != "beta"))) shouldBe "true false"
+   }
+   "reverse" should "turn the list back to front" in {
+      joined(",", sample.reverse) shouldBe "gamma,alpha,beta"
+   }
+   "last" should "yield the final element" in {
+      sample.last.foldOption("<none>", word -> word) shouldBe "gamma"
+   }
+   "head" should "yield the leading element" in {
+      sample.head.foldOption("<none>", word -> word) shouldBe "beta"
+   }
+   "dropLast" should "remove the final element only" in {
+      joined(",", sample.dropLast) shouldBe "beta,alpha"
+   }
+   "dropLast" should "leave the empty list empty" in {
+      joined(",", dropLast(noWords)) shouldBe ""
+   }
+   "replaceLast" should "overwrite the stack top" in {
+      joined(",", sample.replaceLast("omega")) shouldBe "beta,alpha,omega"
+   }
+   "concat" should "flatten a list of lists in order" in {
+      joined(",", concat(append(append(empty, sample), singleton("delta")))) shouldBe "beta,alpha,gamma,delta"
+   }
+   "sorted" should "put the elements in ascending order" in {
+      joined(",", sample.sorted) shouldBe "alpha,beta,gamma"
+   }
+   "sorted" should "keep an already sorted list unchanged" in {
+      joined(",", sorted(sample.sorted)) shouldBe "alpha,beta,gamma"
+   }
+   "lookup" should "find the value bound to a key" in {
+      (table.lookup("beta") else "<none>") shouldBe "second"
+   }
+   "lookup" should "abort on an absent key" in {
+      (table.lookup("delta") else "<none>") shouldBe "<none>"
+   }
+   "put" should "replace an existing binding where it stands" in {
+      joined(",", put("alpha", "changed", table).map(entry -> entry.second)) shouldBe "changed,second"
+   }
+   "put" should "append a binding that is not there yet" in {
+      joined(",", put("gamma", "third", table).map(entry -> entry.first)) shouldBe "alpha,beta,gamma"
+   }
+}
+
+/**
+ * `Bool` has no `Show` instance in the standard library, so tests render one themselves.
+ */
+private def rendered(flag: Bool): String = fold(flag, "true", "false")
+
+private def sample: List[String] = append(append(append(empty, "beta"), "alpha"), "gamma")
+
+private def noWords: List[String] = empty
+
+private def table: List[Pair[String, String]] =
+   append(append(empty, Pair("alpha", "first")), Pair("beta", "second"))

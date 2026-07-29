@@ -1,0 +1,120 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.build.Lists
+
+/**
+ * Splitting and number parsing — the two string operations the descriptor parser needs and the
+ * standard library does not have, because both are unbounded iteration over characters and a total
+ * language cannot write that loop.
+ *
+ * They are recovered here by folding over an **iteration budget**: a list of that many units, built
+ * by doubling a singleton, is a perfectly ordinary value, and `foldLeft` over it runs the step that
+ * many times. Iteration a language cannot express as control flow it can still express as data.
+ *
+ * The cost is an explicit ceiling — `split` yields at most `tokenLimit` pieces and `parseNatural`
+ * reads at most `digitLimit` digits — which is why both document their bound rather than hiding it.
+ * A `String.foldCodePoints` native in the standard library (the pure twin of the one `eliot.file`
+ * already has) would retire this module's machinery, and should.
+ */
+def tokenLimit: Int = 256
+
+def digitLimit: Int = 32
+
+/**
+ * The characters of `s` before the first occurrence of `separator`, or all of `s` when it does not
+ * occur.
+ */
+def before(separator: String, s: String): String = s.substring(0, s.indexOf(separator)) else s
+
+/**
+ * The characters of `s` after the first occurrence of `separator`, or `""` when it does not occur.
+ */
+def after(separator: String, s: String): String = s.drop(s.indexOf(separator) + separator.length) else ""
+
+/**
+ * The pieces of `s` between occurrences of `separator`, in order, empty pieces included. Splitting
+ * on a separator that does not occur yields `s` alone.
+ *
+ * At most `tokenLimit` pieces: on a longer string the final piece holds the whole unsplit remainder
+ * rather than silently losing it.
+ */
+def split(separator: String, s: String): List[String] = {
+   val peeled: Pair[List[String], Option[String]] =
+      tokenBudget.foldLeft(Pair(empty, Some(s)), _ -> acc -> peelToken(separator, acc))
+
+   peeled.second.foldOption(peeled.first, remainder -> append(peeled.first, remainder))
+}
+
+/**
+ * The whitespace-separated words of `s`, with empty pieces dropped — the tokenizer the clause
+ * grammar is written against, where runs of spaces and a trailing newline are not information.
+ */
+def words(s: String): List[String] = split(" ", s.trim.replace("\t", " ")).filter(word -> word != "")
+
+/**
+ * The non-negative integer `s` spells, aborting when it is empty, longer than `digitLimit`, or holds
+ * anything but decimal digits. Written as a fold over the digit budget, one character at a time.
+ */
+def parseNatural(s: String): {Abort} Int = {
+   val read: Pair[Option[Int], String] =
+      digitBudget.foldLeft(Pair(Some(0), s), _ -> acc -> readDigit(acc))
+
+   fold(s == "" || read.second != "", abort, orAbort(read.first))
+}
+
+/**
+ * `true` when `s` holds only decimal digits and at least one of them.
+ */
+def isNatural(s: String): Bool = foldOption(false, _ -> true, runId(runAbort(parseNatural(s))))
+
+/**
+ * One step of `split`: take the next piece off the remainder, or do nothing once there is none.
+ */
+private def peelToken(separator: String, acc: Pair[List[String], Option[String]]): Pair[List[String], Option[String]] =
+   acc.second.foldOption(
+      acc,
+      remainder -> fold(
+         remainder.contains(separator),
+         Pair(append(acc.first, before(separator, remainder)), Some(after(separator, remainder))),
+         Pair(append(acc.first, remainder), None)
+      )
+   )
+
+/**
+ * One step of `parseNatural`: fold the leading character of the remainder into the accumulated
+ * value, or do nothing once the remainder is spent. A non-digit poisons the accumulator to `None`,
+ * which every later step carries through unchanged.
+ */
+private def readDigit(acc: Pair[Option[Int], String]): Pair[Option[Int], String] =
+   fold(
+      acc.second == "",
+      acc,
+      Pair(nextValue(acc.first, acc.second.take(1)), acc.second.drop(1))
+   )
+
+private def nextValue(accumulated: Option[Int], character: String): Option[Int] =
+   accumulated.foldOption(None, value -> runId(runAbort(value * 10 + digitValue(character))))
+
+/**
+ * The value of a single decimal digit, aborting on anything else. A lookup table rather than
+ * character arithmetic, since there is no way to take a character's code point.
+ */
+private def digitValue(character: String): {Abort} Int = digits.lookup(character)
+
+private def digits: List[Pair[String, Int]] =
+   append(append(append(append(append(append(append(append(append(append(empty,
+      Pair("0", 0)), Pair("1", 1)), Pair("2", 2)), Pair("3", 3)), Pair("4", 4)),
+      Pair("5", 5)), Pair("6", 6)), Pair("7", 7)), Pair("8", 8)), Pair("9", 9))
+
+/**
+ * A list of `tokenLimit` units: `split`'s iteration budget, built by doubling a singleton eight
+ * times rather than by a loop that cannot be written.
+ */
+private def tokenBudget: List[Unit] = doubled(doubled(doubled(doubled(doubled(doubled(doubled(doubled(singleton(unit)))))))))
+
+/**
+ * A list of `digitLimit` units — `parseNatural`'s budget, five doublings.
+ */
+private def digitBudget: List[Unit] = doubled(doubled(doubled(doubled(doubled(singleton(unit))))))
+
+private def doubled[A](list: List[A]): List[A] = list ++ list

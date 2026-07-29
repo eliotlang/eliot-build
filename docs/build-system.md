@@ -13,10 +13,14 @@ model, so it must let users program one. A language-owned tool *defines* the bui
 language-owned tools that took this route (Cargo, Go) are the ones their users praise. Rationale:
 
 - **Same verbs on every project.** A build you have never seen is operable and readable.
-- **Tools read data without executing it.** The LSP, a mirror, a future `eliot migrate` all parse
-  the descriptor directly; no build-tool daemon, no code execution on IDE import (contrast Gradle
-  sync). Mechanical ecosystem-wide format migrations stay possible.
-- **Opening a project runs no code.** Reproducibility and supply-chain hygiene by construction.
+- **Tools read data without executing it.** A mirror, a future `eliot migrate`, a syntax
+  highlighter all parse the descriptor directly — its *literal content* is available to anyone
+  without a build-tool daemon and without evaluating anything (contrast Gradle sync). Mechanical
+  ecosystem-wide format migrations stay possible. The **resolved** project model is a different
+  question with a single answerer — see the IDE section.
+- **Opening a project runs no project code.** Reproducibility and supply-chain hygiene by
+  construction: whatever a tool executes is fixed, pinned tooling, never something the repo
+  supplied.
 - **Eliot needs less build tool than almost any language.** The compiler already is the build
   engine (demand-driven facts, plugin backends, whole-program compilation from `main`, layer
   assembly via paths). The build tool reduces to: resolve dependencies → assemble roots →
@@ -455,11 +459,41 @@ Two consequences:
 
 BSP assumes the build server compiles and streams diagnostics — the opposite of the Eliot LSP,
 which embeds the compiler in-process (live VFS overlay, unsaved-buffer diagnostics). BSP solves
-cross-vendor interop we do not have. The shape is rust-analyzer/gopls: the build tool answers one
-question — the **resolved project model** (runtime roots, compiler-overlay roots, dependency
-checkout paths, configurations) — via a JSON query or, since tool and LSP share one Scala
-codebase, a directly-linked resolver library. The only shared-state care point is a locked
-download cache so CLI and LSP do not race. This retires the `eliot.paths` stopgap.
+cross-vendor interop we do not have. The shape is rust-analyzer/gopls: **the LSP spawns the build
+tool and asks it one question** — the **resolved project model** (runtime roots,
+compiler-overlay roots, dependency checkout paths, configurations) — answered as JSON on stdout
+by a machine-facing verb, `eliot project-model` (`cargo metadata`, `go list -json`). This retires
+the `eliot.paths` stopgap.
+
+**The descriptor and the project model are different artifacts, and only the second has a single
+answerer.** Parsing `eliot.pkg` is the easy half and stays open to everyone (above); the project
+model is the descriptor *plus* MVS over the transitive closure, `replace` application, lockfile
+pins, per-configuration scoping and cache checkout paths. A second implementation of that inside
+the LSP would drift from the first, and the drift is the worst kind: the IDE reports diagnostics
+against a different set of roots than the build compiles, with nothing in either output naming
+the discrepancy. One resolver, one answer.
+
+Consequences worth stating:
+
+- **No linked-library option.** The launcher is written in Eliot (see the bootstrap section), so
+  there is no shared Scala codebase for the LSP to link a resolver from — a jar of generated
+  Eliot bytecode whose entry point is an effectful `main` is not a Scala-callable library. Process
+  spawn is the only viable mechanism, and it is what the cited precedents do anyway.
+- **The no-code-execution cornerstone is untouched.** Spawning the build tool executes a fixed,
+  version-pinned, reviewed binary — the one the wrapper's pin file already selects. Gradle sync
+  is a different thing entirely: it *evaluates a program the repo supplied*. The property was
+  never about who does the parsing.
+- **The query must answer offline and degraded.** Opening a project whose dependencies are not
+  yet fetched must yield the model that is knowable — resolved where the lockfile and cache
+  suffice, explicitly marked incomplete elsewhere — never block IDE startup on a network fetch
+  (`cargo metadata --offline`). Fetching is a verb the user invokes, not a side effect of opening
+  an editor.
+- **Shared-state care shrinks to nothing.** Since the LSP never touches the download cache
+  itself, only the build tool does, the CLI-vs-LSP race disappears in favour of the tool's own
+  lock. The LSP watches `eliot.pkg`/`eliot.lock` and re-queries on change.
+- **Transitional**: until the LSP learns the query, the build tool can *emit* `eliot.paths` as
+  generated output. That is strictly better than today's hand-maintained file, which silently
+  drifts from the CLI invocation it is supposed to mirror, and it deletes cleanly.
 
 ## Deferred / open problems
 
