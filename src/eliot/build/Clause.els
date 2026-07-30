@@ -1,6 +1,4 @@
 import eliot.collection.List
-import eliot.build.Lists
-import eliot.build.Strings
 
 /**
  * The generic clause tree an `eliot.pkg` file is, and the parser that reads one.
@@ -44,8 +42,7 @@ def parseClauses(lines: List[String]): {Throw[ClauseError]} List[Clause] =
  * The `index`-th argument of `clause`, aborting when it has no such argument — so a clause reader
  * answers a missing argument with `else` or lets it propagate.
  */
-def argument(index: Int, clause: Clause): {Abort} String =
-   orAbort(clause.arguments.foldLeft(Pair(0, None), e -> acc -> takeAt(index, e, acc)).second)
+def argument(index: Int, clause: Clause): {Abort} String = orAbort(clause.arguments.at(index))
 
 /**
  * The direct children of `clause` whose keyword is `keyword` — how an interpreter reads the `dep`
@@ -176,16 +173,6 @@ private def clauseOf(tokens: List[String], children: List[Clause]): Clause =
 
 private def failedAt(reason: String, content: String, state: ClauseState): ClauseState =
    ClauseState(state.stack, state.atLine, Some(ClauseError(state.atLine, content, reason)))
-
-/**
- * One step of `argument`'s fold: keep the element whose position is `index`, counting as it goes.
- * A positional index rather than `List` indexing, which does not exist.
- */
-private def takeAt(index: Int, element: String, acc: Pair[Int, Option[String]]): Pair[Int, Option[String]] =
-   Pair(acc.first + 1, acc.second.foldOption(atIndex(index, acc.first, element), found -> Some(found)))
-
-private def atIndex(index: Int, position: Int, element: String): Option[String] =
-   fold(index <= position && position <= index, Some(element), None)
 
 /**
  * The three nesting levels, written out one per definition rather than as one function calling

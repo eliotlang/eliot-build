@@ -3,8 +3,6 @@ import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.Clause
-import eliot.build.Lists
-import eliot.build.Strings
 
 def testCases: Test = {
    "parseClauses" should "read a flat sequence of clauses" in {

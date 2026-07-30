@@ -3,8 +3,6 @@ import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.Descriptor
-import eliot.build.Lists
-import eliot.build.Strings
 
 def testCases: Test = {
    "parseDescriptor" should "read the minimal library descriptor of the design" in {

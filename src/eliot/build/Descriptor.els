@@ -1,8 +1,6 @@
 import eliot.lang.Id
 import eliot.collection.List
 import eliot.build.Clause
-import eliot.build.Lists
-import eliot.build.Strings
 
 /**
  * The typed `eliot.pkg` model, and the interpretation of a clause tree into it.
@@ -293,14 +291,14 @@ private def parameterOf(clause: Clause): Pair[String, String] =
    Pair(clause.keyword, clause.arguments.joined(" "))
 
 private def pluginsOf(clause: Clause): {Throw[DescriptorError]} List[Plugin] =
-   clause.childrenNamed("plugin").mapEffect(pluginClause)
+   clause.childrenNamed("plugin").map(pluginClause)
 
 private def pluginClause(clause: Clause): {Throw[DescriptorError]} Plugin = {
    val coordinate = required(0, "a plugin needs a Maven coordinate", clause)
 
    atMostArguments(1, clause)
    knownChildren(pluginKeywords, clause)
-   Plugin(coordinate, clause.childrenNamed("jar").mapEffect(jarClause))
+   Plugin(coordinate, clause.childrenNamed("jar").map(jarClause))
 }
 
 /**
@@ -328,10 +326,10 @@ private def replacementOf(clause: Clause): {Throw[DescriptorError]} Replacement 
 }
 
 private def dependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
-   clause.childrenNamed("dep").mapEffect(dependencyOf)
+   clause.childrenNamed("dep").map(dependencyOf)
 
 private def testDependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
-   clause.childrenNamed("test").flatMapEffect(dependenciesOf)
+   clause.childrenNamed("test").flatMap(dependenciesOf)
 
 /**
  * The `index`-th argument, raising `problem` when there is none. The `{Abort}` is discharged to an
@@ -359,6 +357,13 @@ private def checkVersion(version: Option[String], clause: Clause): {Throw[Descri
 
 private def versionWellFormed(version: Option[String]): Bool =
    foldOption(true, tag -> startsWith("v", tag) && isNatural(before(".", drop(1, tag))), version)
+
+/**
+ * `true` when `text` spells a non-negative whole number. The standard library's `isInteger` also admits a leading
+ * sign, which a version's major number never carries — `v-1` is not a tag anyone writes, and refusing it here keeps
+ * the check as narrow as the format.
+ */
+private def isNatural(text: String): Bool = isInteger(text) && !startsWith("-", text)
 
 private def checkSchemeless(target: String, clause: Clause): {Throw[DescriptorError]} Unit =
    requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)
