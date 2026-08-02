@@ -1,8 +1,9 @@
 # The Eliot Build System: Git-Native Packages, Declarative Descriptor, Standard Verbs
 
-Status: **DESIGN** — no implementation yet. Records the design discussion of 2026-07-21.
-Fixes the model, the semantics, the descriptor contents, and the descriptor syntax
-(`eliot.pkg`).
+Status: **DESIGN** — descriptor and identity implemented, resolution not yet. Records the design
+discussion of 2026-07-21. Fixes the model, the semantics, the descriptor contents, and the
+descriptor syntax (`eliot.pkg`). Amended 2026-08-02: identity is decided by the URL *or* by a
+shared lineage anchor (see below).
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -49,12 +50,35 @@ symmetric: a dependency is a URL or a filesystem path.
 ### Identity
 
 **The URL is the package identity.** There is no separate name — a name would need a central
-place to live, which is the registry we are avoiding (Go ran URL-as-identity at scale). Two
-consequences accepted deliberately:
+place to live, which is the registry we are avoiding (Go ran URL-as-identity at scale). What
+follows:
 
-- **URL equality must be defined on day one** (canonical form: lowercase host, strip `.git`, one
-  scheme). Swift shipped without this and paid for years; in Eliot the failure is worse — the
-  same package resolved twice collides at the FQN merge with a baffling error far from the cause.
+- **The URL decides, and the lineage confirms when the URLs differ.** Canonical form first
+  (lowercase host, strip `.git`, one scheme, no trailing slash): it settles the common case with no
+  network, and it is what keys the cache and the tool's own output. But canonicalization is not
+  where correctness lives, because a URL is exactly the thing that does not survive a rename, an org
+  transfer, a host migration, or a local checkout standing in for a remote. **Two dependencies are
+  the same package when their canonical URLs match *or* when their `vM.0` tags name the same
+  commit.** Git is content-addressed, so the anchor costs nothing: the resolver already runs
+  `git ls-remote` per package for version discovery, and the first release tag of a compatibility
+  line is immutable, carried by every mirror and every fork, and *per-major* — precisely the
+  granularity of the append-only contract that the identity question is really about. Whether the
+  two histories diverged after `v1.0` is irrelevant: they are the same line. Swift's failure mode
+  (spelling variants resolving one package twice, colliding at the FQN merge with a baffling error
+  far from the cause) is defanged — a variant the canonicalizer misses still unifies on the anchor.
+- **A match proves sameness; a mismatch proves nothing.** Re-tagged history exists, so the test is
+  "there is a tag name present in both whose peeled commits agree" — `vM.0` is merely the first one
+  to try. Where no such anchor exists (a line whose history was migrated and starts at `v1.3`), the
+  rule degrades to URL equality, which is where it started: strictly additive, offline included.
+- **Unifying identity is not trusting either source.** Once two URLs are one dependency, MVS takes
+  the maximum of the declared minimums — and across genuinely diverged forks, one line's `v1.6` need
+  not contain the other's `v1.5`, so the winner can silently lack what somebody required. The same
+  gap is an escalation path: anything in the graph could declare a URL carrying the real `v1.0` plus
+  a high tag and thereby supplant a package everyone else names by its official URL. One rule closes
+  both — **fetch from the root-preferred URL, and require the selected version's commit to be a
+  descendant of every other candidate's.** Where it is not, the lines have truly diverged and that is
+  a resolver error naming both URLs, never a silent pick. The ancestry check needs the objects, so it
+  happens at fetch, after the cheap anchor test has already settled identity.
 - **No package-level namespace claim.** An ownership rule ("only this package defines
   `com.acme.*`") was considered and **rejected**: layers *deliberately* redefine names they do
   not own — that is the platform-implementation mechanism. The compiler's merge already enforces
@@ -111,7 +135,10 @@ none central:
 
 1. **Root-only `replace`** (consumer-controlled): the root project may map URL X → URL Y or a
    local path. Only the root's replaces apply, never a dependency's (Go's rule — keeps resolution
-   local). This is also the local-development story.
+   local). This is also the local-development story. Note what the anchor rule above already
+   removes from `replace`'s job: a package named by two spellings — the old URL and the new one
+   after a move, a mirror, a local checkout — no longer *collides*, it unifies. `replace` remains
+   for choosing which source is used, not for preventing a duplicate.
 2. **Mirrors as resolver configuration** (consumer-controlled), never descriptor content. Git is
    content-addressed — a commit hash is a Merkle root — so once the lock pins a hash, *any*
    remote can serve the bytes trustlessly. The design obligation is only negative: do not bake
