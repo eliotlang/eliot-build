@@ -1,0 +1,255 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Descriptor
+import eliot.build.Resolution
+
+def testCases: Test = {
+   "resolveTests" should "select the version the only requirement declared" in {
+      resolved("test {\n  dep github.com/x/foo v1.2\n}", publishing("github.com/x/foo@v1.2", ""))
+         shouldBe "github.com/x/foo v1.2"
+   }
+   "resolveTests" should "select the maximum of two declared minimums" in {
+      resolved(
+         "dep github.com/x/foo v1.2\ntest {\n  dep github.com/x/foo v1.4\n}",
+         publishing("github.com/x/foo@v1.2", "").published("github.com/x/foo@v1.4", "")
+      ) shouldBe "github.com/x/foo v1.4"
+   }
+   "resolveTests" should "keep a requirement that asks for less than is already selected" in {
+      resolved(
+         "dep github.com/x/foo v1.4\ntest {\n  dep github.com/x/foo v1.1\n}",
+         publishing("github.com/x/foo@v1.4", "")
+      ) shouldBe "github.com/x/foo v1.4"
+   }
+   "resolveTests" should "follow what a dependency itself requires" in {
+      resolved(
+         "dep github.com/x/foo v1.2",
+         publishing("github.com/x/foo@v1.2", "dep github.com/x/bar v1.1").published("github.com/x/bar@v1.1", "")
+      ) shouldBe "github.com/x/bar v1.1, github.com/x/foo v1.2"
+   }
+   "resolveTests" should "raise a transitive minimum above a direct one" in {
+      resolved(
+         "dep github.com/x/foo v1.2\ndep github.com/x/bar v1.0",
+         publishing("github.com/x/foo@v1.2", "dep github.com/x/bar v1.5")
+            .published("github.com/x/bar@v1.0", "")
+            .published("github.com/x/bar@v1.5", "")
+      ) shouldBe "github.com/x/bar v1.5, github.com/x/foo v1.2"
+   }
+   "resolveTests" should "mount what a dependency's exported modules require" in {
+      resolved(
+         "dep github.com/x/foo v1.2",
+         publishing("github.com/x/foo@v1.2", "module jvm {\n  dep github.com/x/bar v1.1\n}")
+            .published("github.com/x/bar@v1.1", "")
+      ) shouldBe "github.com/x/bar v1.1, github.com/x/foo v1.2"
+   }
+   "resolveTests" should "leave a dependency's own test and artifact scopes out of the closure" in {
+      resolved(
+         "dep github.com/x/foo v1.2",
+         publishing(
+            "github.com/x/foo@v1.2",
+            "dep github.com/x/base v1.0\n" ++
+               "test {\n  dep github.com/x/tester v1\n}\nartifact app {\n  dep github.com/x/jvm v1\n}"
+         ).published("github.com/x/base@v1.0", "")
+      ) shouldBe "github.com/x/base v1.0, github.com/x/foo v1.2"
+   }
+   "resolveTests" should "treat two module selectors into one repository as one selection" in {
+      resolved(
+         "dep github.com/e/eliot//stdlib v1.2\ndep github.com/e/eliot//jvm v1.4",
+         publishing("github.com/e/eliot@v1.2", "").published("github.com/e/eliot@v1.4", "")
+      ) shouldBe "github.com/e/eliot v1.4"
+   }
+   "resolveTests" should "select nothing for a sibling module, which versions with its own repository" in {
+      resolved("dep //stdlib", publishing("unused", "")) shouldBe ""
+   }
+   "resolveTests" should "reach a package by every path a diamond offers, selecting it once" in {
+      resolved(
+         "dep github.com/x/left v1.0\ndep github.com/x/right v1.0",
+         publishing("github.com/x/left@v1.0", "dep github.com/x/base v1.1")
+            .published("github.com/x/right@v1.0", "dep github.com/x/base v1.3")
+            .published("github.com/x/base@v1.1", "")
+            .published("github.com/x/base@v1.3", "")
+      ) shouldBe "github.com/x/base v1.3, github.com/x/left v1.0, github.com/x/right v1.0"
+   }
+   "resolveTests" should "terminate on a dependency cycle" in {
+      resolved(
+         "dep github.com/x/foo v1.0",
+         publishing("github.com/x/foo@v1.0", "dep github.com/x/bar v1.0")
+            .published("github.com/x/bar@v1.0", "dep github.com/x/foo v1.0")
+      ) shouldBe "github.com/x/bar v1.0, github.com/x/foo v1.0"
+   }
+   "resolveTests" should "call two URLs one package when their anchors agree" in {
+      resolvedWithAnchors(
+         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/mirror/foo v1.4\n}",
+         publishing("github.com/x/foo@v1.2", "").published("github.com/x/foo@v1.4", ""),
+         anchoring("github.com/x/foo@v1", "a1b2c3").anchored("gitlab.com/mirror/foo@v1", "a1b2c3")
+      ) shouldBe "github.com/x/foo v1.4"
+   }
+   "resolveTests" should "keep two packages apart when their anchors differ" in {
+      resolvedWithAnchors(
+         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/other/foo v1.4\n}",
+         publishing("github.com/x/foo@v1.2", "").published("gitlab.com/other/foo@v1.4", ""),
+         anchoring("github.com/x/foo@v1", "a1b2c3").anchored("gitlab.com/other/foo@v1", "d4e5f6")
+      ) shouldBe "github.com/x/foo v1.2, gitlab.com/other/foo v1.4"
+   }
+   "resolveTests" should "unify nothing on a missing anchor, which is evidence of nothing" in {
+      resolved(
+         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/mirror/foo v1.4\n}",
+         publishing("github.com/x/foo@v1.2", "").published("gitlab.com/mirror/foo@v1.4", "")
+      ) shouldBe "github.com/x/foo v1.2, gitlab.com/mirror/foo v1.4"
+   }
+   "resolveTests" should "refuse two compatibility lines of one package" in {
+      resolved(
+         "dep github.com/x/foo v1.2\ntest {\n  dep github.com/x/foo v2.0\n}",
+         publishing("github.com/x/foo@v1.2", "")
+      ) shouldBe "github.com/x/foo is required at both v1.2 and v2.0, which are different compatibility lines"
+   }
+   "resolveTests" should "report a version the source does not publish" in {
+      resolved("dep github.com/x/foo v1.2", publishing("github.com/x/foo@v1.1", ""))
+         shouldBe "github.com/x/foo publishes no v1.2"
+   }
+   "resolveTests" should "refuse a foreign dependency that declares no minimum" in {
+      resolved("dep github.com/x/foo", publishing("github.com/x/foo@v1.0", ""))
+         shouldBe "no minimum version declared for github.com/x/foo"
+   }
+   "resolveArtifact" should "resolve the base dependencies together with the artifact's own" in {
+      resolvedFor(
+         "controller-jvm",
+         "dep github.com/x/api v2.0\nartifact controller-jvm {\n  dep github.com/x/jvm v1.3\n}",
+         publishing("github.com/x/api@v2.0", "").published("github.com/x/jvm@v1.3", "")
+      ) shouldBe "github.com/x/api v2.0, github.com/x/jvm v1.3"
+   }
+   "resolveArtifact" should "leave another artifact's platform layer out of this one" in {
+      resolvedFor(
+         "controller-jvm",
+         "artifact controller-jvm {\n  dep github.com/x/jvm v1.3\n}\n" ++
+            "artifact controller-attiny {\n  dep github.com/x/avr v1.1\n}",
+         publishing("github.com/x/jvm@v1.3", "").published("github.com/x/avr@v1.1", "")
+      ) shouldBe "github.com/x/jvm v1.3"
+   }
+   "resolveArtifact" should "report a configuration the descriptor does not name" in {
+      resolvedFor("controller-avr", "artifact controller-jvm {\n}", publishing("unused", ""))
+         shouldBe "no configuration named 'controller-avr'"
+   }
+   "resolutionDepthLimit" should "be the number of rounds the closure may take" in {
+      show(resolutionDepthLimit) shouldBe "64"
+   }
+   "selectedVersionOf" should "answer the version a package was selected at" in {
+      versionSelected(
+         "github.com/x/foo",
+         "dep github.com/x/foo v1.2",
+         publishing("github.com/x/foo@v1.2", "")
+      ) shouldBe "v1.2"
+   }
+   "selectedVersionOf" should "answer nothing for a package the closure never reached" in {
+      versionSelected(
+         "github.com/x/elsewhere",
+         "dep github.com/x/foo v1.2",
+         publishing("github.com/x/foo@v1.2", "")
+      ) shouldBe "<unselected>"
+   }
+}
+
+/**
+ * A package universe held as data: what each repository publishes at each version, as descriptor
+ * text, and what each compatibility line's anchor tag names. The lookups are written where they are
+ * passed, because a function carrying an effect row is a callback rather than a value — spelled at
+ * the call site, never built and handed around.
+ *
+ * That the resolver runs unchanged against these two lambdas and against a git-backed source is the
+ * point of taking the lookups as arguments rather than reaching for a remote itself.
+ */
+private def resolved(rootText: String, universe: List[Pair[String, String]]): String =
+   resolvedWithAnchors(rootText, universe, empty)
+
+private def resolvedWithAnchors(
+   rootText: String,
+   universe: List[Pair[String, String]],
+   lineages: List[Pair[String, String]]
+): String =
+   reported(
+      runId(
+         runThrow[ResolutionError](
+            resolveTests(
+               repositoryId -> version -> publicationIn(universe, repositoryId, version),
+               repositoryId -> major -> anchorIn(lineages, repositoryId, major),
+               descriptorOf(rootText)
+            )
+         )
+      )
+   )
+
+private def resolvedFor(configurationName: String, rootText: String, universe: List[Pair[String, String]]): String =
+   reported(
+      runId(
+         runThrow[ResolutionError](
+            resolveArtifact(
+               configurationName,
+               repositoryId -> version -> publicationIn(universe, repositoryId, version),
+               repositoryId -> major -> anchorIn(empty, repositoryId, major),
+               descriptorOf(rootText)
+            )
+         )
+      )
+   )
+
+private def publicationIn(
+   universe: List[Pair[String, String]],
+   repositoryId: PackageId,
+   version: Version
+): Option[Descriptor] =
+   foldOption(
+      None,
+      text -> Some(descriptorOf(text)),
+      lookupOption(show(repositoryId) ++ "@" ++ show(version), universe)
+   )
+
+private def anchorIn(lineages: List[Pair[String, String]], repositoryId: PackageId, major: Int): Option[String] =
+   lookupOption(show(repositoryId) ++ "@v" ++ show(major), lineages)
+
+/**
+ * The version `url` was selected at in the test configuration of `rootText`, so the reading side of a
+ * resolution is exercised rather than only its rendering.
+ */
+private def versionSelected(url: String, rootText: String, universe: List[Pair[String, String]]): String =
+   foldEither(
+      error -> show(error),
+      resolution -> renderedVersion(selectedVersionOf(packageId(url), resolution)),
+      runId(
+         runThrow[ResolutionError](
+            resolveTests(
+               repositoryId -> version -> publicationIn(universe, repositoryId, version),
+               repositoryId -> major -> anchorIn(empty, repositoryId, major),
+               descriptorOf(rootText)
+            )
+         )
+      )
+   )
+
+private def renderedVersion(version: Option[Version]): String =
+   foldOption("<unselected>", selected -> show(selected), version)
+
+/**
+ * The selections on one line, or the error instead — both outcomes asserted the same way.
+ */
+private def reported(outcome: Either[ResolutionError, Resolution]): String =
+   foldEither(error -> show(error), resolution -> resolution.selections.joined(", "), outcome)
+
+private def descriptorOf(text: String): Descriptor =
+   foldEither(
+      _ -> emptyDescriptor,
+      descriptor -> descriptor,
+      runId(runThrow[DescriptorError](parseDescriptor(split("\n", text))))
+   )
+
+private def publishing(key: String, text: String): List[Pair[String, String]] = published(key, text, empty)
+
+private def published(key: String, text: String, entries: List[Pair[String, String]]): List[Pair[String, String]] =
+   append(entries, Pair(key, text))
+
+private def anchoring(key: String, commit: String): List[Pair[String, String]] = anchored(key, commit, empty)
+
+private def anchored(key: String, commit: String, entries: List[Pair[String, String]]): List[Pair[String, String]] =
+   append(entries, Pair(key, commit))

@@ -1,0 +1,350 @@
+import eliot.collection.List
+import eliot.carrier.Effect
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Descriptor
+
+/**
+ * Minimal version selection: the closure of what a build configuration depends on, and the version
+ * chosen for each package in it.
+ *
+ * A declared version is a **minimum**, never a range and never an upper bound, so selection is the
+ * maximum of the declared minimums — the oldest version satisfying everyone. That is the whole
+ * algorithm: no solver, no backtracking, and the same answer on every machine without consulting a
+ * lockfile. Publishing a new version changes nobody's build; only raising a minimum does.
+ *
+ * **The configuration is the unit of resolution.** Platform layers are declared per artifact
+ * precisely so two of them never meet: flat-listing a jvm layer and an avr layer would mount both
+ * into one resolution and collide on every name a layer implements. So there is no such thing as
+ * "the" resolution of a repository — there is one per artifact, plus one for the test scope.
+ *
+ * **Selection is per repository, not per module.** Tags are repository-wide, so `//stdlib v1.2` and
+ * `//jvm v1.4` into one repository are two minimums on one package, not two packages; the selector
+ * decides what gets mounted afterwards, which is the assembly step's business rather than this one's.
+ *
+ * **The source is handed in, not reached for.** Resolution asks a remote exactly two questions —
+ * *what does this package require at this version*, and *is this URL a package I already have* — and
+ * both arrive as callbacks carrying an open `{Effect}` row, so their effects ride the caller's
+ * carrier. That is what lets one resolver run against git in the launcher and against a table of
+ * strings under test. Notably absent is version listing: MVS never enumerates what a package offers,
+ * so discovering that a newer release exists belongs to `eliot get` rather than here.
+ *
+ * An `ability` would read better and was tried first. It does not work yet: an ability method that
+ * declares a row *is* an effect, and an effect with no carrier and no handler can never be
+ * discharged, so the row propagates outwards until it reaches a signature that cannot carry it —
+ * under test, the pinned `{Throw[AssertionError] | Id}` of a test case body. Worth revisiting once
+ * there is a carrier to discharge it with; nothing in the algorithm below would change.
+ */
+data Selection(selectedPackage: PackageId, selectedVersion: Version, lineageAnchor: Option[String])
+
+/**
+ * What one configuration resolved to, in canonical package order — the order is the resolution's,
+ * not the traversal's, so the same closure always renders and locks the same way.
+ */
+data Resolution(selections: List[Selection])
+
+/**
+ * Why a configuration could not be resolved. Each constructor is a question the graph could not
+ * answer, and each names the package it is about, because a resolution failure the user cannot
+ * attribute to a dependency line is a failure they cannot fix.
+ */
+data ResolutionError =
+   NoSuchConfiguration(configurationName: String) |
+   NoMinimum(unversionedPackage: PackageId) |
+   Unavailable(missingPackage: PackageId, missingVersion: Version) |
+   MajorConflict(conflictedPackage: PackageId, oneVersion: Version, otherVersion: Version) |
+   TooDeep(reachedDepth: Int)
+
+implement Show[ResolutionError] {
+   def show(value: ResolutionError): String = value match {
+      case NoSuchConfiguration(name) -> "no configuration named '" ++ name ++ "'"
+      case NoMinimum(unversioned)    -> "no minimum version declared for " ++ show(unversioned)
+      case Unavailable(absent, version) -> show(absent) ++ " publishes no " ++ show(version)
+      case MajorConflict(conflicted, one, other) ->
+         show(conflicted) ++ " is required at both " ++ show(one) ++ " and " ++ show(other) ++
+            ", which are different compatibility lines"
+      case TooDeep(depth) -> "dependency graph deeper than " ++ show(depth)
+   }
+}
+
+implement Show[Selection] {
+   def show(value: Selection): String = show(value.selectedPackage) ++ " " ++ show(value.selectedVersion)
+}
+
+/**
+ * Packages order by identity, which is what gives a resolution one canonical line order regardless
+ * of the order the closure happened to discover them in.
+ */
+implement Compare[Selection] {
+   def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedPackage <= b.selectedPackage
+}
+
+/**
+ * What the artifact named `configurationName` resolves to: the repository's base dependencies plus
+ * that artifact's own — the platform layers among them — closed over the graph.
+ *
+ * ```eliot
+ * val resolution = resolveArtifact("controller-jvm", descriptorAt, anchorAt, descriptor)
+ * ```
+ */
+def resolveArtifact(
+   configurationName: String,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String],
+   descriptor: Descriptor
+): {Effect, Throw[ResolutionError]} Resolution = {
+   val artifact = artifactNamed(configurationName, descriptor)
+
+   foldOption(
+      raise(NoSuchConfiguration(configurationName)),
+      found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies, descriptorAt, anchorAt),
+      artifact
+   )
+}
+
+/**
+ * What the test scope resolves to: the base dependencies plus the test-scoped ones (the framework
+ * and a platform layer the build host can run). Test is a configuration like any other — it just
+ * needs no `artifact` clause to name it.
+ */
+def resolveTests(
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String],
+   descriptor: Descriptor
+): {Effect, Throw[ResolutionError]} Resolution =
+   resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies, descriptorAt, anchorAt)
+
+/**
+ * The version `resolution` selected for `repositoryId`, absent when the closure never reached it.
+ */
+def selectedVersionOf(repositoryId: PackageId, resolution: Resolution): Option[Version] =
+   foldOption(
+      None,
+      selection -> Some(selection.selectedVersion),
+      resolution.selections.find(selection -> selection.selectedPackage == repositoryId)
+   )
+
+/**
+ * How many rounds of expansion a closure may take before resolution gives up — one round per level
+ * of the dependency graph, so this is the deepest chain of packages a build may have.
+ *
+ * A declared ceiling rather than a fixpoint loop: user code cannot recurse, so the closure is a fold
+ * over a fixed list of rounds and the bound is what the list's length says. Sixty-four is far past
+ * anything a real graph reaches, and reaching it raises `TooDeep` rather than silently answering with
+ * a partial closure — a wrong answer being the one outcome not on offer.
+ */
+def resolutionDepthLimit: Int = rounds.size
+
+private def resolveRequirements(
+   requirements: List[Dependency],
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} Resolution = {
+   val seeded = withRequirements(requirements, emptyState, descriptorAt, anchorAt)
+
+   completed(rounds.foldLeft(seeded, _ -> state -> expanded(state, descriptorAt, anchorAt)))
+}
+
+/**
+ * The closure so far: what has been selected, and which of those selections still owe their own
+ * requirements to the graph. A selection joins `pending` exactly when it is new or when its version
+ * went up, which is what makes a cycle terminate — the second visit selects nothing new, so nothing
+ * is pending and the remaining rounds are folds over an empty list.
+ */
+data ResolutionState(selected: List[Selection], pending: List[Selection])
+
+private def emptyState: ResolutionState = ResolutionState(empty, empty)
+
+/**
+ * One round: every pending selection's own requirements folded in, and the frontier replaced by
+ * whatever those requirements newly selected or raised.
+ */
+private def expanded(
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState = {
+   val ready = ResolutionState(state.selected, empty)
+
+   state.pending.foldLeft(ready, selection -> acc -> withDependenciesOf(selection, acc, descriptorAt, anchorAt))
+}
+
+private def withDependenciesOf(
+   selection: Selection,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState = {
+   val published = descriptorAt(selection.selectedPackage)(selection.selectedVersion)
+
+   foldOption(
+      raise(Unavailable(selection.selectedPackage, selection.selectedVersion)),
+      descriptor -> withRequirements(mountedDependencies(descriptor), state, descriptorAt, anchorAt),
+      published
+   )
+}
+
+/**
+ * What a *dependency's* descriptor contributes to the closure: its base dependencies and those of the
+ * modules it exports. An artifact's dependencies are its own build's business and a test block's are
+ * its own suite's — neither travels to a consumer, which is exactly why platform layers are declared
+ * there.
+ */
+private def mountedDependencies(descriptor: Descriptor): List[Dependency] =
+   descriptor.baseDependencies ++
+      descriptor.modules.filter(module -> module.exported).flatMap(module -> module.moduleDependencies)
+
+private def withRequirements(
+   requirements: List[Dependency],
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState =
+   requirements.foldLeft(state, dependency -> acc -> withRequirement(dependency, acc, descriptorAt, anchorAt))
+
+/**
+ * A sibling (`dep //stdlib`) selects nothing: it names a module of the repository that declared it,
+ * which is already selected at the version its tag gave it. It matters to what gets mounted, not to
+ * what gets chosen.
+ */
+private def withRequirement(
+   dependency: Dependency,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState =
+   foldOption(state, foreign -> withForeign(foreign, state, descriptorAt, anchorAt), foreignOf(dependency))
+
+private def foreignOf(dependency: Dependency): Option[Dependency] =
+   fold(isSibling(dependency.reference), None, Some(dependency))
+
+private def withForeign(
+   dependency: Dependency,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState =
+   foldOption(
+      raise(NoMinimum(dependency.reference)),
+      minimum -> withMinimum(repository(dependency.reference), minimum, state, descriptorAt, anchorAt),
+      dependency.minimumVersion
+   )
+
+private def withMinimum(
+   target: PackageId,
+   minimum: Version,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect, Throw[ResolutionError]} ResolutionState = {
+   val identity = identified(target, minimum, state, descriptorAt, anchorAt)
+
+   foldOption(
+      inserted(Selection(target, minimum, identity.anchorFound), state),
+      known -> merged(known, minimum, state),
+      identity.matched
+   )
+}
+
+/**
+ * The selection this requirement is about, if the closure already has one, together with the anchor
+ * that was looked up on the way — kept so a new selection records its lineage without asking twice.
+ */
+data Identified(matched: Option[Selection], anchorFound: Option[String])
+
+/**
+ * Identity, URL first: the canonical URL settles the common case with no source call at all, and only
+ * a requirement naming an unfamiliar URL is worth a lineage lookup.
+ */
+private def identified(
+   target: PackageId,
+   minimum: Version,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect} Identified = {
+   val byUrl = state.selected.find(selection -> selection.selectedPackage == target)
+
+   foldOption(byLineage(target, minimum, state, descriptorAt, anchorAt), known -> Identified(Some(known), known.lineageAnchor), byUrl)
+}
+
+private def byLineage(
+   target: PackageId,
+   minimum: Version,
+   state: ResolutionState,
+   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
+   anchorAt: PackageId => Int => {Effect} Option[String]
+): {Effect} Identified = {
+   val anchor = anchorAt(target)(minimum.major)
+
+   Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
+}
+
+private def sameLineage(anchor: Option[String], minimum: Version, selection: Selection): Bool =
+   sameLine(minimum, selection.selectedVersion) && sameAnchor(anchor, selection.lineageAnchor)
+
+/**
+ * Two anchors match only when both are present and equal. A missing anchor is not evidence of
+ * anything — a line whose history was migrated may have no `vM.0` at all — so absence never unifies.
+ */
+private def sameAnchor(anchor: Option[String], other: Option[String]): Bool =
+   foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)
+
+/**
+ * Two minimums on one package: the higher wins, unless they are not the same compatibility line at
+ * all, in which case nothing wins — two majors of one package would collide at the merge of fully
+ * qualified names, so the resolver refuses rather than picking.
+ */
+private def merged(known: Selection, minimum: Version, state: ResolutionState): {Throw[ResolutionError]} ResolutionState = {
+   val conflict = conflictBetween(known, minimum)
+
+   foldOption(upgraded(known, minimum, state), error -> raise(error), conflict)
+}
+
+private def conflictBetween(known: Selection, minimum: Version): Option[ResolutionError] =
+   fold(
+      sameLine(known.selectedVersion, minimum),
+      None,
+      Some(MajorConflict(known.selectedPackage, known.selectedVersion, minimum))
+   )
+
+/**
+ * The known selection keeps its package — the URL the closure reached first, which is the root's
+ * spelling before any dependency's — and takes the higher version. A requirement that asks for no
+ * more than what is already selected changes nothing, and so queues nothing.
+ */
+private def upgraded(known: Selection, minimum: Version, state: ResolutionState): ResolutionState =
+   fold(
+      minimum <= known.selectedVersion,
+      state,
+      replaced(Selection(known.selectedPackage, minimum, known.lineageAnchor), state)
+   )
+
+private def inserted(selection: Selection, state: ResolutionState): ResolutionState =
+   ResolutionState(append(state.selected, selection), append(state.pending, selection))
+
+private def replaced(selection: Selection, state: ResolutionState): ResolutionState =
+   ResolutionState(
+      append(state.selected.filter(other -> other.selectedPackage != selection.selectedPackage), selection),
+      append(state.pending, selection)
+   )
+
+/**
+ * The closure once the rounds are spent: a frontier that is still not empty means the graph is deeper
+ * than the declared ceiling, and a partial answer is not one of the outcomes on offer.
+ */
+private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution =
+   foldOption(Resolution(state.selected.sorted), _ -> raise(TooDeep(resolutionDepthLimit)), state.pending.head)
+
+private def artifactNamed(configurationName: String, descriptor: Descriptor): Option[Artifact] =
+   descriptor.artifacts.find(artifact -> artifact.artifactName == configurationName)
+
+/**
+ * The rounds a closure may take, as data: user code cannot loop, so depth is a list to fold over
+ * rather than a condition to repeat under. Six doublings of one round is sixty-four, and
+ * `resolutionDepthLimit` reads the length back off the same list so the ceiling and the message about
+ * it cannot disagree.
+ */
+private def rounds: List[Unit] = twice(twice(twice(twice(twice(twice(singleton(unit)))))))
+
+private def twice(list: List[Unit]): List[Unit] = list ++ list
