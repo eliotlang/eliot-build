@@ -1,0 +1,97 @@
+/**
+ * What identifies a package, and the canonical form two spellings of one package are compared in.
+ *
+ * **The URL is the identity** — there is no name, because a name needs a central place to live and
+ * that place is the registry this design does without. The consequence is that URL equality has to
+ * be *defined*, not assumed: `GitHub.com/x/foo.git`, `https://github.com/x/foo` and
+ * `github.com/x/foo/` are one package, and a resolver that missed that would resolve it twice and
+ * collide far away, at the merge of fully qualified names, with an error naming nothing that caused
+ * it.
+ *
+ * Canonicalizing at the one place identities are built settles that case with no network, which is
+ * why it is done here — but it is deliberately *not* where correctness lives. A URL is exactly what
+ * does not survive a rename, an org transfer or a host migration, so resolution also calls two
+ * packages the same when their `vM.0` tags name the same commit (see `docs/build-system.md`). This
+ * type answers the offline half of that question; the lineage half belongs to the resolver, which is
+ * the part holding a remote.
+ *
+ * A `//name` selector narrows a multi-module repository to one of its modules. It is part of the
+ * identity — `…/eliot//stdlib` and `…/eliot//jvm` are different dependencies — but not of the
+ * *repository*, which is what git fetches and what tags version: modules of one repository version
+ * together, since a tag is repository-wide.
+ */
+data PackageId(url: String, selectedModule: Option[String])
+
+/**
+ * The package `text` identifies, in canonical form.
+ *
+ * ```eliot
+ * val stdlib = packageId("github.com/eliot-lang/eliot//stdlib")
+ * ```
+ *
+ * Canonical means: no scheme (descriptors are scheme-less by invariant — transports are the
+ * consumer's configuration, not the package's identity), no trailing slash, no `.git` suffix, and a
+ * lowercase host. The *path* keeps its case, because only the host is case-insensitive by
+ * specification — lowercasing `github.com/Acme/Foo` would invent an identity no remote answers to.
+ */
+def packageId(text: String): PackageId = {
+   val body = withoutScheme(text)
+
+   PackageId(canonicalUrl(before("//", body)), selectorOf(body))
+}
+
+/**
+ * The repository `id` lives in: the same identity with its module selector dropped. This is the unit
+ * git works in — what is cloned, and what a version tag applies to.
+ */
+def repository(id: PackageId): PackageId = PackageId(id.url, None)
+
+/**
+ * `true` when `id` names a module of the repository being read (`dep //stdlib`) rather than a
+ * foreign package. A sibling carries no URL and no version: it is whatever the repository around it
+ * is, at the version that repository was resolved to.
+ */
+def isSibling(id: PackageId): Bool = id.url == ""
+
+/**
+ * The canonical spelling, which is also what a descriptor is written back out as.
+ */
+implement Show[PackageId] {
+   def show(value: PackageId): String =
+      value.url ++ value.selectedModule.foldOption("", name -> "//" ++ name)
+}
+
+/**
+ * Identity, compared in canonical form. Both sides are already canonical by construction, so
+ * comparing the rendering is comparing the identity — and it stays right by construction as the
+ * canonical form grows.
+ */
+implement Eq[PackageId] {
+   def equals(a: PackageId, b: PackageId): Bool = show(a) == show(b)
+}
+
+/**
+ * An arbitrary but stable total order, so anything the tool writes out keyed by package — a
+ * lockfile above all — has one canonical line order and diffs only where the resolution changed.
+ */
+implement Compare[PackageId] {
+   def lessThanOrEqual(a: PackageId, b: PackageId): Bool = show(a) <= show(b)
+}
+
+private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)
+
+private def selectorOf(body: String): Option[String] =
+   fold(contains("//", body), Some(after("//", body)), None)
+
+/**
+ * The suffixes are stripped outermost first, so a URL wearing both (`…/foo.git/`) loses both.
+ */
+private def canonicalUrl(url: String): String = {
+   val trimmed = withoutSuffix(".git", withoutSuffix("/", url))
+   val host = before("/", trimmed)
+
+   toLowerCase(host) ++ drop(length(host), trimmed)
+}
+
+private def withoutSuffix(suffix: String, text: String): String =
+   fold(endsWith(suffix, text), take(length(text) - length(suffix), text), text)

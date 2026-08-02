@@ -1,0 +1,111 @@
+/**
+ * A version, and the ordering resolution selects with.
+ *
+ * A major version is a **branch** — an append-only compatibility line — and a version is an
+ * annotated **tag** on that branch, so `v1.4` is the fourth release of the `v1` line. Both parts are
+ * read as numbers rather than compared as text, which is the whole point of having a type here:
+ * `v1.10` follows `v1.9`, a fact no comparison of tag *names* gets right.
+ *
+ * The minor part is optional because a bare `v1` is what a descriptor writes to mean "anywhere on
+ * the v1 line". It is kept exactly as written rather than filled in: `v1` and `v1.0` are the same
+ * version to the ordering, but only the spelling the author used is a git tag, and the tag is what
+ * the resolver hands to a remote.
+ *
+ * Every version token in a descriptor is a *minimum* — resolution answers with the maximum of the
+ * declared minimums — so there is no range to model here and no operator to parse.
+ */
+data Version(major: Int, minor: Option[Int])
+
+/**
+ * The version `text` spells, aborting when it spells anything else.
+ *
+ * ```eliot
+ * val minimum = parseVersion("v1.3") else beginningOfTime
+ * ```
+ *
+ * Deliberately strict about the shapes it refuses, because every one of them means the author
+ * expected something the resolver does not do: `>=v1.3` and `v1.x` ask for a range, `1.3` names no
+ * compatibility line, and `v1.2.3` names a third component nothing orders by. A rejected token is a
+ * misunderstanding worth reporting, never a token to interpret generously.
+ */
+def parseVersion(text: String): {Abort} Version = {
+   val body = versionBody(text)
+   val majorPart = natural(before(".", body))
+   val minorPart = minorOf(body)
+
+   Version(majorPart, minorPart)
+}
+
+/**
+ * The git branch `version` lives on — its compatibility line, which is what `git ls-remote` is asked
+ * about to discover the versions available.
+ */
+def branchName(version: Version): String = "v" ++ show(version.major)
+
+/**
+ * `true` when both versions are releases of one compatibility line, and are therefore
+ * interchangeable as far as the append-only signature contract goes. Two requirements that are
+ * *not* on one line cannot both be satisfied — one major per package per program.
+ */
+def sameLine(a: Version, b: Version): Bool = a.major == b.major
+
+/**
+ * The minor a version orders by. An omitted minor is the start of the line, so `v1` orders exactly
+ * where `v1.0` does — which is what makes `dep … v1` mean "anywhere on the v1 line" instead of
+ * something unordered.
+ */
+def orderedMinor(version: Version): Int = version.minor.foldOption(0, part -> part)
+
+/**
+ * The tag the version was written as, which is the tag a remote is asked for.
+ */
+implement Show[Version] {
+   def show(value: Version): String =
+      "v" ++ show(value.major) ++ value.minor.foldOption("", part -> "." ++ show(part))
+}
+
+/**
+ * Equality *as the ordering sees it*, so `v1` equals `v1.0` — the two spellings denote one point on
+ * one line, and a resolver that treated them as different packages-versions would select twice.
+ * Rendering keeps them apart; comparison does not.
+ */
+implement Eq[Version] {
+   def equals(a: Version, b: Version): Bool = a.major == b.major && orderedMinor(a) == orderedMinor(b)
+}
+
+/**
+ * Major first, then minor — numerically. This is the whole ordering MVS runs on: `max` over the
+ * declared minimums of a package is the version resolution selects.
+ */
+implement Compare[Version] {
+   def lessThanOrEqual(a: Version, b: Version): Bool =
+      fold(a.major == b.major, orderedMinor(a) <= orderedMinor(b), a.major < b.major)
+}
+
+/**
+ * Everything after the leading `v`, which every tag on a compatibility line carries.
+ */
+private def versionBody(text: String): {Abort} String = if(startsWith("v", text)) drop(1, text)
+
+/**
+ * The minor part, absent when the body names a line rather than a release on it. Written as an
+ * `Option` eliminator rather than an `if..else`: `else` would discharge the `Abort` of the *parse*
+ * along with the one the `if` introduces, quietly turning a malformed minor into an absent one.
+ */
+private def minorOf(body: String): {Abort} Option[Int] =
+   foldOption(None, part -> Some(natural(part)), minorText(body))
+
+private def minorText(body: String): Option[String] =
+   fold(contains(".", body), Some(after(".", body)), None)
+
+/**
+ * `text` read as a non-negative whole number with no redundant spelling. A sign is refused because
+ * no tag carries one, and a leading zero because `v1.05` and `v1.5` would be one version rendered
+ * two ways — and the rendering is the tag a remote gets asked for.
+ */
+private def natural(text: String): {Abort} Int =
+   if(isInteger(text) && !hasSign(text) && !hasLeadingZero(text)) parseInt(text)
+
+private def hasSign(text: String): Bool = startsWith("-", text) || startsWith("+", text)
+
+private def hasLeadingZero(text: String): Bool = startsWith("0", text) && length(text) > 1

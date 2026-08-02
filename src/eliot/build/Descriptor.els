@@ -1,6 +1,8 @@
 import eliot.lang.Id
 import eliot.collection.List
 import eliot.build.Clause
+import eliot.build.PackageId
+import eliot.build.Version
 
 /**
  * The typed `eliot.pkg` model, and the interpretation of a clause tree into it.
@@ -16,18 +18,11 @@ import eliot.build.Clause
  */
 
 /**
- * A package, identified the only way packages are: by URL. `selectedModule` is the `//name` selector
- * that narrows a multi-module repository to one of its modules; a reference whose `url` is empty and
- * whose selector is set is a *sibling* module of the repository being read.
- */
-data PackageReference(url: String, selectedModule: Option[String])
-
-/**
  * A dependency: a package and the *minimum* version acceptable of it. Never a range and never an
  * upper bound — resolution picks the maximum of the declared minimums, so a version token is only
  * ever a floor. Absent for a sibling module, which versions with the repository it lives in.
  */
-data Dependency(reference: PackageReference, minimumVersion: Option[String])
+data Dependency(reference: PackageId, minimumVersion: Option[Version])
 
 /**
  * One jar of a compiler plugin's flat closure: an exact Maven coordinate and the SHA-256 the
@@ -58,7 +53,7 @@ data BuildModule(
  * offer exactly one candidate) and the parameters to call it with. The parameters stay free-form
  * here and are validated against the plugin's own declared schema.
  */
-data Backend(backendPackage: Option[String], backendParameters: List[Pair[String, String]])
+data Backend(backendPackage: Option[PackageId], backendParameters: List[Pair[String, String]])
 
 /**
  * A build configuration: the unit of dependency resolution. Its own dependencies are where platform
@@ -71,7 +66,7 @@ data Artifact(artifactName: String, artifactDependencies: List[Dependency], arti
  * A root-only redirection of one package URL to another URL or a local path. Only the root
  * project's replacements apply, never a dependency's.
  */
-data Replacement(replacedUrl: String, replacementTarget: String)
+data Replacement(replacedPackage: PackageId, replacementTarget: String)
 
 /**
  * Everything an `eliot.pkg` says. Deliberately absent: the package's own name (the URL is the
@@ -231,26 +226,21 @@ private def withReplacement(clause: Clause, descriptor: Descriptor): {Throw[Desc
 private def dependencyOf(clause: Clause): {Throw[DescriptorError]} Dependency = {
    val target = required(0, "a dep needs a package URL", clause)
    val reference = referenceOf(target, clause)
-   val version = optional(1, clause)
+   val version = versionOf(optional(1, clause), clause)
 
    atMostArguments(2, clause)
-   checkVersion(version, clause)
    Dependency(reference, version)
 }
 
 /**
- * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less by invariant: there is
- * no `https://` versus `ssh://` spelling to normalize away, which is also what frees `//`
- * unambiguously as the selector.
+ * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less is an invariant of the
+ * format, not merely of the canonical form `packageId` answers with: a written scheme is a spelling
+ * the author expected to matter, and where the bytes come from is the consumer's configuration.
+ * Refusing it here is what keeps `//` unambiguously the module selector.
  */
-private def referenceOf(target: String, clause: Clause): {Throw[DescriptorError]} PackageReference = {
+private def referenceOf(target: String, clause: Clause): {Throw[DescriptorError]} PackageId = {
    checkSchemeless(target, clause)
-
-   fold(
-      target.contains("//"),
-      PackageReference(before("//", target), Some(after("//", target))),
-      PackageReference(target, None)
-   )
+   packageId(target)
 }
 
 private def moduleOf(clause: Clause): {Throw[DescriptorError]} BuildModule = {
@@ -283,9 +273,14 @@ private def backendOf(clause: Clause): {Throw[DescriptorError]} Option[Backend] 
    clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendClause(child)))
 
 private def backendClause(clause: Clause): {Throw[DescriptorError]} Backend = {
+   val named = optional(0, clause)
+
    atMostArguments(1, clause)
-   Backend(optional(0, clause), clause.children.map(parameterOf))
+   Backend(backendPackageOf(named, clause), clause.children.map(parameterOf))
 }
+
+private def backendPackageOf(named: Option[String], clause: Clause): {Throw[DescriptorError]} Option[PackageId] =
+   foldOption(None, target -> Some(referenceOf(target, clause)), named)
 
 private def parameterOf(clause: Clause): Pair[String, String] =
    Pair(clause.keyword, clause.arguments.joined(" "))
@@ -322,7 +317,7 @@ private def replacementOf(clause: Clause): {Throw[DescriptorError]} Replacement 
 
    atMostArguments(3, clause)
    requireThat(label == "with", "a replace reads 'replace <url> with <target>'", clause)
-   Replacement(replaced, target)
+   Replacement(referenceOf(replaced, clause), target)
 }
 
 private def dependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
@@ -349,21 +344,19 @@ private def atMostArguments(count: Int, clause: Clause): {Throw[DescriptorError]
    requireThat(clause.arguments.size <= count, "too many arguments", clause)
 
 /**
- * Every version token is a git tag, spelled as the tag is. There is no `>=` to write and no range to
- * express, so the only thing to check is that it looks like one.
+ * Every version token is a git tag, spelled as the tag is: there is no `>=` to write and no range to
+ * express, because the syntax cannot state what the resolver does not do. The token is *parsed*
+ * rather than merely inspected — the model carries an ordered version from here on, which is what
+ * resolution needs and what the string never was.
  */
-private def checkVersion(version: Option[String], clause: Clause): {Throw[DescriptorError]} Unit =
-   requireThat(versionWellFormed(version), "a version must be a tag like 'v1.3'", clause)
+private def versionOf(token: Option[String], clause: Clause): {Throw[DescriptorError]} Option[Version] =
+   foldOption(None, tag -> Some(checkedVersion(tag, clause)), token)
 
-private def versionWellFormed(version: Option[String]): Bool =
-   foldOption(true, tag -> startsWith("v", tag) && isNatural(before(".", drop(1, tag))), version)
+private def checkedVersion(tag: String, clause: Clause): {Throw[DescriptorError]} Version = {
+   val parsed: Option[Version] = runId(runAbort(parseVersion(tag)))
 
-/**
- * `true` when `text` spells a non-negative whole number. The standard library's `isInteger` also admits a leading
- * sign, which a version's major number never carries — `v-1` is not a tag anyone writes, and refusing it here keeps
- * the check as narrow as the format.
- */
-private def isNatural(text: String): Bool = isInteger(text) && !startsWith("-", text)
+   foldOption(raise(Unreadable(render(clause), "a version must be a tag like 'v1.3'")), version -> version, parsed)
+}
 
 private def checkSchemeless(target: String, clause: Clause): {Throw[DescriptorError]} Unit =
    requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)
@@ -410,10 +403,7 @@ private def artifactKeywords: List[String] = append(append(empty, "dep"), "backe
 private def pluginKeywords: List[String] = singleton("jar")
 
 private def renderDependency(dependency: Dependency): String =
-   "dep " ++ renderReference(dependency.reference) ++ foldOption("", tag -> " " ++ tag, dependency.minimumVersion)
-
-private def renderReference(reference: PackageReference): String =
-   reference.url ++ foldOption("", name -> "//" ++ name, reference.selectedModule)
+   "dep " ++ show(dependency.reference) ++ foldOption("", version -> " " ++ show(version), dependency.minimumVersion)
 
 private def renderModule(built: BuildModule): String =
    "module " ++ built.moduleName ++ renderBlock(
@@ -443,14 +433,14 @@ private def renderBackend(backend: Option[Backend]): List[String] =
    foldOption(empty, present -> singleton(renderBackendClause(present)), backend)
 
 private def renderBackendClause(backend: Backend): String =
-   "backend" ++ foldOption("", url -> " " ++ url, backend.backendPackage) ++
+   "backend" ++ foldOption("", named -> " " ++ show(named), backend.backendPackage) ++
       renderBlock(backend.backendParameters.map(renderParameter))
 
 private def renderParameter(parameter: Pair[String, String]): String =
    parameter.first ++ " " ++ parameter.second
 
 private def renderReplacement(replacement: Replacement): String =
-   "replace " ++ replacement.replacedUrl ++ " with " ++ replacement.replacementTarget
+   "replace " ++ show(replacement.replacedPackage) ++ " with " ++ replacement.replacementTarget
 
 /**
  * A `{ … }` block holding `lines`, each indented one level. Nested blocks are indented by their own

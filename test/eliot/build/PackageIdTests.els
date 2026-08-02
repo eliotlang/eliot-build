@@ -1,0 +1,89 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.PackageId
+
+def testCases: Test = {
+   "packageId" should "leave a package already written canonically alone" in {
+      canonical("github.com/x/foo") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "keep a module selector apart from the repository it narrows" in {
+      canonical("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot//stdlib"
+   }
+   "packageId" should "read a sibling module, which carries no URL" in {
+      canonical("//stdlib") shouldBe "//stdlib"
+   }
+   "packageId" should "lowercase the host, which is case-insensitive by specification" in {
+      canonical("GitHub.COM/x/foo") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "keep the path's case, which no remote promises to ignore" in {
+      canonical("github.com/Acme/Foo") shouldBe "github.com/Acme/Foo"
+   }
+   "packageId" should "strip a '.git' suffix" in {
+      canonical("github.com/x/foo.git") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "strip a trailing slash" in {
+      canonical("github.com/x/foo/") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "strip a slash written behind the '.git'" in {
+      canonical("github.com/x/foo.git/") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "strip a scheme, which is a transport rather than an identity" in {
+      canonical("https://github.com/x/foo") shouldBe "github.com/x/foo"
+   }
+   "packageId" should "canonicalize the repository a selector narrows, not only a bare URL" in {
+      canonical("SSH://GitHub.com/x/foo.git//jvm") shouldBe "github.com/x/foo//jvm"
+   }
+   "PackageId" should "call every spelling of one package the same package" in {
+      same("https://GitHub.com/x/foo.git/", "github.com/x/foo") shouldBe "same"
+   }
+   "PackageId" should "tell two modules of one repository apart" in {
+      same("github.com/eliot-lang/eliot//stdlib", "github.com/eliot-lang/eliot//jvm") shouldBe "different"
+   }
+   "PackageId" should "tell a whole repository from a module of it" in {
+      same("github.com/eliot-lang/eliot", "github.com/eliot-lang/eliot//jvm") shouldBe "different"
+   }
+   "PackageId" should "tell two packages of one host apart" in {
+      same("github.com/x/foo", "github.com/x/bar") shouldBe "different"
+   }
+   "PackageId" should "order packages stably, so anything keyed by package has one line order" in {
+      sortedIds shouldBe "github.com/a/two github.com/b/one github.com/b/one//jvm"
+   }
+   "repository" should "drop the module selector, since a tag versions the whole repository" in {
+      canonicalRepository("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot"
+   }
+   "repository" should "leave a package with no selector alone" in {
+      canonicalRepository("github.com/x/foo") shouldBe "github.com/x/foo"
+   }
+   "isSibling" should "recognise a module of the repository being read" in {
+      kindOfReference("//stdlib") shouldBe "sibling"
+   }
+   "isSibling" should "call a selector into a foreign repository foreign" in {
+      kindOfReference("github.com/eliot-lang/eliot//stdlib") shouldBe "foreign"
+   }
+}
+
+/**
+ * The canonical form of the package `text` identifies — the spelling everything downstream compares,
+ * writes and fetches with.
+ */
+private def canonical(text: String): String = show(packageId(text))
+
+private def canonicalRepository(text: String): String = show(repository(packageId(text)))
+
+private def same(a: String, b: String): String = fold(packageId(a) == packageId(b), "same", "different")
+
+private def kindOfReference(text: String): String = fold(isSibling(packageId(text)), "sibling", "foreign")
+
+/**
+ * Three packages given out of order and sorted back, rendered on one line: the property a lockfile
+ * needs, which is that the order depends on the packages and not on how they arrived.
+ */
+private def sortedIds: String = {
+   val given = append(
+      append(append(empty, packageId("github.com/b/one//jvm")), packageId("github.com/a/two")),
+      packageId("github.com/b/one")
+   )
+
+   given.sorted.joined(" ")
+}

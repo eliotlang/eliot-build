@@ -2,6 +2,8 @@ import eliot.lang.Id
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
+import eliot.build.PackageId
+import eliot.build.Version
 import eliot.build.Descriptor
 
 def testCases: Test = {
@@ -36,6 +38,15 @@ def testCases: Test = {
          "module examples {\n  internal\n  dep //jvm\n}"
       )
    }
+   "parseDescriptor" should "read a backend naming the package whose plugin to call" in {
+      roundTrip("artifact hello {\n  backend github.com/eliot-lang/eliot//jvm {\n    kind exe-jar\n  }\n}")
+   }
+   "parseDescriptor" should "canonicalize a dependency URL, so one package is one identity" in {
+      parsed("dep GitHub.com/x/foo.git v1") shouldBe "dep github.com/x/foo v1"
+   }
+   "parseDescriptor" should "canonicalize the URL a replacement replaces" in {
+      parsed("replace GitHub.com/x/foo.git with ../foo-local") shouldBe "replace github.com/x/foo with ../foo-local"
+   }
    "parseDescriptor" should "read a test block" in {
       roundTrip("test {\n  dep github.com/eliot-lang/eliot-test v1\n}")
    }
@@ -66,6 +77,10 @@ def testCases: Test = {
    "parseDescriptor" should "reject a version range, which the model has no way to mean" in {
       parsed("dep github.com/x/foo >=v1.3")
          shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo >=v1.3'"
+   }
+   "parseDescriptor" should "reject a version carrying a third component" in {
+      parsed("dep github.com/x/foo v1.2.3")
+         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo v1.2.3'"
    }
    "parseDescriptor" should "reject a dep with no URL at all" in {
       parsed("dep") shouldBe "a dep needs a package URL in 'dep'"

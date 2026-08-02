@@ -1,0 +1,101 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.Version
+
+def testCases: Test = {
+   "parseVersion" should "read a release on a compatibility line" in {
+      parsed("v1.3") shouldBe "v1.3"
+   }
+   "parseVersion" should "read a bare major, which names the whole line" in {
+      parsed("v1") shouldBe "v1"
+   }
+   "parseVersion" should "keep the spelling it was given, since the tag is what a remote is asked for" in {
+      parsed("v1.0") shouldBe "v1.0"
+   }
+   "parseVersion" should "read a zero major, which a pre-release line has" in {
+      parsed("v0.6") shouldBe "v0.6"
+   }
+   "parseVersion" should "read a major of more than one digit" in {
+      parsed("v12.7") shouldBe "v12.7"
+   }
+   "parseVersion" should "reject a version with no compatibility line" in {
+      parsed("1.3") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a range operator, which resolution has no way to mean" in {
+      parsed(">=v1.3") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a wildcard, for the same reason" in {
+      parsed("v1.x") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a third component, which nothing orders by" in {
+      parsed("v1.2.3") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a trailing dot with no minor behind it" in {
+      parsed("v1.") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a line with no number at all" in {
+      parsed("v") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a signed number, which no tag carries" in {
+      parsed("v-1") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a signed minor" in {
+      parsed("v1.+2") shouldBe "<not a version>"
+   }
+   "parseVersion" should "reject a padded number, which would render as a tag nobody pushed" in {
+      parsed("v1.05") shouldBe "<not a version>"
+   }
+   "Version" should "order by major before anything else" in {
+      larger("v1.9", "v2") shouldBe "v2"
+   }
+   "Version" should "order minors numerically, not as the text of a tag name" in {
+      larger("v1.3", "v1.10") shouldBe "v1.10"
+   }
+   "Version" should "answer the older of two minimums as the smaller" in {
+      smaller("v1.4", "v1.2") shouldBe "v1.2"
+   }
+   "Version" should "start a line where its first release is" in {
+      sameVersion("v1", "v1.0") shouldBe "same"
+   }
+   "Version" should "hold a bare major below every later release of its line" in {
+      larger("v1", "v1.1") shouldBe "v1.1"
+   }
+   "Version" should "tell two releases of one line from two lines" in {
+      oneLine("v1.3", "v1.9") shouldBe "one line"
+   }
+   "Version" should "refuse to call two majors one line, however close their minors" in {
+      oneLine("v1.9", "v2.0") shouldBe "two lines"
+   }
+   "branchName" should "name the branch a release lives on" in {
+      branchName(versionOf("v1.4")) shouldBe "v1"
+   }
+   "branchName" should "name the branch a bare major already is" in {
+      branchName(versionOf("v2")) shouldBe "v2"
+   }
+}
+
+/**
+ * The version `text` spells, rendered back into the tag it was read from — or a stand-in for the
+ * absence, so a refusal is asserted the same way a reading is.
+ */
+private def parsed(text: String): String =
+   foldOption("<not a version>", version -> show(version), runId(runAbort(parseVersion(text))))
+
+/**
+ * The version `text` spells, for the assertions that are about ordering rather than about parsing.
+ * An unreadable token answers `v0`, which every one of those assertions would visibly fail on.
+ */
+private def versionOf(text: String): Version =
+   foldOption(Version(0, None), version -> version, runId(runAbort(parseVersion(text))))
+
+private def larger(a: String, b: String): String = show(max(versionOf(a), versionOf(b)))
+
+private def smaller(a: String, b: String): String = show(min(versionOf(a), versionOf(b)))
+
+private def sameVersion(a: String, b: String): String =
+   fold(versionOf(a) == versionOf(b), "same", "different")
+
+private def oneLine(a: String, b: String): String =
+   fold(sameLine(versionOf(a), versionOf(b)), "one line", "two lines")
