@@ -1,10 +1,27 @@
 # The Eliot Build System: Git-Native Packages, Declarative Descriptor, Standard Verbs
 
-Status: **DESIGN** — descriptor, identity and resolution implemented; no source, lockfile or verbs
-yet. Records the design discussion of 2026-07-21. Fixes the model, the semantics, the descriptor
-contents, and the descriptor syntax (`eliot.pkg`). Amended 2026-08-02: identity is decided by the URL
-*or* by a shared lineage anchor (see below). Amended 2026-08-06: the `replace` clause is cut (see
-below).
+Status: **DESIGN**, being built. Records the design discussion of 2026-07-21. Fixes the model, the
+semantics, the descriptor contents, and the descriptor syntax (`eliot.pkg`). Amended 2026-08-02:
+identity is decided by the URL *or* by a shared lineage anchor (see below). Amended 2026-08-06: the
+`replace` clause is cut, and the implementation's own lessons are recorded (both below).
+
+**Where the implementation stands** (2026-08-06, 124 tests):
+
+| Module | What it is | State |
+|---|---|---|
+| `Clause` | the `keyword args… { … }` grammar, and nothing about the build model | done |
+| `Descriptor` | the typed `eliot.pkg` model, interpret and render | done |
+| `Version` | tag parsing, numeric ordering, compatibility lines | done |
+| `PackageId` | canonical URL identity, `//module` selector | done |
+| `Resolution` | MVS per configuration, identity by URL then lineage | done, source handed in |
+| `Git` | git command construction and `ls-remote` parsing | done |
+| `Cache` | bare mirrors per package; tags, anchors, descriptors out of them | done |
+| — | the adapter binding `Cache` to `Resolution`'s two callbacks | next |
+| — | lockfile, source assembly, verb dispatch, wrapper, launcher `main` | not started |
+
+Nothing fetches on behalf of a build yet: `Resolution` still takes its source as callbacks, and the
+only caller wiring them to `Cache` is a probe. The compat-check verb, the plugin-jar closure and the
+project-model query are unstarted.
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -462,10 +479,15 @@ generated Eliot bytecode carries no `META-INF/services` files to collapse. The b
 is the standard compiler one: launcher v0 is built by mill and published; thereafter launcher
 vN−1 builds launcher vN.
 
-What the Eliot-written launcher demands is a set of jvm-layer effects/natives that do not exist
-yet — file IO, process spawning, HTTP GET, sha256 — and that is a feature, not an obstacle: the
-build tool is the forcing function for the effect system and stdlib the way `namedValues` was
-for reflection — a real, fully effectful program we control. Process spawn is the load-bearing
+What the Eliot-written launcher demands is a set of jvm-layer effects/natives, and that was a
+feature rather than an obstacle: the build tool is the forcing function for the effect system and
+stdlib the way `namedValues` was for reflection — a real, fully effectful program we control. It
+worked. `eliot.file.File`/`Path`, `eliot.system.Process` and `eliot.system.Environment` all exist
+now, and `eliot.build.Cache` is a real `{Process, FileSystem}` program running against real
+repositories — so "can the launcher be written in Eliot at all" is answered rather than assumed.
+HTTP GET and sha256 are still absent and are the remaining two: both are reachable by shelling out
+(`curl`, `sha256sum`) if they stay absent, at the cost of one more thing that must be installed.
+Process spawn is the load-bearing
 capability: the launcher **shells out to `git`** (Go's original choice; no embedded git
 library) and **spawns the compiler as a second `java` process** with the assembled classpath —
 dynamic jar loading from Eliot would need a bespoke native, while spawn is needed for git
@@ -531,8 +553,53 @@ Consequences worth stating:
   generated output. That is strictly better than today's hand-maintained file, which silently
   drifts from the CLI invocation it is supposed to mirror, and it deletes cleanly.
 
+## Lessons from building it
+
+Things the implementation taught that the design did not know, kept here because each one shapes
+what is left to write rather than only what is written.
+
+- **The pure/effectful boundary is imposed, not chosen.** A test case body is pinned to
+  `{Throw[AssertionError] | Id}` and may only assert, so *nothing effectful is reachable from the
+  test suite* — not "hard to test", unreachable. Every module that touches the outside therefore
+  splits in two: all the decisions on the pure side where tests can reach them, and a shell next
+  door thin enough to trust unexamined. `Git` (parsing, command construction) versus `Cache`
+  (spawning) is that split, and the lockfile, the assembler and verb dispatch each owe the same one.
+  This is the single most load-bearing constraint on the rest of the build.
+- **A module is only checked if `main` reaches it.** Checking is whole-program from `main`, and
+  ability resolution happens at monomorphization — so an effectful module nothing calls compiles
+  green while its `Process`/`FileSystem` instances are never resolved at all. `Cache` was in that
+  state and looked finished. Until the launcher has its own `main`, a `probe/` source root carries
+  one; when the launcher exists, that *is* the verification mechanism, and it should reach every
+  module deliberately.
+- **Effects cross a module boundary as callbacks, not as an ability.** An ability method that
+  declares a row *is* an effect, and an effect with no carrier and no handler can never be
+  discharged, so the row propagates outward until it hits a signature that cannot carry it. "A
+  swappable package source" is therefore a callback with a row in the arrow codomain
+  (`PackageId => Version => {Effect} Option[Descriptor]`), which is why `Resolution` reads as it
+  does. Worth revisiting when there is a carrier to discharge such an ability with; nothing in the
+  algorithm would change.
+- **Failure wants more than one channel.** `IoError` (git could not be run) and `GitError` (git ran
+  and said no) are different reports to a user and are kept apart, which costs a type-annotated
+  `catch` per channel since two `Throw`s in one row cannot be told apart by inference. The launcher
+  will carry four or five of these; the boundary that discharges them is the place to keep honest.
+- **A relative path belongs to whoever is standing in a directory.** Shelling out means every path
+  handed to git is resolved against git's working directory, not the tool's. Two bugs, one mistake:
+  a clone launched from inside the cache root resolved `target/cache/…` a second time and buried the
+  mirror at `target/cache/target/cache/…`. The rule that fell out — a command that *names* a
+  repository by path runs where this program runs, one that operates on the repository it stands in
+  runs in the mirror — is git's own split, and everything spawned later inherits the question.
+- **Mirrors, not checkouts.** The cache holds bare repositories: a descriptor is read with
+  `git show`, the ancestry check reads objects, and neither wants files on disk. This was not in the
+  design and it creates one open question (below), but it makes resolution cost nothing on disk
+  beyond history, and re-resolving a cached package is a local process at ~0.1s.
+
 ## Deferred / open problems
 
+- **How resolved sources reach the compiler.** The cache deliberately has no working tree, and the
+  compiler wants directories to mount as source roots — so something must materialise the selected
+  version of each package. `git worktree add` per resolution is cheap and stays tied to the mirror;
+  a plain checkout per (package, version) is simpler and duplicates; `git archive` into the cache
+  sits between. Undecided, and it belongs with the assembly step rather than with the cache.
 - **Major-version coexistence** in one program (resolver error today; Go-style identity split if
   ecosystem migrations ever demand it).
 - **Availability endgame** — immutable proxy + checksum transparency log, only if the ecosystem
