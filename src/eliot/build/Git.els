@@ -1,0 +1,173 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.system.Process
+import eliot.build.Version
+
+/**
+ * What git is told and what it says back — the pure half of talking to git.
+ *
+ * There is no embedded git library and there will not be one: the tool shells out to the `git` the
+ * user already has, which is Go's original choice and the reason process spawning is the launcher's
+ * load-bearing capability. What that leaves is two pure problems — building an argument list and
+ * reading the output — and this module is both of them. `eliot.build.Cache` performs them.
+ *
+ * The split is not tidiness. A test case body is pinned to `{Throw[AssertionError] | Id}` and can
+ * therefore never perform an effect, so anything effectful is unreachable from the suite. Every
+ * decision — which refs count, which commit a tag names, what a version tag even looks like — lives
+ * here where a test can reach it, and what remains next door is a spawn and an exit code.
+ */
+
+/**
+ * A tag naming a version, and the commit that tag ultimately points at.
+ *
+ * "Ultimately" is the whole subtlety of reading `git ls-remote`: an annotated tag — which is what a
+ * release is — is an object in its own right, so it appears twice, once as itself and once peeled to
+ * the commit it wraps. The commit is what a lockfile pins and what an ancestry check compares, so the
+ * peeled line is the one that matters and the tag object's own hash is noise.
+ */
+data TagRef(taggedVersion: Version, taggedCommit: String)
+
+/**
+ * Tags order by the version they name, newest last — so the newest release a repository publishes is
+ * the last of its sorted tags. That is not a question resolution asks, since MVS selects the maximum
+ * of the declared *minimums* and never enumerates; it is what `eliot get` will ask when raising a
+ * minimum to what is actually available.
+ */
+implement Compare[TagRef] {
+   def lessThanOrEqual(a: TagRef, b: TagRef): Bool = a.taggedVersion <= b.taggedVersion
+}
+
+/**
+ * The versions `output` announces, where `output` is what `git ls-remote --tags` wrote.
+ *
+ * ```eliot
+ * val published = parseTagRefs(listed.standardOutput)
+ * ```
+ *
+ * Anything that is not a version tag is dropped rather than reported. A repository is free to carry
+ * `latest`, `2024-06-release` or `v1.0-rc1`, and none of them is a thing resolution can order or
+ * select; refusing the whole listing over a tag nobody asked for would make a package unusable for
+ * decorating its own history. The tags that *are* versions are exactly the tags MVS can choose
+ * between, which is the question being asked.
+ */
+def parseTagRefs(output: String): List[TagRef] =
+   split("\n", output).foldLeft(empty, line -> refs -> withTagLine(line, refs))
+
+/**
+ * The commit `version` names, absent when the repository publishes no such version.
+ *
+ * Versions are compared as the ordering sees them, so a repository that tagged `v1` answers a
+ * requirement written `v1.0` — the two spell one point on one line, and only the spelling the author
+ * used was ever a tag.
+ */
+def commitOf(version: Version, tags: List[TagRef]): Option[String] =
+   foldOption(None, ref -> Some(ref.taggedCommit), tags.find(ref -> ref.taggedVersion == version))
+
+/**
+ * The lineage anchor of the `majorLine` compatibility line: the commit its *first* release names.
+ *
+ * This is the identity test the resolver falls back on when two canonical URLs disagree. It works
+ * because git is content-addressed and the first release tag of a line is immutable, carried by every
+ * mirror and every fork, and per-major — precisely the granularity of the append-only contract that
+ * the identity question is about. Absent is a legitimate answer and unifies nothing: a line whose
+ * history was migrated may start at `v1.3` and have no first release at all.
+ */
+def anchorCommit(majorLine: Int, tags: List[TagRef]): Option[String] =
+   commitOf(Version(majorLine, Some(0)), tags)
+
+/**
+ * `git ls-remote --tags <target>` — what a repository publishes, without fetching any of it.
+ *
+ * `target` is a URL or a local path indifferently, which is why one command serves both discovery
+ * against a remote and reading back a mirror that is already on disk.
+ */
+def lsRemoteTagsCommand(target: String): List[String] =
+   command("git").withArgument("ls-remote").withArgument("--tags").withArgument(target)
+
+/**
+ * `git clone --mirror <source> <target>` — the whole repository, no working tree.
+ *
+ * A mirror rather than a checkout because nothing here wants files on disk: a descriptor is read out
+ * of the object database with `git show`, and the ancestry check the design owes reads objects too.
+ * A working tree would be a second copy of every source file per package, checked out at one version
+ * at a time, for no question anybody asks.
+ */
+def mirrorCloneCommand(source: String, target: String): List[String] =
+   command("git").withArgument("clone").withArgument("--mirror").withArgument(source).withArgument(target)
+
+/**
+ * `git fetch --tags --prune` — bring a mirror up to date with what its remote publishes now.
+ *
+ * Pruning matters more here than it looks: a tag that stopped existing is a tag the resolver must
+ * stop selecting, and a mirror that only ever accumulates would answer with releases the package has
+ * withdrawn.
+ */
+def fetchTagsCommand: List[String] =
+   command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune")
+
+/**
+ * `git show <revision>:<file>` — one file's content at one point in history, straight from the object
+ * database.
+ */
+def showFileCommand(revision: String, file: String): List[String] =
+   command("git").withArgument("show").withArgument(revision ++ ":" ++ file)
+
+/**
+ * How to actually reach `url`, which a descriptor deliberately does not say.
+ *
+ * Dependency URLs are scheme-less by invariant — that is what keeps `//` unambiguously the module
+ * selector and what stops two spellings of one transport becoming two identities. So the scheme is
+ * supplied here, at the one place bytes are fetched, and `https` is the default rather than the rule:
+ * where a package is fetched from is consumer configuration, and this is the function that will grow
+ * a mirror table when there is one to grow.
+ */
+def transportUrl(url: String): String = "https://" ++ url
+
+private def withTagLine(line: String, refs: List[TagRef]): List[TagRef] =
+   foldOption(refs, name -> withTagName(name, before("\t", line), refs), tagNameOf(line))
+
+/**
+ * The tag a listing line is about, absent for anything that is not one. A line reads
+ * `<commit>\t<ref>`, and `after` answers `""` for a line carrying no tab at all — the trailing empty
+ * line every listing ends with — so the `refs/tags/` test rejects those without a length check first.
+ */
+private def tagNameOf(line: String): Option[String] = {
+   val reference = after("\t", line)
+
+   fold(startsWith(tagPrefix, reference), Some(drop(length(tagPrefix), reference)), None)
+}
+
+private def withTagName(name: String, commit: String, refs: List[TagRef]): List[TagRef] =
+   foldOption(refs, version -> withTag(version, commit, isPeeled(name), refs), versionOfTag(bareTagName(name)))
+
+/**
+ * A peeled entry replaces what is known, a plain one only fills a gap. Stated as two rules rather
+ * than as "the second line wins" because git's listing order is git's business, and an annotated tag
+ * whose peeled line arrived first must not be overwritten by the tag object's own hash.
+ *
+ * A repository tagging one version twice — `v1` *and* `v1.0`, which the ordering reads as one point —
+ * is degenerate, and the first spelling seen is kept. There is no right answer to give it, and it is
+ * not worth an error path of its own.
+ */
+private def withTag(version: Version, commit: String, peeled: Bool, refs: List[TagRef]): List[TagRef] =
+   fold(peeled, replacedTag(TagRef(version, commit), refs), addedTag(TagRef(version, commit), refs))
+
+private def replacedTag(ref: TagRef, refs: List[TagRef]): List[TagRef] =
+   append(refs.filter(other -> other.taggedVersion != ref.taggedVersion), ref)
+
+private def addedTag(ref: TagRef, refs: List[TagRef]): List[TagRef] =
+   fold(refs.any(other -> other.taggedVersion == ref.taggedVersion), refs, append(refs, ref))
+
+private def versionOfTag(name: String): Option[Version] = runId(runAbort(parseVersion(name)))
+
+private def isPeeled(name: String): Bool = endsWith(peeledSuffix, name)
+
+private def bareTagName(name: String): String =
+   fold(isPeeled(name), take(length(name) - length(peeledSuffix), name), name)
+
+private def tagPrefix: String = "refs/tags/"
+
+/**
+ * What git appends to a ref that has been followed to the object it wraps.
+ */
+private def peeledSuffix: String = "^{}"

@@ -1,0 +1,200 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Git
+
+/**
+ * The local mirror of every package a build has looked at, and the two questions resolution asks of
+ * one.
+ *
+ * A package is a git repository, so the cache is git repositories — bare mirrors under a directory
+ * named after the canonical URL. Everything else follows from that: discovering what a package
+ * publishes is `ls-remote` against the mirror, reading a descriptor at a version is `git show` out of
+ * its object database, and the ancestry check the design owes the fetcher is a third question for the
+ * same objects to answer later. Nothing is ever checked out.
+ *
+ * **What is cached is the repository, not an answer.** No memo of "this URL resolved to that
+ * version" is kept, because MVS's answer depends on the whole closure rather than on any one package,
+ * and a stale memo of a wrong shape is worse than a second `ls-remote` against a local directory.
+ *
+ * The effects are `{Process, FileSystem}` plus two failure channels, and both are honest: `IoError`
+ * is the standard library's, raised when a program cannot be started or a directory cannot be made,
+ * and `GitError` is this module's, raised when `git` ran fine and *said no*. Keeping them apart is
+ * what lets a caller report "git is not installed" differently from "that repository does not exist".
+ */
+
+/**
+ * A git command that ran and failed — as distinct from a git that could not be run at all, which is
+ * the standard library's `IoError`.
+ *
+ * The command is carried whole rather than summarised. A build tool that shells out is a build tool
+ * whose errors are somebody else's, and the only useful thing to say about one is exactly what was
+ * run and exactly what it said back, so the user can run it themselves.
+ */
+data GitError(failedCommand: String, failedExitCode: Int, failedDiagnostics: String)
+
+implement Show[GitError] {
+   def show(value: GitError): String =
+      "'" ++ value.failedCommand ++ "' failed with exit code " ++ show(value.failedExitCode) ++
+         ": " ++ value.failedDiagnostics
+}
+
+/**
+ * Where the mirror of `id` lives under `root`: one directory per canonical URL segment, so
+ * `github.com/x/foo` caches at `<root>/github.com/x/foo` and the cache is a thing a human can read
+ * with `ls`.
+ *
+ * The *repository* keys it, not the package: a module selector narrows what gets mounted later and
+ * has no bearing on what git fetches, so `…/eliot//stdlib` and `…/eliot//jvm` share one mirror.
+ *
+ * Known gap, accepted for now: canonical URLs keep their path case — only the host is
+ * case-insensitive by specification — so two packages differing only in path case collide on a
+ * case-insensitive filesystem. Go escapes uppercase letters to solve this; doing the same needs
+ * per-character iteration the standard library does not offer yet.
+ */
+def cacheDirectory(root: Path, id: PackageId): Path =
+   split("/", repository(id).url).foldLeft(root, segment -> directory -> directory / segment)
+
+/**
+ * Every version `id` publishes, with the commit each names — the question `eliot get` asks in full
+ * and identity asks one line of.
+ *
+ * Answered from the mirror rather than from the network, so a resolution that revisits a package
+ * costs a local process and nothing else. Bringing the mirror up to date is `refreshed`, deliberately
+ * a separate act: MVS never needs to know that a newer release exists, and a resolver that refetched
+ * on every question would make an offline build impossible for no gain.
+ */
+def publishedTags(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} List[TagRef] = {
+   val mirror = ensuredMirror(root, id)
+   val listed = checked(lsRemoteTagsCommand(show(mirror)), here)
+
+   parseTagRefs(listed)
+}
+
+/**
+ * The lineage anchor of `id`'s `majorLine` — the commit its first release names, or nothing where the
+ * line has no first release to name one.
+ *
+ * This is the resolver's `anchorAt`: the question it asks when a requirement names a URL it has not
+ * seen, to decide whether that URL is a package already selected under a different spelling.
+ */
+def anchorOf(root: Path, majorLine: Int, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
+   anchorCommit(majorLine, publishedTags(root, id))
+
+/**
+ * What `id`'s descriptor said at `version`, or nothing where the version publishes none.
+ *
+ * Absence is an ordinary answer here rather than a failure, and both ways of being absent give it: a
+ * version nobody tagged and a tag carrying no `eliot.pkg` are equally "there is no descriptor to
+ * read", and a resolver that reached either has a dependency line to blame that this module cannot
+ * see. `git show` reports both by exiting non-zero, which is why this is the one place a non-zero
+ * exit is read rather than raised.
+ */
+def descriptorTextAt(root: Path, version: Version, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] = {
+   val mirror = ensuredMirror(root, id)
+   val shown = run(showFileCommand(show(version), descriptorFileName), mirror)
+
+   outputWhenFound(shown)
+}
+
+/**
+ * Bring `id`'s mirror up to date with what its remote publishes now, cloning it first if this build
+ * has never seen it.
+ *
+ * The verb that owns the network. Everything else in this module answers from what is already on
+ * disk, so this is where "the build fetched something" is a true statement about a program run —
+ * which is what lets the project-model query stay offline and lets fetching be something a user
+ * invokes rather than something opening an editor does.
+ */
+def refreshed(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+   val mirror = ensuredMirror(root, id)
+
+   checked(fetchTagsCommand, mirror)
+   mirror
+}
+
+/**
+ * The descriptor's file name, at the root of every package.
+ */
+def descriptorFileName: String = "eliot.pkg"
+
+/**
+ * The mirror of `id`, cloned if this is the first time the cache has been asked about it.
+ *
+ * Presence is tested rather than remembered, so two runs of the tool share a cache with no handshake
+ * between them. A directory is taken as proof of a finished clone because git removes a clone target
+ * it failed to fill — a repository that does not exist leaves nothing behind and the next run simply
+ * tries again. The hole that remains is a clone killed outright rather than failing, which leaves a
+ * partial mirror that will look present; validating one is work for the fetcher, which has to check
+ * ancestry against the objects anyway.
+ *
+ * Written as an `Option` eliminator rather than as `if(present) mirror else cloned(…)`: an `if`
+ * introduces an `Abort` its arms then run under, and `Throw` has no lift through an `Abort` carrier,
+ * so the cloning arm could not raise.
+ */
+private def ensuredMirror(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+   val mirror = cacheDirectory(root, id)
+   val absent = missingMirror(isDirectory(mirror), mirror)
+
+   foldOption(mirror, missing -> cloned(root, missing, id), absent)
+}
+
+private def missingMirror(present: Bool, mirror: Path): Option[Path] = fold(present, None, Some(mirror))
+
+/**
+ * The clone runs *where this program runs*, not in the cache root, because the target it is handed is
+ * a path in this program's own terms: `root` may be relative — `target/cache` is the obvious thing for
+ * a caller to pass — and a clone launched from inside `root` would resolve that same relative path a
+ * second time, burying the mirror at `target/cache/target/cache/…`. An absolute root is indifferent to
+ * the working directory, so one rule serves both.
+ *
+ * Only the root is created up front. Git makes the leading directories of a clone target itself, so
+ * the per-package chain needs no help; the root is made anyway to state that the cache is a directory
+ * this tool owns rather than one that appears as a side effect of the first fetch.
+ */
+private def cloned(root: Path, mirror: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+   createDirectories(root)
+   checked(mirrorCloneCommand(transportUrl(repository(id).url), show(mirror)), here)
+   mirror
+}
+
+/**
+ * The directory this program was started in — the frame every relative path it is given is expressed
+ * in.
+ *
+ * Which working directory a git command wants is decided by the command, the way git itself decides
+ * it: one that *names* a repository by path (`clone`, `ls-remote`) is given that path in this
+ * program's frame and so must run here, while one that operates on the repository it is standing in
+ * (`fetch`, `show`) runs in the mirror and names nothing. Getting this backwards is silent — git
+ * resolves the relative path against the wrong directory and reports a missing repository — so the
+ * rule is worth stating rather than inferring per call.
+ */
+private def here: Path = path(".")
+
+/**
+ * Run `arguments` and answer what it wrote, raising when it exited non-zero.
+ *
+ * The standard library is right that a non-zero exit is data rather than a failure — it is how a
+ * program reports a decision — but the decisions reported here are all the same one: git was asked
+ * about a repository and could not answer. The single caller that genuinely wants to *read* a refusal
+ * is `descriptorTextAt`, and it calls `run` itself.
+ */
+private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[GitError]} String = {
+   val result = run(arguments, workingDirectory)
+   val failure = failureOf(arguments, result)
+
+   foldOption(result.standardOutput, error -> raise(error), failure)
+}
+
+private def failureOf(arguments: List[String], result: ProcessResult): Option[GitError] =
+   fold(
+      result.exitCode == 0,
+      None,
+      Some(GitError(arguments.joined(" "), result.exitCode, result.standardError))
+   )
+
+private def outputWhenFound(result: ProcessResult): Option[String] =
+   fold(result.exitCode == 0, Some(result.standardOutput), None)

@@ -1,0 +1,65 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.system.Environment
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Git
+import eliot.build.Cache
+
+/**
+ * A `main` that drives `eliot.build.Cache` against a real repository.
+ *
+ * It exists because the compiler checks a whole program from `main` and nothing else: ability
+ * resolution happens at monomorphization, so a `{Process, FileSystem}` module no test can reach is a
+ * module whose instances are never resolved and whose errors are never reported. The test suite
+ * cannot supply that reachability — a test case body is pinned to `{Throw[AssertionError] | Id}` and
+ * may only assert — so this does, and it is the seed of the launcher's own entry point.
+ *
+ * Not a test: it wants the network and a `git` on the path, and it asserts nothing. Run it to watch
+ * the cache work.
+ */
+def main: {Console, Process, FileSystem, Environment} Unit = {
+   val cacheRoot = path("target/probe-cache")
+   val subject = packageId(arguments.head orElse "github.com/robertbraeutigam/eliot")
+
+   printLine("cache directory: " ++ show(cacheDirectory(cacheRoot, subject)))
+   printLine(reported(cacheRoot, subject) catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed)))
+}
+
+/**
+ * Everything the cache can say about `subject`, in one string: what it publishes, where its first
+ * release points, and whether it carries a descriptor at its newest version.
+ */
+private def reported(cacheRoot: Path, subject: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} String = {
+   val published = publishedTags(cacheRoot, subject)
+   val anchor = anchorOf(cacheRoot, 1, subject)
+
+   "tags: " ++ published.map(ref -> show(ref.taggedVersion)).joined(", ") ++
+      "\nv1 anchor: " ++ foldOption("<none>", commit -> commit, anchor) ++
+      "\n" ++ descriptorReport(cacheRoot, published, subject)
+}
+
+private def descriptorReport(
+   cacheRoot: Path,
+   published: List[TagRef],
+   subject: PackageId
+): {Process, FileSystem, Throw[IoError], Throw[GitError]} String =
+   foldOption(
+      "descriptor: no version to read one at",
+      newest -> descriptorAt(cacheRoot, newest.taggedVersion, subject),
+      published.sorted.last
+   )
+
+private def descriptorAt(
+   cacheRoot: Path,
+   newest: Version,
+   subject: PackageId
+): {Process, FileSystem, Throw[IoError], Throw[GitError]} String = {
+   val text = descriptorTextAt(cacheRoot, newest, subject)
+
+   "descriptor at " ++ show(newest) ++ ": " ++ foldOption("<none published>", found -> shown(found), text)
+}
+
+private def shown(text: String): String = show(size(split("\n", text))) ++ " lines"

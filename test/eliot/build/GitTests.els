@@ -1,0 +1,97 @@
+import eliot.lang.Id
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.Version
+import eliot.build.Git
+
+def testCases: Test = {
+   "parseTagRefs" should "read a lightweight tag, which is listed once" in {
+      tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
+   }
+   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in {
+      tags("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
+   }
+   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in {
+      tags("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
+   }
+   "parseTagRefs" should "read every version a repository publishes" in {
+      tags("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
+         shouldBe "v1.2 aaa1, v1.3 bbb2, v2.0 ccc3"
+   }
+   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in {
+      tags("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
+   }
+   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in {
+      tags("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
+   }
+   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in {
+      tags("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
+   }
+   "parseTagRefs" should "survive the trailing empty line every listing ends with" in {
+      tags("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
+   }
+   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in {
+      tags("") shouldBe ""
+   }
+   "commitOf" should "find the commit a version names" in {
+      commit("v1.3", "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3") shouldBe "bbb2"
+   }
+   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in {
+      commit("v1.0", "aaa1\trefs/tags/v1") shouldBe "aaa1"
+   }
+   "commitOf" should "find nothing for a version the repository does not publish" in {
+      commit("v1.9", "aaa1\trefs/tags/v1.2") shouldBe "<none>"
+   }
+   "anchorCommit" should "answer the first release of the line asked about" in {
+      anchor(1, "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4\nccc3\trefs/tags/v2.0") shouldBe "aaa1"
+   }
+   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in {
+      anchor(1, "aaa1\trefs/tags/v1\nbbb2\trefs/tags/v1.4") shouldBe "aaa1"
+   }
+   "anchorCommit" should "find no anchor for a line whose history starts later" in {
+      anchor(1, "aaa1\trefs/tags/v1.3\nbbb2\trefs/tags/v1.4") shouldBe "<none>"
+   }
+   "anchorCommit" should "find no anchor for a line the repository does not publish" in {
+      anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
+   }
+   "TagRef" should "order by version, so the newest release sorts last" in {
+      foldOption(
+         "<none>",
+         newest -> rendered(newest),
+         parseTagRefs("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2").sorted.last
+      ) shouldBe "v1.10 aaa1"
+   }
+   "lsRemoteTagsCommand" should "ask a remote what it publishes without fetching it" in {
+      lsRemoteTagsCommand("github.com/x/foo").joined(" ") shouldBe "git ls-remote --tags github.com/x/foo"
+   }
+   "mirrorCloneCommand" should "clone without a working tree" in {
+      mirrorCloneCommand("https://github.com/x/foo", "/cache/github.com/x/foo").joined(" ")
+         shouldBe "git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+   }
+   "fetchTagsCommand" should "prune, so a withdrawn tag stops being selectable" in {
+      fetchTagsCommand.joined(" ") shouldBe "git fetch --tags --prune"
+   }
+   "showFileCommand" should "read one file out of the object database" in {
+      showFileCommand("v1.2", "eliot.pkg").joined(" ") shouldBe "git show v1.2:eliot.pkg"
+   }
+   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in {
+      transportUrl("github.com/x/foo") shouldBe "https://github.com/x/foo"
+   }
+}
+
+/**
+ * The tags `output` announces, rendered as `<tag> <commit>` per version — both halves asserted at
+ * once, so a test says which commit a version resolved to rather than merely that it appeared.
+ */
+private def tags(output: String): String = parseTagRefs(output).map(rendered).joined(", ")
+
+private def rendered(ref: TagRef): String = show(ref.taggedVersion) ++ " " ++ ref.taggedCommit
+
+private def commit(tag: String, output: String): String =
+   foldOption("<none>", found -> found, commitOf(version(tag), parseTagRefs(output)))
+
+private def anchor(majorLine: Int, output: String): String =
+   foldOption("<none>", found -> found, anchorCommit(majorLine, parseTagRefs(output)))
+
+private def version(tag: String): Version = parseVersion(tag) else Version(0, None)
