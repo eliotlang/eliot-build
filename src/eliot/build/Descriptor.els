@@ -63,12 +63,6 @@ data Backend(backendPackage: Option[PackageId], backendParameters: List[Pair[Str
 data Artifact(artifactName: String, artifactDependencies: List[Dependency], artifactBackend: Option[Backend])
 
 /**
- * A root-only redirection of one package URL to another URL or a local path. Only the root
- * project's replacements apply, never a dependency's.
- */
-data Replacement(replacedPackage: PackageId, replacementTarget: String)
-
-/**
  * Everything an `eliot.pkg` says. Deliberately absent: the package's own name (the URL is the
  * identity), its version (the git tag carries it), and a toolchain directive (the toolchain is an
  * ordinary dependency).
@@ -77,8 +71,7 @@ data Descriptor(
    baseDependencies: List[Dependency],
    modules: List[BuildModule],
    testDependencies: List[Dependency],
-   artifacts: List[Artifact],
-   replacements: List[Replacement]
+   artifacts: List[Artifact]
 )
 
 /**
@@ -112,7 +105,7 @@ def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
 /**
  * The empty descriptor — what a file of nothing but comments means.
  */
-def emptyDescriptor: Descriptor = Descriptor(empty, empty, empty, empty, empty)
+def emptyDescriptor: Descriptor = Descriptor(empty, empty, empty, empty)
 
 /**
  * `descriptor` written back out in `eliot.pkg` syntax, canonically ordered. Not a byte-for-byte
@@ -124,8 +117,7 @@ def renderDescriptor(descriptor: Descriptor): String =
       descriptor.baseDependencies.map(renderDependency) ++
          descriptor.modules.map(renderModule) ++
          renderTestBlock(descriptor.testDependencies) ++
-         descriptor.artifacts.map(renderArtifact) ++
-         descriptor.replacements.map(renderReplacement)
+         descriptor.artifacts.map(renderArtifact)
    )
 
 private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
@@ -137,14 +129,13 @@ private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descripto
  * `Abort` carrier, which `Throw` has no lift through — so the arms could not raise. A `match`
  * introduces no effect and the arms keep the row they are written at.
  */
-data ClauseKind = DepClause | ModuleClause | TestClause | ArtifactClause | ReplaceClause | UnknownClause
+data ClauseKind = DepClause | ModuleClause | TestClause | ArtifactClause | UnknownClause
 
 private def kindOf(keyword: String): ClauseKind =
    fold(keyword == "dep", DepClause,
       fold(keyword == "module", ModuleClause,
          fold(keyword == "test", TestClause,
-            fold(keyword == "artifact", ArtifactClause,
-               fold(keyword == "replace", ReplaceClause, UnknownClause)))))
+            fold(keyword == "artifact", ArtifactClause, UnknownClause))))
 
 private def withClause(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
    val kind = kindOf(clause.keyword)
@@ -154,7 +145,6 @@ private def withClause(clause: Clause, descriptor: Descriptor): {Throw[Descripto
       case ModuleClause   -> withModule(clause, descriptor)
       case TestClause     -> withTestBlock(clause, descriptor)
       case ArtifactClause -> withArtifact(clause, descriptor)
-      case ReplaceClause  -> withReplacement(clause, descriptor)
       case UnknownClause  -> raise(unknown(clause))
    }
 }
@@ -166,8 +156,7 @@ private def withBaseDependency(clause: Clause, descriptor: Descriptor): {Throw[D
       append(descriptor.baseDependencies, dependency),
       descriptor.modules,
       descriptor.testDependencies,
-      descriptor.artifacts,
-      descriptor.replacements
+      descriptor.artifacts
    )
 }
 
@@ -178,8 +167,7 @@ private def withModule(clause: Clause, descriptor: Descriptor): {Throw[Descripto
       descriptor.baseDependencies,
       append(descriptor.modules, built),
       descriptor.testDependencies,
-      descriptor.artifacts,
-      descriptor.replacements
+      descriptor.artifacts
    )
 }
 
@@ -190,8 +178,7 @@ private def withTestBlock(clause: Clause, descriptor: Descriptor): {Throw[Descri
       descriptor.baseDependencies,
       descriptor.modules,
       descriptor.testDependencies ++ dependencies,
-      descriptor.artifacts,
-      descriptor.replacements
+      descriptor.artifacts
    )
 }
 
@@ -202,20 +189,7 @@ private def withArtifact(clause: Clause, descriptor: Descriptor): {Throw[Descrip
       descriptor.baseDependencies,
       descriptor.modules,
       descriptor.testDependencies,
-      append(descriptor.artifacts, built),
-      descriptor.replacements
-   )
-}
-
-private def withReplacement(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val built = replacementOf(clause)
-
-   Descriptor(
-      descriptor.baseDependencies,
-      descriptor.modules,
-      descriptor.testDependencies,
-      descriptor.artifacts,
-      append(descriptor.replacements, built)
+      append(descriptor.artifacts, built)
    )
 }
 
@@ -308,16 +282,6 @@ private def jarClause(clause: Clause): {Throw[DescriptorError]} JarPin = {
    atMostArguments(3, clause)
    requireThat(label == "sha256", "a jar's hash must be introduced by 'sha256'", clause)
    JarPin(coordinate, hash)
-}
-
-private def replacementOf(clause: Clause): {Throw[DescriptorError]} Replacement = {
-   val replaced = required(0, "a replace needs the URL being replaced", clause)
-   val label = required(1, "a replace reads 'replace <url> with <target>'", clause)
-   val target = required(2, "a replace needs a replacement URL or path", clause)
-
-   atMostArguments(3, clause)
-   requireThat(label == "with", "a replace reads 'replace <url> with <target>'", clause)
-   Replacement(referenceOf(replaced, clause), target)
 }
 
 private def dependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
@@ -438,9 +402,6 @@ private def renderBackendClause(backend: Backend): String =
 
 private def renderParameter(parameter: Pair[String, String]): String =
    parameter.first ++ " " ++ parameter.second
-
-private def renderReplacement(replacement: Replacement): String =
-   "replace " ++ show(replacement.replacedPackage) ++ " with " ++ replacement.replacementTarget
 
 /**
  * A `{ … }` block holding `lines`, each indented one level. Nested blocks are indented by their own

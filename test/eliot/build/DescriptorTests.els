@@ -44,14 +44,8 @@ def testCases: Test = {
    "parseDescriptor" should "canonicalize a dependency URL, so one package is one identity" in {
       parsed("dep GitHub.com/x/foo.git v1") shouldBe "dep github.com/x/foo v1"
    }
-   "parseDescriptor" should "canonicalize the URL a replacement replaces" in {
-      parsed("replace GitHub.com/x/foo.git with ../foo-local") shouldBe "replace github.com/x/foo with ../foo-local"
-   }
    "parseDescriptor" should "read a test block" in {
       roundTrip("test {\n  dep github.com/eliot-lang/eliot-test v1\n}")
-   }
-   "parseDescriptor" should "read a root replacement" in {
-      roundTrip("replace github.com/x/foo with ../foo-local")
    }
    "parseDescriptor" should "treat a module as exported unless it says otherwise" in {
       parsed("module lang {\n   dep //other\n}") shouldBe "module lang {\n  dep //other\n}"
@@ -92,9 +86,10 @@ def testCases: Test = {
       parsed("module lang {\n  plugin a:b:1 {\n    jar c:d:2\n  }\n}")
          shouldBe "a jar needs 'sha256 <hex>' in 'jar c:d:2'"
    }
-   "parseDescriptor" should "reject a replace that does not read 'with'" in {
-      parsed("replace github.com/x/foo by ../foo-local")
-         shouldBe "a replace reads 'replace <url> with <target>' in 'replace github.com/x/foo by ../foo-local'"
+   "parseDescriptor" should "reject a replacement, which the resolver has no way to honour" in {
+      parsed("replace github.com/x/foo with ../foo-local")
+         shouldBe ("unknown clause 'replace'; this descriptor may need a newer eliot in " ++
+            "'replace github.com/x/foo with ../foo-local'")
    }
    "parseDescriptor" should "report a syntax error as such" in {
       parsed("dep a v1\n}") shouldBe "line 2: unmatched '}' in '}'"

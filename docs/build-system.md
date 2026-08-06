@@ -1,9 +1,10 @@
 # The Eliot Build System: Git-Native Packages, Declarative Descriptor, Standard Verbs
 
-Status: **DESIGN** — descriptor and identity implemented, resolution not yet. Records the design
-discussion of 2026-07-21. Fixes the model, the semantics, the descriptor contents, and the
-descriptor syntax (`eliot.pkg`). Amended 2026-08-02: identity is decided by the URL *or* by a
-shared lineage anchor (see below).
+Status: **DESIGN** — descriptor, identity and resolution implemented; no source, lockfile or verbs
+yet. Records the design discussion of 2026-07-21. Fixes the model, the semantics, the descriptor
+contents, and the descriptor syntax (`eliot.pkg`). Amended 2026-08-02: identity is decided by the URL
+*or* by a shared lineage anchor (see below). Amended 2026-08-06: the `replace` clause is cut (see
+below).
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -130,23 +131,33 @@ nearly redundant for resolution; it survives as the integrity record.
 
 ### Location drift and availability — registry-free indirection
 
-Identity answers "same package?"; it does not keep repos findable or alive. Three mechanisms,
-none central:
+Identity answers "same package?"; it does not keep repos findable or alive. Two mechanisms,
+neither central:
 
-1. **Root-only `replace`** (consumer-controlled): the root project may map URL X → URL Y or a
-   local path. Only the root's replaces apply, never a dependency's (Go's rule — keeps resolution
-   local). This is also the local-development story. Note what the anchor rule above already
-   removes from `replace`'s job: a package named by two spellings — the old URL and the new one
-   after a move, a mirror, a local checkout — no longer *collides*, it unifies. `replace` remains
-   for choosing which source is used, not for preventing a duplicate.
-2. **Mirrors as resolver configuration** (consumer-controlled), never descriptor content. Git is
+1. **Mirrors as resolver configuration** (consumer-controlled), never descriptor content. Git is
    content-addressed — a commit hash is a Merkle root — so once the lock pins a hash, *any*
    remote can serve the bytes trustlessly. The design obligation is only negative: do not bake
    "fetch only from the identity URL" into the resolver. A proxy/cache can be run later with zero
    protocol change; the left-pad endgame (immutable proxy + checksum transparency log) stays
    available if the ecosystem ever needs it.
-3. **Vanity URLs** (author-controlled, deferrable): identity under a domain the author owns, an
+2. **Vanity URLs** (author-controlled, deferrable): identity under a domain the author owns, an
    HTTP response pointing at the current git remote. DNS is the decentralized registry.
+
+**A root-only `replace` clause was specified and then cut** (2026-08-06), before anything read it.
+The anchor rule had already taken its first job: a package named by two spellings — the old URL and
+the new one after a move, a mirror, a local checkout — no longer *collides*, it unifies, so nothing
+needs redirecting to prevent a duplicate. Availability is mechanism 1 above, which is consumer
+configuration by design. What remained was the local-development story, and that argues against a
+descriptor clause on this design's own terms: which checkout stands in for a dependency is an
+*environment* property, not a project property — the same rule that keeps mirrors out of the
+descriptor and the repo URL out of the wrapper's pin file. Go is the cautionary precedent rather than
+the model here: `replace` had to be confined to the root to limit the damage, and `go.work` was
+introduced later precisely to move local-development redirection back out of the committed manifest.
+Substituting genuinely *different* content for a transitive dependency — a fork carrying a fix
+upstream has not released — is the one job left with no other home, and it cannot arise before there
+is an ecosystem of packages one does not control. Reintroducing the clause then costs nothing:
+unknown-clause-is-fatal makes it purely additive, and only a descriptor that uses it needs the newer
+launcher.
 
 ## The descriptor
 
@@ -236,8 +247,6 @@ artifact hello {                             -- a build configuration
     main HelloWorld
   }
 }
-
-replace github.com/x/foo with ../foo-local   -- root-only; path or URL
 ```
 
 - `backend` names no platform: the backend is located among the artifact's deps (the packages
@@ -464,7 +473,7 @@ anyway and keeps the compiler's classpath isolated from the launcher's.
 
 **The full sequence**: script finds JRE → reads pin → fetches/caches/verifies launcher jar →
 execs it. Launcher parses `eliot.pkg` (+ `eliot.lock` if present) → MVS over git tags (shelling
-`git ls-remote`/`fetch`, honoring `replace`, verifying content hashes) → unions the plugin jar
+`git ls-remote`/`fetch`, verifying content hashes) → unions the plugin jar
 closures (the flat lists above), fetches deterministic URLs, verifies hashes → assembles the compiler
 classpath as separate jars → spawns the compiler per artifact → the backend emits. Stated
 honestly: a JVM is required to *build* on every platform, MCU projects included, until a native
@@ -494,7 +503,7 @@ the `eliot.paths` stopgap.
 
 **The descriptor and the project model are different artifacts, and only the second has a single
 answerer.** Parsing `eliot.pkg` is the easy half and stays open to everyone (above); the project
-model is the descriptor *plus* MVS over the transitive closure, `replace` application, lockfile
+model is the descriptor *plus* MVS over the transitive closure, mirror configuration, lockfile
 pins, per-configuration scoping and cache checkout paths. A second implementation of that inside
 the LSP would drift from the first, and the drift is the worst kind: the IDE reports diagnostics
 against a different set of roots than the build compiles, with nothing in either output naming
