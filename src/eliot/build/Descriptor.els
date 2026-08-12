@@ -120,9 +120,6 @@ def renderDescriptor(descriptor: Descriptor): String =
          descriptor.artifacts.map(renderArtifact)
    )
 
-private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
-   clauses.foldLeft(emptyDescriptor, clause -> acc -> withClause(clause, acc))
-
 /**
  * Which clause a keyword introduces. A `data` sum matched with `match`, rather than a chain of
  * `if..else` over the keyword: an `if` introduces `Abort` and its arms therefore run *under* an
@@ -130,6 +127,9 @@ private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descripto
  * introduces no effect and the arms keep the row they are written at.
  */
 data ClauseKind = DepClause | ModuleClause | TestClause | ArtifactClause | UnknownClause
+
+private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
+   clauses.foldLeft(emptyDescriptor, clause -> acc -> withClause(clause, acc))
 
 private def kindOf(keyword: String): ClauseKind =
    fold(keyword == "dep", DepClause,

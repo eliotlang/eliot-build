@@ -565,6 +565,10 @@ what is left to write rather than only what is written.
   door thin enough to trust unexamined. `Git` (parsing, command construction) versus `Cache`
   (spawning) is that split, and the lockfile, the assembler and verb dispatch each owe the same one.
   This is the single most load-bearing constraint on the rest of the build.
+  **Superseded 2026-08-12**: the compiler now resolves a test's own carrier instance for the standard
+  effects and lets a harness return a plain value, so an effectful module *is* reachable from the
+  suite and this split is no longer imposed. What the modules become instead, and how they are
+  tested, is `docs/effectful-modules.md`.
 - **A module is only checked if `main` reaches it.** Checking is whole-program from `main`, and
   ability resolution happens at monomorphization — so an effectful module nothing calls compiles
   green while its `Process`/`FileSystem` instances are never resolved at all. `Cache` was in that

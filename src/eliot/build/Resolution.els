@@ -135,6 +135,20 @@ def selectedVersionOf(repositoryId: PackageId, resolution: Resolution): Option[V
  */
 def resolutionDepthLimit: Int = rounds.size
 
+/**
+ * The closure so far: what has been selected, and which of those selections still owe their own
+ * requirements to the graph. A selection joins `pending` exactly when it is new or when its version
+ * went up, which is what makes a cycle terminate — the second visit selects nothing new, so nothing
+ * is pending and the remaining rounds are folds over an empty list.
+ */
+data ResolutionState(selected: List[Selection], pending: List[Selection])
+
+/**
+ * The selection this requirement is about, if the closure already has one, together with the anchor
+ * that was looked up on the way — kept so a new selection records its lineage without asking twice.
+ */
+data Identified(matched: Option[Selection], anchorFound: Option[String])
+
 private def resolveRequirements(
    requirements: List[Dependency],
    descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
@@ -144,14 +158,6 @@ private def resolveRequirements(
 
    completed(rounds.foldLeft(seeded, _ -> state -> expanded(state, descriptorAt, anchorAt)))
 }
-
-/**
- * The closure so far: what has been selected, and which of those selections still owe their own
- * requirements to the graph. A selection joins `pending` exactly when it is new or when its version
- * went up, which is what makes a cycle terminate — the second visit selects nothing new, so nothing
- * is pending and the remaining rounds are folds over an empty list.
- */
-data ResolutionState(selected: List[Selection], pending: List[Selection])
 
 private def emptyState: ResolutionState = ResolutionState(empty, empty)
 
@@ -245,12 +251,6 @@ private def withMinimum(
       identity.matched
    )
 }
-
-/**
- * The selection this requirement is about, if the closure already has one, together with the anchor
- * that was looked up on the way — kept so a new selection records its lineage without asking twice.
- */
-data Identified(matched: Option[Selection], anchorFound: Option[String])
 
 /**
  * Identity, URL first: the canonical URL settles the common case with no source call at all, and only
