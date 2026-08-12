@@ -1,0 +1,195 @@
+import eliot.carrier.Effect
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.build.Git
+
+/**
+ * The world an effectful module is run against under test: which directories exist, what each command
+ * it spawns answers, and a journal of everything it did.
+ *
+ * Not a suite — the fixture every suite over `{Process, FileSystem}` code shares. Production code
+ * declaring an effect row names no carrier, so it commits to no interpretation of it; instantiating it
+ * at `Fake` is what makes the interpretation this file's, and nothing in `src/` knows a test exists.
+ *
+ * **The carrier implements the whole row, flat.** All five instances — `Effect`, `Process`,
+ * `FileSystem` and one `Throw` per failure channel — are its own. Discharging the `Throw`s with the
+ * real `runThrow` over `Fake` as a base is not an alternative: `Process[ThrowCarrier[E, Fake]]` would
+ * need a lift of this `Process` through `ThrowCarrier`, the real effects get theirs for free by riding
+ * `Suspend`, and writing one here would be an orphan instance. So a raise lands in this carrier's own
+ * result slot, rendered, and `outcomeOf` reads it back.
+ *
+ * **It cannot cheat.** `Fake` has no `Suspend` instance and `Suspend` is the only route to a native
+ * side effect, so no line of production code run on it can reach a real process or a real file — an
+ * accidental one is a compile error rather than a test that quietly does I/O.
+ *
+ * **Assertions are run-then-assert.** A test case body is pinned to `{Throw[AssertionError] | Id}` and
+ * a pinned region writes every carrier-generic callee at *its* carrier, so a run written inside one
+ * fails to compile. Each scenario is therefore a private `def` above the suite, and the body only
+ * compares what it answered.
+ */
+
+/**
+ * What a spawned command answers: the three things a `ProcessResult` carries.
+ */
+data Reply(replyExitCode: Int, replyOutput: String, replyError: String)
+
+/**
+ * A reply, and the command it is the reply to — matched by containment, so a test says `"ls-remote"`
+ * rather than spelling a whole command line it is not asserting about.
+ */
+data Canned(whenCommandContains: String, cannedReply: Reply)
+
+data World(existingDirectories: List[String], journal: List[String], replies: List[Canned])
+
+/**
+ * A world in, a value or a raised error out, and the world after.
+ */
+data Fake[A](runFake: Function[World, Pair[Either[String, A], World]])
+
+implement Effect[Fake] {
+   def pure[A](a: A): Fake[A] = Fake(w -> Pair(Right(a), w))
+
+   def flatMap[A, B](f: Function[A, Fake[B]], fa: Fake[A]): Fake[B] =
+      Fake(w -> foldPair(
+         outcome -> after -> foldEither(err -> Pair(Left(err), after), a -> runFake(f(a))(after), outcome),
+         runFake(fa)(w)
+      ))
+
+   def map[A, B](f: Function[A, B], fa: Fake[A]): Fake[B] =
+      Fake(w -> foldPair(
+         outcome -> after -> Pair(foldEither(err -> Left(err), a -> Right(f(a)), outcome), after),
+         runFake(fa)(w)
+      ))
+}
+
+/**
+ * Spawning: nothing runs, the command and the directory it would have run in are journalled, and the
+ * canned reply is what it "wrote". Recording the working directory is the point — it is the half of a
+ * git invocation a command line does not carry, and the half that has actually been wrong.
+ */
+implement Process[Fake] {
+   def run(command: List[String], workingDirectory: Path): Fake[ProcessResult] =
+      Fake(w -> Pair(Right(replied(command, w)), noted(spawnNote(command, workingDirectory), w)))
+
+   def runInheritingIo(command: List[String], workingDirectory: Path): Fake[Int] =
+      Fake(w -> Pair(Right(replied(command, w).exitCode), noted(spawnNote(command, workingDirectory), w)))
+}
+
+/**
+ * The filesystem: directories a test seeded exist, creating one makes it exist and says so, and every
+ * read nobody has needed yet answers empty. The unused ones are here because an ability is
+ * all-or-nothing, not because they mean anything.
+ */
+implement FileSystem[Fake] {
+   def readFile(path: Path): Fake[String] = constantly("")
+   def writeFile(content: String, path: Path): Fake[Unit] = noting("write " ++ show(path))
+   def appendFile(content: String, path: Path): Fake[Unit] = noting("append " ++ show(path))
+   def foldLines[B](initial: B, step: B => String => B, path: Path): Fake[B] = constantly(initial)
+   def foldCodePoints[B](initial: B, step: B => Int => B, path: Path): Fake[B] = constantly(initial)
+   def readLines(path: Path): Fake[List[String]] = constantly(empty)
+   def exists(path: Path): Fake[Bool] = present(path)
+   def isDirectory(path: Path): Fake[Bool] = present(path)
+   def listDirectory(path: Path): Fake[List[Path]] = constantly(empty)
+   def walk(path: Path): Fake[List[Path]] = constantly(empty)
+   def createDirectories(path: Path): Fake[Unit] = Fake(w -> Pair(Right(unit), created(show(path), w)))
+   def delete(path: Path): Fake[Unit] = noting("delete " ++ show(path))
+}
+
+implement Throw[GitError, Fake] {
+   def raise[A](err: GitError): Fake[A] = Fake(w -> Pair(Left(show(err)), w))
+}
+
+implement Throw[IoError, Fake] {
+   def raise[A](err: IoError): Fake[A] = Fake(w -> Pair(Left(show(err)), w))
+}
+
+/**
+ * A world where nothing exists, nothing has happened, and every command succeeds saying nothing.
+ */
+def emptyWorld: World = World(empty, empty, empty)
+
+/**
+ * `world` with a directory that already exists — a mirror this build has seen before.
+ */
+def withDirectory(directory: String, world: World): World =
+   World(append(world.existingDirectories, directory), world.journal, world.replies)
+
+/**
+ * `world` in which any command line containing `commandFragment` answers `output` and exits zero.
+ */
+def answering(commandFragment: String, output: String, world: World): World =
+   World(
+      world.existingDirectories,
+      world.journal,
+      append(world.replies, Canned(commandFragment, Reply(0, output, "")))
+   )
+
+/**
+ * `world` in which any command line containing `commandFragment` fails, saying `diagnostics`.
+ */
+def failing(commandFragment: String, exitCode: Int, diagnostics: String, world: World): World =
+   World(
+      world.existingDirectories,
+      world.journal,
+      append(world.replies, Canned(commandFragment, Reply(exitCode, "", diagnostics)))
+   )
+
+/**
+ * Everything `computation` did against `world`, one entry per act, in order — a spawn as
+ * `<directory>$ <command line>`, a directory creation as `mkdir <path>`.
+ */
+def journalOf[A](world: World, computation: Fake[A]): String =
+   second(runFake(computation)(world)).journal.joined("; ")
+
+/**
+ * What `computation` answered against `world`, rendered by `rendering` — or the error it raised,
+ * rendered by that error's own `Show`. One helper for both outcomes, so a test asserts a failure the
+ * same way it asserts a success.
+ */
+def outcomeOf[A](world: World, rendering: A => String, computation: Fake[A]): String =
+   foldEither(err -> "raised: " ++ err, a -> rendering(a), first(runFake(computation)(world)))
+
+/**
+ * The tags of an answer, rendered `<tag> <commit>` apiece — both halves, so a test says which commit a
+ * version resolved to rather than merely that it appeared.
+ */
+def renderedTags(tags: List[TagRef]): String =
+   tags.map(ref -> show(ref.taggedVersion) ++ " " ++ ref.taggedCommit).joined(", ")
+
+/**
+ * An optional answer, rendered — absence being an outcome several operations deliberately have.
+ */
+def renderedText(text: Option[String]): String = foldOption("<none>", found -> found, text)
+
+private def spawnNote(command: List[String], workingDirectory: Path): String =
+   show(workingDirectory) ++ "$ " ++ command.joined(" ")
+
+private def replied(command: List[String], world: World): ProcessResult =
+   foldOption(
+      ProcessResult(0, "", ""),
+      canned -> ProcessResult(
+         canned.cannedReply.replyExitCode,
+         canned.cannedReply.replyOutput,
+         canned.cannedReply.replyError
+      ),
+      world.replies.find(canned -> contains(canned.whenCommandContains, command.joined(" ")))
+   )
+
+private def noted(note: String, world: World): World =
+   World(world.existingDirectories, append(world.journal, note), world.replies)
+
+private def created(directory: String, world: World): World =
+   World(
+      append(world.existingDirectories, directory),
+      append(world.journal, "mkdir " ++ directory),
+      world.replies
+   )
+
+private def noting(note: String): Fake[Unit] = Fake(w -> Pair(Right(unit), noted(note, w)))
+
+private def present(path: Path): Fake[Bool] =
+   Fake(w -> Pair(Right(w.existingDirectories.any(directory -> directory == show(path))), w))
+
+private def constantly[A](value: A): Fake[A] = Fake(w -> Pair(Right(value), w))

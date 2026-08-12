@@ -3,9 +3,11 @@
 Status: **DESIGN**, being built. Records the design discussion of 2026-07-21. Fixes the model, the
 semantics, the descriptor contents, and the descriptor syntax (`eliot.pkg`). Amended 2026-08-02:
 identity is decided by the URL *or* by a shared lineage anchor (see below). Amended 2026-08-06: the
-`replace` clause is cut, and the implementation's own lessons are recorded (both below).
+`replace` clause is cut, and the implementation's own lessons are recorded (both below). Amended
+2026-08-12: the modules that touch the outside carry their own logic and are tested
+(`docs/effectful-modules.md`), which retires one lesson below and rewrites another.
 
-**Where the implementation stands** (2026-08-06, 124 tests):
+**Where the implementation stands** (2026-08-12, 141 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -13,15 +15,16 @@ identity is decided by the URL *or* by a shared lineage anchor (see below). Amen
 | `Descriptor` | the typed `eliot.pkg` model, interpret and render | done |
 | `Version` | tag parsing, numeric ordering, compatibility lines | done |
 | `PackageId` | canonical URL identity, `//module` selector | done |
-| `Resolution` | MVS per configuration, identity by URL then lineage | done, source handed in |
-| `Git` | git command construction and `ls-remote` parsing | done |
+| `Resolution` | MVS per configuration, identity by URL then lineage | done, source is an effect |
+| `Git` | the git operations, and the reading of what git says back | done |
 | `Cache` | bare mirrors per package; tags, anchors, descriptors out of them | done |
-| — | the adapter binding `Cache` to `Resolution`'s two callbacks | next |
+| `PackageSource` | the resolver's two questions, and the git-backed answer to them | done |
 | — | lockfile, source assembly, verb dispatch, wrapper, launcher `main` | not started |
 
-Nothing fetches on behalf of a build yet: `Resolution` still takes its source as callbacks, and the
-only caller wiring them to `Cache` is a probe. The compat-check verb, the plugin-jar closure and the
-project-model query are unstarted.
+Resolution now runs against real repositories: `PackageSource` binds it to the cache, and every
+module including that binding is exercised at the real carrier by `probe/`. What is still missing is a
+tool — nothing yet fetches on behalf of a *build*, because there is no verb to invoke and no lockfile
+to record. The compat-check verb, the plugin-jar closure and the project-model query are unstarted.
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -558,26 +561,39 @@ Consequences worth stating:
 Things the implementation taught that the design did not know, kept here because each one shapes
 what is left to write rather than only what is written.
 
-- **The pure/effectful boundary is imposed, not chosen.** A test case body is pinned to
-  `{Throw[AssertionError] | Id}` and may only assert, so *nothing effectful is reachable from the
-  test suite* — not "hard to test", unreachable. Every module that touches the outside therefore
-  splits in two: all the decisions on the pure side where tests can reach them, and a shell next
-  door thin enough to trust unexamined. `Git` (parsing, command construction) versus `Cache`
-  (spawning) is that split, and the lockfile, the assembler and verb dispatch each owe the same one.
-  This is the single most load-bearing constraint on the rest of the build.
-- **A module is only checked if `main` reaches it.** Checking is whole-program from `main`, and
-  ability resolution happens at monomorphization — so an effectful module nothing calls compiles
-  green while its `Process`/`FileSystem` instances are never resolved at all. `Cache` was in that
-  state and looked finished. Until the launcher has its own `main`, a `probe/` source root carries
-  one; when the launcher exists, that *is* the verification mechanism, and it should reach every
-  module deliberately.
-- **Effects cross a module boundary as callbacks, not as an ability.** An ability method that
-  declares a row *is* an effect, and an effect with no carrier and no handler can never be
-  discharged, so the row propagates outward until it hits a signature that cannot carry it. "A
-  swappable package source" is therefore a callback with a row in the arrow codomain
-  (`PackageId => Version => {Effect} Option[Descriptor]`), which is why `Resolution` reads as it
-  does. Worth revisiting when there is a carrier to discharge such an ability with; nothing in the
-  algorithm would change.
+- **The pure/effectful boundary is chosen, and the test brings the carrier.** This entry used to read
+  the opposite way, and the correction is worth keeping whole because the wrong version shaped four
+  modules. A test case body is pinned to `{Throw[AssertionError] | Id}` and may only assert, from
+  which it seemed to follow that nothing effectful is reachable from a suite, so every module
+  touching the outside had to split into decisions on the pure side and an untested shell next door.
+  The premise is still true; the conclusion never followed. Production code that declares an effect
+  row *names no carrier*, so a test can declare its own — an ordinary `data` with an `Effect`
+  instance and one instance per effect in the row — and instantiate the production code at it. Two
+  compiler fixes were what made that reach the standard effects (`docs/testing-effects.md`), and
+  since them a `{Process, FileSystem}` module is testable as it is. So `Git` performs git,
+  `Cache` decides caching, and the split the lockfile and the assembler were going to inherit is
+  cancelled. The one shape it costs: a run must sit outside the pinned body, so a test is
+  run-then-assert rather than a script. See `docs/effectful-modules.md`.
+- **A module is only checked if `main` reaches it, and a fake carrier does not count.** Checking is
+  whole-program from `main`, and ability resolution happens at monomorphization — so an effectful
+  module nothing calls compiles green while its `Process`/`FileSystem` instances are never resolved
+  at all. `Cache` was in that state and looked finished. The subtler version of the same fact
+  survives the entry above: running production code on a test's carrier resolves `Process[Fake]`,
+  never `Process[IO]`, so a green suite is evidence about the logic and no evidence that the logic has
+  an interpretation on the platform. Until the launcher has its own `main`, a `probe/` source root
+  carries one and must reach every effectful module deliberately; when the launcher exists, that *is*
+  the verification mechanism.
+- **An effect crosses a module boundary as an ability once something can interpret it.** This also
+  used to read the other way — a swappable package source had to be a callback with a row in the
+  arrow codomain (`PackageId => Version => {Effect} Option[Descriptor]`), because an ability method
+  that declares a row *is* an effect and an effect with no carrier and no handler can never be
+  discharged. What was missing was the handler, and a test carrier is one: `PackageSource` is now an
+  ability, `Resolution` names no source at all, and 22 parameter declarations of plumbing are gone
+  from eleven functions. Nothing in the algorithm changed, exactly as predicted. Two rules came with
+  it: the production instance must be a constrained catch-all in the ability's own module (the orphan
+  rule allows nowhere else for an instance over an arbitrary carrier), and a test carrier must
+  therefore implement the *minimum* — a fake that also satisfies those constraints makes the query
+  ambiguous.
 - **Failure wants more than one channel.** `IoError` (git could not be run) and `GitError` (git ran
   and said no) are different reports to a user and are kept apart, which costs a type-annotated
   `catch` per channel since two `Throw`s in one row cannot be told apart by inference. The launcher

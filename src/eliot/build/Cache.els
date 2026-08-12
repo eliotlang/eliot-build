@@ -7,8 +7,7 @@ import eliot.build.Version
 import eliot.build.Git
 
 /**
- * The local mirror of every package a build has looked at, and the two questions resolution asks of
- * one.
+ * The local mirror of every package a build has looked at, and the questions resolution asks of one.
  *
  * A package is a git repository, so the cache is git repositories — bare mirrors under a directory
  * named after the canonical URL. Everything else follows from that: discovering what a package
@@ -20,27 +19,12 @@ import eliot.build.Git
  * version" is kept, because MVS's answer depends on the whole closure rather than on any one package,
  * and a stale memo of a wrong shape is worse than a second `ls-remote` against a local directory.
  *
- * The effects are `{Process, FileSystem}` plus two failure channels, and both are honest: `IoError`
- * is the standard library's, raised when a program cannot be started or a directory cannot be made,
- * and `GitError` is this module's, raised when `git` ran fine and *said no*. Keeping them apart is
- * what lets a caller report "git is not installed" differently from "that repository does not exist".
+ * This module owns *cache policy* — where a mirror lives, whether it has to be made, which directory
+ * a command must stand in — and `eliot.build.Git` owns git. The row is `{Process, FileSystem}` plus
+ * both failure channels: `IoError` when a program cannot be started or a directory cannot be made,
+ * `GitError` when git ran and said no. Keeping them apart is what lets a caller report "git is not
+ * installed" differently from "that repository does not exist".
  */
-
-/**
- * A git command that ran and failed — as distinct from a git that could not be run at all, which is
- * the standard library's `IoError`.
- *
- * The command is carried whole rather than summarised. A build tool that shells out is a build tool
- * whose errors are somebody else's, and the only useful thing to say about one is exactly what was
- * run and exactly what it said back, so the user can run it themselves.
- */
-data GitError(failedCommand: String, failedExitCode: Int, failedDiagnostics: String)
-
-implement Show[GitError] {
-   def show(value: GitError): String =
-      "'" ++ value.failedCommand ++ "' failed with exit code " ++ show(value.failedExitCode) ++
-         ": " ++ value.failedDiagnostics
-}
 
 /**
  * Where the mirror of `id` lives under `root`: one directory per canonical URL segment, so
@@ -69,9 +53,8 @@ def cacheDirectory(root: Path, id: PackageId): Path =
  */
 def publishedTags(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} List[TagRef] = {
    val mirror = ensuredMirror(root, id)
-   val listed = checked(lsRemoteTagsCommand(show(mirror)), here)
 
-   parseTagRefs(listed)
+   lsRemoteTags(show(mirror), here)
 }
 
 /**
@@ -90,14 +73,12 @@ def anchorOf(root: Path, majorLine: Int, id: PackageId): {Process, FileSystem, T
  * Absence is an ordinary answer here rather than a failure, and both ways of being absent give it: a
  * version nobody tagged and a tag carrying no `eliot.pkg` are equally "there is no descriptor to
  * read", and a resolver that reached either has a dependency line to blame that this module cannot
- * see. `git show` reports both by exiting non-zero, which is why this is the one place a non-zero
- * exit is read rather than raised.
+ * see. `showFile` reports both the same way, by answering nothing.
  */
 def descriptorTextAt(root: Path, version: Version, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] = {
    val mirror = ensuredMirror(root, id)
-   val shown = run(showFileCommand(show(version), descriptorFileName), mirror)
 
-   outputWhenFound(shown)
+   showFile(show(version), descriptorFileName, mirror)
 }
 
 /**
@@ -112,7 +93,7 @@ def descriptorTextAt(root: Path, version: Version, id: PackageId): {Process, Fil
 def refreshed(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
    val mirror = ensuredMirror(root, id)
 
-   checked(fetchTagsCommand, mirror)
+   fetchTags(mirror)
    mirror
 }
 
@@ -145,56 +126,22 @@ private def ensuredMirror(root: Path, id: PackageId): {Process, FileSystem, Thro
 private def missingMirror(present: Bool, mirror: Path): Option[Path] = fold(present, None, Some(mirror))
 
 /**
- * The clone runs *where this program runs*, not in the cache root, because the target it is handed is
- * a path in this program's own terms: `root` may be relative — `target/cache` is the obvious thing for
- * a caller to pass — and a clone launched from inside `root` would resolve that same relative path a
- * second time, burying the mirror at `target/cache/target/cache/…`. An absolute root is indifferent to
- * the working directory, so one rule serves both.
- *
  * Only the root is created up front. Git makes the leading directories of a clone target itself, so
  * the per-package chain needs no help; the root is made anyway to state that the cache is a directory
  * this tool owns rather than one that appears as a side effect of the first fetch.
  */
 private def cloned(root: Path, mirror: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
    createDirectories(root)
-   checked(mirrorCloneCommand(transportUrl(repository(id).url), show(mirror)), here)
+   mirrorClone(transportUrl(repository(id).url), show(mirror), here)
    mirror
 }
 
 /**
  * The directory this program was started in — the frame every relative path it is given is expressed
- * in.
- *
- * Which working directory a git command wants is decided by the command, the way git itself decides
- * it: one that *names* a repository by path (`clone`, `ls-remote`) is given that path in this
- * program's frame and so must run here, while one that operates on the repository it is standing in
- * (`fetch`, `show`) runs in the mirror and names nothing. Getting this backwards is silent — git
- * resolves the relative path against the wrong directory and reports a missing repository — so the
- * rule is worth stating rather than inferring per call.
+ * in, and therefore the directory every command that *names* a cache path must run in. `root` may be
+ * relative (`target/cache` is the obvious thing for a caller to pass), and a command launched from
+ * inside `root` would resolve that same relative path a second time, burying the mirror at
+ * `target/cache/target/cache/…`. An absolute root is indifferent to the working directory, so one
+ * rule serves both.
  */
 private def here: Path = path(".")
-
-/**
- * Run `arguments` and answer what it wrote, raising when it exited non-zero.
- *
- * The standard library is right that a non-zero exit is data rather than a failure — it is how a
- * program reports a decision — but the decisions reported here are all the same one: git was asked
- * about a repository and could not answer. The single caller that genuinely wants to *read* a refusal
- * is `descriptorTextAt`, and it calls `run` itself.
- */
-private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[GitError]} String = {
-   val result = run(arguments, workingDirectory)
-   val failure = failureOf(arguments, result)
-
-   foldOption(result.standardOutput, error -> raise(error), failure)
-}
-
-private def failureOf(arguments: List[String], result: ProcessResult): Option[GitError] =
-   fold(
-      result.exitCode == 0,
-      None,
-      Some(GitError(arguments.joined(" "), result.exitCode, result.standardError))
-   )
-
-private def outputWhenFound(result: ProcessResult): Option[String] =
-   fold(result.exitCode == 0, Some(result.standardOutput), None)
