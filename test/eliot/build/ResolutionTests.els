@@ -4,8 +4,8 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.PackageId
 import eliot.build.Version
-import eliot.build.Descriptor
 import eliot.build.Resolution
+import eliot.build.TablePackages
 
 def testCases: Test = {
    "resolveTests" should "select the version the only requirement declared" in {
@@ -154,12 +154,12 @@ def testCases: Test = {
 
 /**
  * A package universe held as data: what each repository publishes at each version, as descriptor
- * text, and what each compatibility line's anchor tag names. The lookups are written where they are
- * passed, because a function carrying an effect row is a callback rather than a value — spelled at
- * the call site, never built and handed around.
+ * text, and what each compatibility line's anchor tag names.
  *
- * That the resolver runs unchanged against these two lambdas and against a git-backed source is the
- * point of taking the lookups as arguments rather than reaching for a remote itself.
+ * The resolver never sees these tables. It declares `{PackageSource}` and names no carrier, so what
+ * answers its two questions is decided by what it is run on — here `eliot.build.TablePackages`, which
+ * reads them out of a `Universe`, and in the launcher a git-backed cache. That the same code runs on
+ * both, unchanged and unaware, is the whole point of the source being an effect.
  */
 private def resolved(rootText: String, universe: List[Pair[String, String]]): String =
    resolvedWithAnchors(rootText, universe, empty)
@@ -169,45 +169,12 @@ private def resolvedWithAnchors(
    universe: List[Pair[String, String]],
    lineages: List[Pair[String, String]]
 ): String =
-   reported(
-      runId(
-         runThrow[ResolutionError](
-            resolveTests(
-               repositoryId -> version -> publicationIn(universe, repositoryId, version),
-               repositoryId -> major -> anchorIn(lineages, repositoryId, major),
-               descriptorOf(rootText)
-            )
-         )
-      )
-   )
+   reported(against(universeOf(universe, lineages), resolveTests(descriptorOf(rootText))))
 
 private def resolvedFor(configurationName: String, rootText: String, universe: List[Pair[String, String]]): String =
    reported(
-      runId(
-         runThrow[ResolutionError](
-            resolveArtifact(
-               configurationName,
-               repositoryId -> version -> publicationIn(universe, repositoryId, version),
-               repositoryId -> major -> anchorIn(empty, repositoryId, major),
-               descriptorOf(rootText)
-            )
-         )
-      )
+      against(universeOf(universe, empty), resolveArtifact(configurationName, descriptorOf(rootText)))
    )
-
-private def publicationIn(
-   universe: List[Pair[String, String]],
-   repositoryId: PackageId,
-   version: Version
-): Option[Descriptor] =
-   foldOption(
-      None,
-      text -> Some(descriptorOf(text)),
-      lookupOption(show(repositoryId) ++ "@" ++ show(version), universe)
-   )
-
-private def anchorIn(lineages: List[Pair[String, String]], repositoryId: PackageId, major: Int): Option[String] =
-   lookupOption(show(repositoryId) ++ "@v" ++ show(major), lineages)
 
 /**
  * The version `url` was selected at in the test configuration of `rootText`, so the reading side of a
@@ -217,15 +184,7 @@ private def versionSelected(url: String, rootText: String, universe: List[Pair[S
    foldEither(
       error -> show(error),
       resolution -> renderedVersion(selectedVersionOf(packageId(url), resolution)),
-      runId(
-         runThrow[ResolutionError](
-            resolveTests(
-               repositoryId -> version -> publicationIn(universe, repositoryId, version),
-               repositoryId -> major -> anchorIn(empty, repositoryId, major),
-               descriptorOf(rootText)
-            )
-         )
-      )
+      against(universeOf(universe, empty), resolveTests(descriptorOf(rootText)))
    )
 
 private def renderedVersion(version: Option[Version]): String =
@@ -236,13 +195,6 @@ private def renderedVersion(version: Option[Version]): String =
  */
 private def reported(outcome: Either[ResolutionError, Resolution]): String =
    foldEither(error -> show(error), resolution -> resolution.selections.joined(", "), outcome)
-
-private def descriptorOf(text: String): Descriptor =
-   foldEither(
-      _ -> emptyDescriptor,
-      descriptor -> descriptor,
-      runId(runThrow[DescriptorError](parseDescriptor(split("\n", text))))
-   )
 
 private def publishing(key: String, text: String): List[Pair[String, String]] = published(key, text, empty)
 

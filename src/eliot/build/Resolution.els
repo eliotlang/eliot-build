@@ -1,8 +1,8 @@
 import eliot.collection.List
-import eliot.carrier.Effect
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
+import eliot.build.PackageSource
 
 /**
  * Minimal version selection: the closure of what a build configuration depends on, and the version
@@ -22,18 +22,12 @@ import eliot.build.Descriptor
  * `//jvm v1.4` into one repository are two minimums on one package, not two packages; the selector
  * decides what gets mounted afterwards, which is the assembly step's business rather than this one's.
  *
- * **The source is handed in, not reached for.** Resolution asks a remote exactly two questions —
- * *what does this package require at this version*, and *is this URL a package I already have* — and
- * both arrive as callbacks carrying an open `{Effect}` row, so their effects ride the caller's
- * carrier. That is what lets one resolver run against git in the launcher and against a table of
- * strings under test. Notably absent is version listing: MVS never enumerates what a package offers,
- * so discovering that a newer release exists belongs to `eliot get` rather than here.
- *
- * An `ability` would read better and was tried first. It does not work yet: an ability method that
- * declares a row *is* an effect, and an effect with no carrier and no handler can never be
- * discharged, so the row propagates outwards until it reaches a signature that cannot carry it —
- * under test, the pinned `{Throw[AssertionError] | Id}` of a test case body. Worth revisiting once
- * there is a carrier to discharge it with; nothing in the algorithm below would change.
+ * **The source is an effect, not an argument.** Everything here runs on `{PackageSource}` — the two
+ * questions the algorithm asks the world, declared as an ability in `eliot.build.PackageSource` and
+ * answered by whichever carrier the caller runs it on: the git-backed cache in the launcher, a table
+ * of descriptors under test. Nothing in this module knows which, and no function takes a source.
+ * Notably absent from the algebra is version listing: MVS never enumerates what a package offers, so
+ * discovering that a newer release exists belongs to `eliot get` rather than here.
  */
 data Selection(selectedPackage: PackageId, selectedVersion: Version, lineageAnchor: Option[String])
 
@@ -84,20 +78,18 @@ implement Compare[Selection] {
  * that artifact's own — the platform layers among them — closed over the graph.
  *
  * ```eliot
- * val resolution = resolveArtifact("controller-jvm", descriptorAt, anchorAt, descriptor)
+ * val resolution = resolveArtifact("controller-jvm", descriptor)
  * ```
  */
 def resolveArtifact(
    configurationName: String,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String],
    descriptor: Descriptor
-): {Effect, Throw[ResolutionError]} Resolution = {
+): {PackageSource, Throw[ResolutionError]} Resolution = {
    val artifact = artifactNamed(configurationName, descriptor)
 
    foldOption(
       raise(NoSuchConfiguration(configurationName)),
-      found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies, descriptorAt, anchorAt),
+      found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies),
       artifact
    )
 }
@@ -107,12 +99,8 @@ def resolveArtifact(
  * and a platform layer the build host can run). Test is a configuration like any other — it just
  * needs no `artifact` clause to name it.
  */
-def resolveTests(
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String],
-   descriptor: Descriptor
-): {Effect, Throw[ResolutionError]} Resolution =
-   resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies, descriptorAt, anchorAt)
+def resolveTests(descriptor: Descriptor): {PackageSource, Throw[ResolutionError]} Resolution =
+   resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies)
 
 /**
  * The version `resolution` selected for `repositoryId`, absent when the closure never reached it.
@@ -149,14 +137,10 @@ data ResolutionState(selected: List[Selection], pending: List[Selection])
  */
 data Identified(matched: Option[Selection], anchorFound: Option[String])
 
-private def resolveRequirements(
-   requirements: List[Dependency],
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} Resolution = {
-   val seeded = withRequirements(requirements, emptyState, descriptorAt, anchorAt)
+private def resolveRequirements(requirements: List[Dependency]): {PackageSource, Throw[ResolutionError]} Resolution = {
+   val seeded = withRequirements(requirements, emptyState)
 
-   completed(rounds.foldLeft(seeded, _ -> state -> expanded(state, descriptorAt, anchorAt)))
+   completed(rounds.foldLeft(seeded, _ -> state -> expanded(state)))
 }
 
 private def emptyState: ResolutionState = ResolutionState(empty, empty)
@@ -165,27 +149,21 @@ private def emptyState: ResolutionState = ResolutionState(empty, empty)
  * One round: every pending selection's own requirements folded in, and the frontier replaced by
  * whatever those requirements newly selected or raised.
  */
-private def expanded(
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState = {
+private def expanded(state: ResolutionState): {PackageSource, Throw[ResolutionError]} ResolutionState = {
    val ready = ResolutionState(state.selected, empty)
 
-   state.pending.foldLeft(ready, selection -> acc -> withDependenciesOf(selection, acc, descriptorAt, anchorAt))
+   state.pending.foldLeft(ready, selection -> acc -> withDependenciesOf(selection, acc))
 }
 
 private def withDependenciesOf(
    selection: Selection,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState = {
-   val published = descriptorAt(selection.selectedPackage)(selection.selectedVersion)
+   state: ResolutionState
+): {PackageSource, Throw[ResolutionError]} ResolutionState = {
+   val published = descriptorAt(selection.selectedVersion, selection.selectedPackage)
 
    foldOption(
       raise(Unavailable(selection.selectedPackage, selection.selectedVersion)),
-      descriptor -> withRequirements(mountedDependencies(descriptor), state, descriptorAt, anchorAt),
+      descriptor -> withRequirements(mountedDependencies(descriptor), state),
       published
    )
 }
@@ -202,11 +180,9 @@ private def mountedDependencies(descriptor: Descriptor): List[Dependency] =
 
 private def withRequirements(
    requirements: List[Dependency],
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState =
-   requirements.foldLeft(state, dependency -> acc -> withRequirement(dependency, acc, descriptorAt, anchorAt))
+   state: ResolutionState
+): {PackageSource, Throw[ResolutionError]} ResolutionState =
+   requirements.foldLeft(state, dependency -> acc -> withRequirement(dependency, acc))
 
 /**
  * A sibling (`dep //stdlib`) selects nothing: it names a module of the repository that declared it,
@@ -215,35 +191,29 @@ private def withRequirements(
  */
 private def withRequirement(
    dependency: Dependency,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState =
-   foldOption(state, foreign -> withForeign(foreign, state, descriptorAt, anchorAt), foreignOf(dependency))
+   state: ResolutionState
+): {PackageSource, Throw[ResolutionError]} ResolutionState =
+   foldOption(state, foreign -> withForeign(foreign, state), foreignOf(dependency))
 
 private def foreignOf(dependency: Dependency): Option[Dependency] =
    fold(isSibling(dependency.reference), None, Some(dependency))
 
 private def withForeign(
    dependency: Dependency,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState =
+   state: ResolutionState
+): {PackageSource, Throw[ResolutionError]} ResolutionState =
    foldOption(
       raise(NoMinimum(dependency.reference)),
-      minimum -> withMinimum(repository(dependency.reference), minimum, state, descriptorAt, anchorAt),
+      minimum -> withMinimum(repository(dependency.reference), minimum, state),
       dependency.minimumVersion
    )
 
 private def withMinimum(
    target: PackageId,
    minimum: Version,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect, Throw[ResolutionError]} ResolutionState = {
-   val identity = identified(target, minimum, state, descriptorAt, anchorAt)
+   state: ResolutionState
+): {PackageSource, Throw[ResolutionError]} ResolutionState = {
+   val identity = identified(target, minimum, state)
 
    foldOption(
       inserted(Selection(target, minimum, identity.anchorFound), state),
@@ -256,26 +226,14 @@ private def withMinimum(
  * Identity, URL first: the canonical URL settles the common case with no source call at all, and only
  * a requirement naming an unfamiliar URL is worth a lineage lookup.
  */
-private def identified(
-   target: PackageId,
-   minimum: Version,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect} Identified = {
+private def identified(target: PackageId, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
    val byUrl = state.selected.find(selection -> selection.selectedPackage == target)
 
-   foldOption(byLineage(target, minimum, state, descriptorAt, anchorAt), known -> Identified(Some(known), known.lineageAnchor), byUrl)
+   foldOption(byLineage(target, minimum, state), known -> Identified(Some(known), known.lineageAnchor), byUrl)
 }
 
-private def byLineage(
-   target: PackageId,
-   minimum: Version,
-   state: ResolutionState,
-   descriptorAt: PackageId => Version => {Effect} Option[Descriptor],
-   anchorAt: PackageId => Int => {Effect} Option[String]
-): {Effect} Identified = {
-   val anchor = anchorAt(target)(minimum.major)
+private def byLineage(target: PackageId, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
+   val anchor = anchorAt(minimum.major, target)
 
    Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
 }

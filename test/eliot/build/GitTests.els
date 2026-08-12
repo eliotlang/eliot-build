@@ -1,9 +1,11 @@
 import eliot.lang.Id
 import eliot.collection.List
+import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.Version
 import eliot.build.Git
+import eliot.build.FakeWorld
 
 def testCases: Test = {
    "parseTagRefs" should "read a lightweight tag, which is listed once" in {
@@ -56,42 +58,99 @@ def testCases: Test = {
       anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
    }
    "TagRef" should "order by version, so the newest release sorts last" in {
-      foldOption(
-         "<none>",
-         newest -> rendered(newest),
-         parseTagRefs("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2").sorted.last
-      ) shouldBe "v1.10 aaa1"
+      newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
-   "lsRemoteTagsCommand" should "ask a remote what it publishes without fetching it" in {
-      lsRemoteTagsCommand("github.com/x/foo").joined(" ") shouldBe "git ls-remote --tags github.com/x/foo"
+   "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in {
+      listingJournal shouldBe "/work$ git ls-remote --tags github.com/x/foo"
    }
-   "mirrorCloneCommand" should "clone without a working tree" in {
-      mirrorCloneCommand("https://github.com/x/foo", "/cache/github.com/x/foo").joined(" ")
-         shouldBe "git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+   "lsRemoteTags" should "read the versions the remote announced" in {
+      listingRead shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
-   "fetchTagsCommand" should "prune, so a withdrawn tag stops being selectable" in {
-      fetchTagsCommand.joined(" ") shouldBe "git fetch --tags --prune"
+   "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in {
+      refusedListing shouldBe expectedRefusal
    }
-   "showFileCommand" should "read one file out of the object database" in {
-      showFileCommand("v1.2", "eliot.pkg").joined(" ") shouldBe "git show v1.2:eliot.pkg"
+   "mirrorClone" should "clone without a working tree, standing where the caller stands" in {
+      cloneJournal shouldBe "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+   }
+   "fetchTags" should "prune, so a withdrawn tag stops being selectable" in {
+      fetchJournal shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
+   }
+   "fetchTags" should "run in the repository it stands in, naming nothing" in {
+      fetchRefusal shouldBe "raised: 'git fetch --tags --prune' failed with exit code 128: not a repository"
+   }
+   "showFile" should "read one file out of the object database, in the mirror" in {
+      showJournal shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
+   }
+   "showFile" should "answer what that revision holds" in {
+      showRead shouldBe "dep github.com/x/bar v1.1"
+   }
+   "showFile" should "answer absent, not raise, where the revision holds no such file" in {
+      showMissing shouldBe "<none>"
    }
    "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in {
       transportUrl("github.com/x/foo") shouldBe "https://github.com/x/foo"
    }
 }
 
+private def here: Path = path("/work")
+
+private def mirror: Path = path("/cache/github.com/x/foo")
+
+private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
+
+private def expectedRefusal: String =
+   "raised: 'git ls-remote --tags github.com/x/foo' failed with exit code 128: no such repository"
+
+private def listingJournal: String =
+   journalOf(emptyWorld.answering("ls-remote", listing), lsRemoteTags("github.com/x/foo", here))
+
+private def listingRead: String =
+   outcomeOf(emptyWorld.answering("ls-remote", listing), renderedTags, lsRemoteTags("github.com/x/foo", here))
+
+private def refusedListing: String =
+   outcomeOf(
+      emptyWorld.failing("ls-remote", 128, "no such repository"),
+      renderedTags,
+      lsRemoteTags("github.com/x/foo", here)
+   )
+
+private def cloneJournal: String =
+   journalOf(emptyWorld, mirrorClone("https://github.com/x/foo", "/cache/github.com/x/foo", here))
+
+private def fetchJournal: String = journalOf(emptyWorld, fetchTags(mirror))
+
+private def fetchRefusal: String =
+   outcomeOf(emptyWorld.failing("fetch", 128, "not a repository"), _ -> "", fetchTags(mirror))
+
+private def showJournal: String = journalOf(emptyWorld, showFile("v1.2", "eliot.pkg", mirror))
+
+private def showRead: String =
+   outcomeOf(
+      emptyWorld.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
+      renderedText,
+      showFile("v1.2", "eliot.pkg", mirror)
+   )
+
+private def showMissing: String =
+   outcomeOf(
+      emptyWorld.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
+      renderedText,
+      showFile("v1.9", "eliot.pkg", mirror)
+   )
+
 /**
  * The tags `output` announces, rendered as `<tag> <commit>` per version — both halves asserted at
  * once, so a test says which commit a version resolved to rather than merely that it appeared.
  */
-private def tags(output: String): String = parseTagRefs(output).map(rendered).joined(", ")
+private def tags(output: String): String = renderedTags(parseTagRefs(output))
 
-private def rendered(ref: TagRef): String = show(ref.taggedVersion) ++ " " ++ ref.taggedCommit
+private def newestOf(output: String): String =
+   foldOption("<none>", newest -> renderedTags(singleton(newest)), parseTagRefs(output).sorted.last)
 
 private def commit(tag: String, output: String): String =
-   foldOption("<none>", found -> found, commitOf(version(tag), parseTagRefs(output)))
+   renderedText(commitOf(version(tag), parseTagRefs(output)))
 
 private def anchor(majorLine: Int, output: String): String =
-   foldOption("<none>", found -> found, anchorCommit(majorLine, parseTagRefs(output)))
+   renderedText(anchorCommit(majorLine, parseTagRefs(output)))
 
 private def version(tag: String): Version = parseVersion(tag) else Version(0, None)
