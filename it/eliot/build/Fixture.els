@@ -1,0 +1,153 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+
+/**
+ * Real git repositories to run the real modules against, built with real git.
+ *
+ * A fake carrier can say what command the cache *would* have run; only a repository on disk can say what git
+ * answers when it runs, and that is the whole reason this project exists. Three things here are outside what
+ * `eliot.build.FakeWorld` can reach by construction: the peeled line an annotated tag really produces, the
+ * directory a clone really lands in, and the non-zero exit `git show` really gives for a revision that is
+ * not there.
+ *
+ * **The fixtures stand in for remotes without a network.** `eliot.build.Git`'s `transportUrl` prepends
+ * `https://` to every dependency URL, so a cold clone always asks git for `https://github.com/x/foo`. Git's
+ * own `url.<base>.insteadOf` rewrites that to a local path, which is why this project is run behind a
+ * `GIT_CONFIG_GLOBAL` naming a config that maps `https://github.com/x/{foo,bar}` onto `target/it/fixtures`.
+ * Nothing in `src/` knows, and the clone path is exercised for real rather than stubbed out.
+ *
+ * Answers a diagnostic rather than raising: an empty string when every command worked, and what failed
+ * otherwise. A fixture that half-built itself would otherwise report as a wrong answer somewhere else
+ * entirely.
+ */
+def builtFixtures: {Process, FileSystem, Throw[IoError]} String = {
+   discarded(itRoot)
+   discarded(cacheRoot)
+   createDirectories(fixtureRoot)
+
+   nonEmpty(publishedBar ++ publishedFoo)
+}
+
+/**
+ * Where the fixture repositories live. Under `target/` because it is scratch: every run discards and rebuilds
+ * them, so a case never inherits a repository an earlier run left in a state it did not intend.
+ */
+def fixtureRoot: Path = itRoot / "fixtures"
+
+/**
+ * The cache the cases exercise — `eliot.build.PackageSource`'s constant, since the resolver's git-backed
+ * source reads that and takes no root of its own.
+ */
+def cacheRoot: Path = path("target/cache")
+
+/**
+ * `bar` publishes two releases and nothing else. Its descriptors are empty, so a closure that reaches it
+ * stops there.
+ */
+private def publishedBar: {Process, FileSystem, Throw[IoError]} List[String] = {
+   val initialised = ran(command("git").withArgument("init").withArgument("--quiet").withArgument("bar"), fixtureRoot)
+   val first = released("bar", "", "v1.1", "first bar")
+   val second = released("bar", "", "v1.2", "second bar")
+
+   prepend(first ++ second, initialised)
+}
+
+/**
+ * `foo` requires a different version of `bar` at each of its own releases, which is what makes reading the
+ * descriptor at the *right* revision observable.
+ *
+ * Its second release is an *annotated* tag, so `git ls-remote` lists it twice — once as the tag object and
+ * once peeled to the commit. Which of the two `parseTagRefs` keeps is the one thing about reading a listing
+ * that a hand-written fixture string can get wrong in exactly the same way the parser does.
+ */
+private def publishedFoo: {Process, FileSystem, Throw[IoError]} List[String] = {
+   val initialised = ran(command("git").withArgument("init").withArgument("--quiet").withArgument("foo"), fixtureRoot)
+   val first = released("foo", "dep github.com/x/bar v1.1", "v1.0", "first foo")
+   val second = annotated("foo", "dep github.com/x/bar v1.2", "v1.2", "second foo")
+
+   prepend(first ++ second, initialised)
+}
+
+private def released(
+   name: String,
+   descriptor: String,
+   tag: String,
+   message: String
+): {Process, FileSystem, Throw[IoError]} List[String] =
+   append(
+      committed(name, descriptor, message),
+      ran(command("git").withArgument("tag").withArgument(tag), fixtureRoot / name)
+   )
+
+private def annotated(
+   name: String,
+   descriptor: String,
+   tag: String,
+   message: String
+): {Process, FileSystem, Throw[IoError]} List[String] =
+   append(
+      committed(name, descriptor, message),
+      ran(
+         identified.withArgument("tag").withArgument("--annotate").withArgument(tag)
+            .withArgument("--message").withArgument(message),
+         fixtureRoot / name
+      )
+   )
+
+/**
+ * A release commit. `--allow-empty` because a release that changes nothing is still a release, and `bar`
+ * publishes two of them carrying the same empty descriptor deliberately — without it git exits non-zero on
+ * the second, having nothing to record.
+ */
+private def committed(
+   name: String,
+   descriptor: String,
+   message: String
+): {Process, FileSystem, Throw[IoError]} List[String] = {
+   writeFile(descriptor, fixtureRoot / name / "eliot.pkg")
+
+   append(
+      singleton(ran(command("git").withArgument("add").withArgument("eliot.pkg"), fixtureRoot / name)),
+      ran(
+         identified.withArgument("commit").withArgument("--quiet").withArgument("--allow-empty")
+            .withArgument("--message").withArgument(message),
+         fixtureRoot / name
+      )
+   )
+}
+
+/**
+ * Git with an identity, needed by every command that writes an object — a commit and, less obviously, an
+ * *annotated* tag. Passed per command rather than configured, so building a fixture works whether or not the
+ * run was wrapped in a `GIT_CONFIG_GLOBAL`; that wrapper's config exists for `insteadOf` alone, and a global
+ * config naming no identity is exactly the state that makes an unqualified `git tag --annotate` fail.
+ */
+private def identified: List[String] =
+   command("git").withArgument("-c").withArgument("user.name=eliot.build")
+      .withArgument("-c").withArgument("user.email=build@eliot.invalid")
+
+private def discarded(directory: Path): {Process, Throw[IoError]} String =
+   ran(command("rm").withArgument("-rf").withArgument(show(directory)), here)
+
+/**
+ * Run a fixture command and say what went wrong, or nothing at all.
+ */
+private def ran(arguments: List[String], workingDirectory: Path): {Process, Throw[IoError]} String = {
+   val result = run(arguments, workingDirectory)
+
+   fold(
+      result.exitCode == 0,
+      "",
+      "fixture command '" ++ arguments.joined(" ") ++ "' failed: " ++ result.standardError
+   )
+}
+
+private def nonEmpty(diagnostics: List[String]): String = diagnostics.filter(said).joined("; ")
+
+private def said(diagnostic: String): Bool = diagnostic != ""
+
+private def itRoot: Path = path("target/it")
+
+private def here: Path = path(".")

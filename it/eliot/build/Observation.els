@@ -1,0 +1,99 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Git
+import eliot.build.Cache
+import eliot.build.Fixture
+
+/**
+ * What the real modules answer when run against the fixture repositories, rendered as strings a case can
+ * compare.
+ *
+ * Separate from the cases for a mundane reason worth writing down: `eliot.test.Assertion` exports `message`
+ * and so does `eliot.file.File` (it is `IoError`'s field), and importing both is an error — so no single
+ * module can both name `IoError` and assert. The split falls where it should anyway, with the effectful
+ * observation on one side and the expectation on the other, and it puts the discharge of the production
+ * failure channels here, next to the calls that raise them: a `GitError` becomes the answer, so a case that
+ * hits one fails by comparison and says exactly what git said.
+ */
+def preparedFixtures: {Process, FileSystem} String =
+   builtFixtures catch ((broken: IoError) -> show(broken))
+
+/**
+ * The first visit to a package this cache has never seen: whether the mirror landed where `cacheDirectory`
+ * said it would, whether anything got buried under a doubly-resolved relative root, and what the repository
+ * publishes.
+ */
+def coldVisit: {Process, FileSystem} String =
+   coldVisitAnswer catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed))
+
+/**
+ * The second visit, which must answer from the mirror that is already there. On a real filesystem this needs
+ * no counting of commands: `git clone` into a directory that already holds a repository fails, so a second
+ * visit that answers at all is one that took the directory as proof.
+ */
+def secondVisit: {Process, FileSystem} String =
+   publishedVersions catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed))
+
+/**
+ * The commit `v1.2` resolves to through the cache — the version being an *annotated* tag, which `ls-remote`
+ * lists twice, once as the tag object and once peeled to the commit it wraps.
+ */
+def cachedCommit: {Process, FileSystem} String =
+   cachedCommitAnswer catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed))
+
+/**
+ * The same commit according to git itself. Comparing the two is what makes the peeled-tag case honest: the
+ * expectation is not a literal somebody wrote down, so it cannot agree with a wrong parser by copying its
+ * mistake.
+ */
+def peeledCommit: {Process, FileSystem} String =
+   revisionCommit("v1.2^{}", fixtureRoot / "foo") catch ((broken: IoError) -> show(broken))
+
+/**
+ * The descriptor `foo` carries at `v1.0`, read out of the object database. `foo` requires a different version
+ * of `bar` at each of its releases, so reading the wrong revision is visible in the answer.
+ */
+def descriptorAtFirstRelease: {Process, FileSystem} String =
+   descriptorText(Version(1, Some(0))) catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed))
+
+/**
+ * What a version nobody tagged answers. Git refuses it with a non-zero exit, and `showFile` reads that
+ * refusal as an ordinary absence rather than raising — the one place in `eliot.build.Git` where a non-zero
+ * exit is data.
+ */
+def descriptorAtMissingRelease: {Process, FileSystem} String =
+   descriptorText(Version(1, Some(9))) catch ((broken: IoError) -> show(broken)) catch ((failed: GitError) -> show(failed))
+
+private def coldVisitAnswer: {Process, FileSystem, Throw[IoError], Throw[GitError]} String = {
+   val published = publishedTags(cacheRoot, fixture("foo"))
+   val landed = isDirectory(cacheDirectory(cacheRoot, fixture("foo")))
+   val buried = isDirectory(cacheRoot / "target")
+
+   "mirror " ++ fold(landed, "present", "absent") ++
+      ", buried " ++ fold(buried, "yes", "no") ++
+      ", tags " ++ renderedVersions(published)
+}
+
+private def publishedVersions: {Process, FileSystem, Throw[IoError], Throw[GitError]} String =
+   renderedVersions(publishedTags(cacheRoot, fixture("foo")))
+
+private def cachedCommitAnswer: {Process, FileSystem, Throw[IoError], Throw[GitError]} String = {
+   val published = publishedTags(cacheRoot, fixture("foo"))
+
+   foldOption("<none>", commit -> commit, commitOf(Version(1, Some(2)), published))
+}
+
+private def descriptorText(version: Version): {Process, FileSystem, Throw[IoError], Throw[GitError]} String =
+   foldOption("<none>", found -> trim(found), descriptorTextAt(cacheRoot, version, fixture("foo")))
+
+private def revisionCommit(revision: String, repository: Path): {Process, Throw[IoError]} String =
+   trim(run(command("git").withArgument("rev-parse").withArgument(revision), repository).standardOutput)
+
+private def renderedVersions(published: List[TagRef]): String =
+   published.map(ref -> show(ref.taggedVersion)).joined(", ")
+
+private def fixture(name: String): PackageId = packageId("github.com/x/" ++ name)

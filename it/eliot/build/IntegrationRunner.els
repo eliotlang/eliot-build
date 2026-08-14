@@ -1,0 +1,34 @@
+import eliot.compiler.Reflect
+import eliot.collection.List
+import eliot.file.File
+import eliot.system.Process
+import eliot.test.Test
+import eliot.test.Report
+import eliot.build.CacheIntegrationTests
+
+/**
+ * One runner over both lists: the pure suites declared as `testCases` anywhere in the program, and the
+ * suites declared as `integrationCases`, which run against real git.
+ *
+ * The two carry different names, and that is what makes one runner possible — the pure `eliot.test.Runner`
+ * gathers only `testCases`, so it cannot accidentally pick up a suite that clones repositories, and this one
+ * takes both without either list having to filter the other.
+ *
+ * The pure list is *discovered* (`namedValues`); the integration list is named here, because reflecting one
+ * needs a nameable suite type and an integration suite's is an open row — `namedValues` over it fails as
+ * "Expected: Type". So each new integration suite is one line in this file until that lifts. Which of them has
+ * anything in it is decided by the source roots the compiler was given: build `src test` and the integration
+ * list is simply empty; add `it` and it is not. There is no flag, and no exclusion list to keep in sync.
+ *
+ * `main`'s row carries only `Suspend`-riding effects on purpose. `IntegrationTest` is pinned to the platform
+ * carrier, so an undischarged `Throw` here would make this program's carrier something else and the gathered
+ * suites would no longer fit it. Everything that can fail is discharged inside a case, which is where a
+ * failure belongs anyway.
+ *
+ * It lives in this project rather than in the framework because it names the platform carrier, and the
+ * framework is meant to run on platforms that have none. If a home for a jvm-side runner appears in
+ * `eliot-test`, this moves there unchanged.
+ */
+def main: {Console, Process, FileSystem} Unit = report(pureOutcomes ++ runWriterToLog(integrationCases))
+
+private def pureOutcomes: List[CaseOutcome] = namedValues[Test]("testCases").flatMap(ranSuite)

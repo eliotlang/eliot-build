@@ -1,0 +1,46 @@
+import eliot.collection.List
+import eliot.jvm.IO
+import eliot.test.Assertion
+import eliot.test.CaseRun
+import eliot.test.Report
+
+/**
+ * The case vocabulary for suites that talk to the outside world: the same `should … in` spelling as
+ * `eliot.test.Test`, pinned to the platform carrier instead of to `Id`.
+ *
+ * It exists as a separate vocabulary rather than as a carrier-generic one in the framework because of a
+ * compiler limitation that is worth stating precisely: a definition that *performs* an effect cannot answer
+ * that effect's row pinned over a **generic** base. `{Writer[…] | Id}` and `{Writer[…] | IO}` both work;
+ * `{Writer[…] | G}` for a bound `G` is rejected with "performs the effect 'Writer' but does not declare it",
+ * which leaves no way to write one `in` serving every base. Until that lifts, a platform restates fifteen
+ * lines and shares everything else — `AssertionError` and its assertions, `outcomeOf`, `CaseOutcome`, and
+ * the whole report.
+ *
+ * **A case is not stored, it is run.** `in` runs the body where it stands and collects only the outcome,
+ * which is what lets a case here perform real effects at all: a stored body is a `data` field, a field
+ * carrying an effect row must name a base carrier, and the only base the framework could honestly name is
+ * the pure one. The consequence to keep in mind is that cases share one world in the order the suite lists
+ * them — the second visit to a cache genuinely follows the first, and that is what makes "did not clone
+ * twice" observable rather than a count of commands.
+ *
+ * A suite declares `{Writer[List[CaseOutcome]], Process, FileSystem} Unit` — an *open* row, because a pinned
+ * one cannot carry `Process` or `FileSystem`: those ride `Suspend` and have no carrier of their own, and
+ * naming them left of a `|` is "Name not defined". The cases themselves are pinned here to `IO`, which is
+ * what the open row's carrier resolves to when the runner's `main` runs them.
+ */
+data CaseName(namedSubject: String, namedPhrase: String)
+
+/**
+ * Name a test case: the `subject` under test and the `should` phrase naming the expectation.
+ */
+infix none def should(subject: String, shouldPhrase: String): CaseName = CaseName(subject, shouldPhrase)
+
+/**
+ * Run `body` as the case `name` and record what it did.
+ */
+infix none below should
+def in(
+   name: CaseName,
+   body: {Throw[AssertionError], Writer[List[CaseOutcome]] | IO} Unit
+): {Writer[List[CaseOutcome]] | IO} Unit =
+   tell(singleton(CaseOutcome(name.namedSubject, name.namedPhrase, outcomeOf(body))))

@@ -1,0 +1,41 @@
+import eliot.collection.List
+import eliot.file.File
+import eliot.system.Process
+import eliot.test.Assertion
+import eliot.test.Report
+import eliot.build.IntegrationCase
+import eliot.build.Observation
+
+/**
+ * What the cache does against repositories that exist.
+ *
+ * Every case here asserts something a pure carrier cannot reach. `eliot.build.CacheTests` already pins the
+ * command lines and the working directories by reading a journal; what it cannot do is run them. So these
+ * cases are about the answers git actually gives — where a clone lands on a real filesystem, what a second
+ * visit finds there, which commit an annotated tag peels to, and what `git show` does with a revision nobody
+ * tagged.
+ *
+ * The cases run in the order they are written and share one world: the first builds the fixtures, the second
+ * clones cold, the third depends on the second having cloned. That is a property of running a case where it
+ * stands instead of storing it to run later, and it is what makes "does not clone twice" observable at all.
+ */
+def integrationCases: {Writer[List[CaseOutcome]], Process, FileSystem} Unit = {
+   "fixtures" should "build two repositories git can answer for" in {
+      preparedFixtures shouldBe ""
+   }
+   "publishedTags" should "clone on the first visit, into the directory it names" in {
+      coldVisit shouldBe "mirror present, buried no, tags v1.0, v1.2"
+   }
+   "publishedTags" should "answer a second visit from the mirror already on disk" in {
+      secondVisit shouldBe "v1.0, v1.2"
+   }
+   "commitOf" should "answer with the commit an annotated tag peels to" in {
+      cachedCommit shouldBe peeledCommit
+   }
+   "descriptorTextAt" should "read the descriptor the named revision carries" in {
+      descriptorAtFirstRelease shouldBe "dep github.com/x/bar v1.1"
+   }
+   "descriptorTextAt" should "answer absent at a revision nobody tagged" in {
+      descriptorAtMissingRelease shouldBe "<none>"
+   }
+}
