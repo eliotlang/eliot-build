@@ -22,6 +22,10 @@ import eliot.build.Git
  * answer is `{Process}` alone: the `catch` supplies the `Throw[IoError]` layer the platform's
  * `Process` instance requires, in the one region that needs it.
  *
+ * Both are carrier-generic — nothing here names `IO`. `eliot.build.RealWorldTests` hands what they
+ * answer to the platform's run boundary (`runMain`), which is what fixes the carrier to `IO`, keeps
+ * the effect out of the suite's row entirely, and is the same boundary a synthesized `main` uses.
+ *
  * **Neither of these touches the network or writes anything** — one asks git about a repository that
  * does not exist, the other asks the operating system for a program that does not exist. What is
  * being tested is that the wiring is real, not what git does with a real repository; that is the

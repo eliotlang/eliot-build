@@ -40,25 +40,23 @@ roots, and the test framework's, as positional arguments:
 
 ```bash
 cd /home/robert/personal/eliot          # the compiler checkout
-./mill examples.run jvm exe-jar -m eliot.build.TestMain \
+./mill examples.run jvm exe-jar -m eliot.test.Runner \
    /home/robert/personal/eliot-test/src \
    /home/robert/personal/eliot-build/src \
    /home/robert/personal/eliot-build/test \
    -o /home/robert/personal/eliot-build/target
-java -jar /home/robert/personal/eliot-build/target/TestMain.jar   # runs the discovered tests
+java -jar /home/robert/personal/eliot-build/target/Runner.jar   # runs the discovered tests
 ```
 
 Argument ordering is strict (scopt): `-m <module>` must come **immediately after `exe-jar`**, before
 the positional source roots (once positional roots are consumed the subcommand scope is lost and
 `-m` errors as "Unknown option"). The output flag `-o <dir>` trails at the end. The module for `-m`
-is **fully qualified** — `eliot.build.TestMain`, not `TestMain`. **`-m eliot.test.Runner` no longer
-compiles these roots**: it declares `{Console}` alone and `eliot.build.RealWorldTests` performs
-`Process`, which is exactly the cap `TestMain` exists to lift.
+is **fully qualified** — `eliot.test.Runner`, not `Runner`.
 
 Every source root that should contribute tests must be passed: the framework's `src`, this project's
 `src`, and this project's `test`.
 
-### The real-carrier check, and why `-m` names *this* project's entry point
+### The real-carrier check — two ordinary tests, no entry point of our own
 
 A green faked suite says nothing about whether the code compiles in production: tests run effectful
 modules on a pure carrier, which resolves `Process[Fake]` and never `Process[IO]`. `probe/` used to be
@@ -66,12 +64,13 @@ the `main` that resolved the real instances; `test/eliot/build/RealWorldTests.el
 `catch`es next door in `RealWorld.els` (a module that does not assert, because naming `IoError` and
 asserting cannot happen in one file — `docs/effectful-modules.md` §9.5).
 
-That suite performs `Process`, and **a suite may only perform what the entry point running it
-declares**. `eliot.test.Runner.main` declares `{Console}`, so this project has its own entry point —
-`test/eliot/build/TestMain.els`, four lines over `eliot.test.Report`, declaring `{Console, Process}` —
-and that is what `-m` names. Adding an effect to a suite is a change *there*, never in the framework;
-§9.6 has the reasoning and what was measured. Keep the real-carrier cases reaching every effectful
-module.
+**Nothing about it touches the framework.** A test names the platform carrier the same way it names a
+fake one: `runMain(...)` — the jvm layer's run boundary, `def runMain[A](io: IO[A]): A` in
+`eliot.jvm.IO` — fixes the carrier to `IO`, so the effect is performed and charged *there*. The case is
+written `in pure` and the suite declares `{Writer[List[TestResult]]}` like every other. A suite's row
+never grows, so `eliot.test.Runner` never needs widening, for this effect or any future one (§9.6).
+Importing `eliot.jvm.IO` does pin that file to the jvm platform — correct for a test about the
+platform's own instances. Keep those cases reaching every effectful module.
 
 ### `eliot.paths` — LSP only
 

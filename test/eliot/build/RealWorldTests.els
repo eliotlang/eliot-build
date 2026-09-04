@@ -1,32 +1,47 @@
 import eliot.collection.List
 import eliot.file.Path
-import eliot.system.Process
+import eliot.jvm.IO
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.RealWorld
 
 /**
- * The two cases that run on the **platform carrier** rather than on a fake: the suite declares
- * `{Process}`, so its bodies perform for real on whatever carrier the runner was compiled to, and
- * what they prove is that the production instances exist and bind — `Process[IO]`, `Throw[IoError]`
- * and `Throw[GitError]` over it, and `eliot.build.Git`'s own raise path through all three.
+ * The two cases that run on the **platform carrier** instead of on a fake — what the deleted `probe/`
+ * used to be, as ordinary tests.
  *
- * That is exactly what a faked suite cannot say: instantiating production code at `Fake` resolves
- * `Process[Fake]`, so every ability the platform supplies stays unresolved and unchecked. These two
- * cases are the smallest thing that reaches them, and they are here rather than in a `probe/` `main`
- * because a suite can now declare the row a real effect needs.
+ * They prove what a faked suite by construction cannot: that the production instances exist and bind.
+ * Ability resolution happens at monomorphization, so production code instantiated at `Fake` resolves
+ * `Process[Fake]` and never `Process[IO]`; these two reach `Process[IO]`, `Throw[IoError]` and
+ * `Throw[GitError]` over it, and `eliot.build.Git`'s own raise path through all three.
+ *
+ * **The carrier is the injection point here exactly as it is for a fake.** A test runs production code
+ * on a fake by naming that carrier at a slot that fixes it (`journalOf`, `answerOf`); it runs the same
+ * code on the *platform's* carrier by naming `runMain`, which is the jvm layer's **run boundary** —
+ * `def runMain[A](io: IO[A]): A`, the very call the synthesized entry point wraps a program's `main`
+ * in. A run boundary's slot fixes the concrete carrier, so what is handed to it is performed *in `IO`*
+ * rather than in the carrier of the case that wrote it.
+ *
+ * Which is why this suite declares **no row beyond `Writer`** and these cases are written `in pure` —
+ * the strictest body the framework has, `Id`, which cannot itself perform anything. Nothing propagates
+ * to `eliot.test.Runner`, so the framework needs no knowledge of `Process`, and would need none of an
+ * ability this project invented yesterday. A suite never grows a row; the effect is discharged where
+ * it is performed, at a carrier the test named.
+ *
+ * The cost, stated plainly: naming `runMain` means `import eliot.jvm.IO`, so **this file is pinned to
+ * the jvm platform** — correctly, since a test about what the platform's instances do is a test about
+ * that platform. Portable suites stay carrier-generic and use fakes.
  *
  * **They do no network and write nothing**: one asks git about a repository that does not exist, the
  * other asks for a program that does not exist. Both assert the *shape* of the report rather than a
  * diagnostic, because the wording belongs to whichever git and whichever operating system is running
  * the suite.
  */
-def testCases: {Writer[List[TestResult]], Process} Unit = {
-   "the platform" should "run git for real, and report what git said when it said no" in {
-      opening(refusalPrefix, tagReportOf("no-such-repository-anywhere", here)) shouldBe refusalPrefix
+def testCases: {Writer[List[TestResult]]} Unit = {
+   "the platform" should "run git for real, and report what git said when it said no" in pure {
+      opening(refusalPrefix, runMain(tagReportOf("no-such-repository-anywhere", here))) shouldBe refusalPrefix
    }
-   "the platform" should "raise, not answer, when a program cannot be started at all" in {
-      opening("io: ", spawnReportOf("no-such-program-anywhere", here)) shouldBe "io: "
+   "the platform" should "raise, not answer, when a program cannot be started at all" in pure {
+      opening("io: ", runMain(spawnReportOf("no-such-program-anywhere", here))) shouldBe "io: "
    }
 }
 
