@@ -409,5 +409,8 @@ Two costs, both stated rather than hidden:
 `PackageSource` are all unchanged and still waiting on the launcher (§8). The world-modelling question
 is answered (§9.3), and so is the platform-carrier one (§9.6): the real instances are checked again, by
 two ordinary tests that name the platform's run boundary, with no framework change and no entry point
-of this project's own. One is new and stays open: the `message` collision of §9.5, which is a rename in
-the stdlib or in `eliot-test` and nobody's to make from here.
+of this project's own. Two are new. The `message` collision of §9.5 stays open — a rename in the stdlib or in `eliot-test`, and
+nobody's to make from here, though `eliot-test/docs/mocking.md` §3.1 shows it can be dodged by placement.
+And the fixtures themselves: `FakeWorld.els` is 195 lines that every project writing a unit test over
+effects has to write again, which `eliot-test/docs/mocking.md` plans to move into the framework — with
+`FakeWorld` deleted at its stage 2 and `TablePackages` kept, for the rule-3 reason in §3.
