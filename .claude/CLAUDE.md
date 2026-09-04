@@ -14,16 +14,22 @@ meta-information.
 
 ## Architecture
 
-Three source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
+Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
 `PackageId` (identity and ordering), `Git` and `Cache` (talking to git and mirroring repositories),
 `PackageSource` (the resolver's two questions plus the git-backed answer), `Resolution` (MVS).
 `test/` mirrors it, plus two fixtures that are not suites — `FakeWorld` and `TablePackages`, the pure
-carriers effectful code is tested on. `probe/` is a `main` that runs the effectful modules against a
-real repository; it is the only thing that resolves the *real* instances (see below).
+carriers effectful code is tested on. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
+§9.6 says what that leaves unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md`. Read the latter before touching `Git`, `Cache`, `PackageSource` or a
-fixture — it carries four rules that are each a compile error to break.
+`docs/effectful-modules.md` — **read §9 of it first**, and read it before touching `Git`, `Cache`,
+`PackageSource` or a fixture. It carries four rules, three of which are still a compile error to
+break; the fourth (run-then-assert) is retired.
+
+A suite declares its own effect row — `def testCases: {Writer[List[TestResult]]} Unit` — because the
+framework's `type Test` alias is gone (an alias may not carry an open row). A faked run goes in a
+capture slot (`{| Fake}`), so it is written inline in a `pure` body rather than in a definition of its
+own.
 
 ## Building and running (compiler CLI)
 
@@ -50,21 +56,18 @@ is **fully qualified** — `eliot.test.Runner`, not `Runner`.
 Every source root that should contribute tests must be passed: the framework's `src`, this project's
 `src`, and this project's `test`.
 
-### The probe — the only real-carrier check
+### There is no real-carrier check right now
 
-A green suite says nothing about whether the code compiles in production. Tests run effectful modules
-on a pure carrier, which resolves `Process[Fake]` and never `Process[IO]`; the real instances are
-resolved only from a `main`. So build and run `probe/` after changing anything effectful:
+A green suite says nothing about whether the code compiles in production: tests run effectful modules
+on a pure carrier, which resolves `Process[Fake]` and never `Process[IO]`, and the real instances are
+resolved only from a `main`. `probe/` used to be that `main` and was deleted, so **nothing here
+currently resolves `Process[IO]`, `FileSystem[IO]` or the git-backed `PackageSource`**.
 
-```bash
-./mill examples.run jvm exe-jar -m eliot.build.Probe \
-   /home/robert/personal/eliot-build/src \
-   /home/robert/personal/eliot-build/probe \
-   -o /home/robert/personal/eliot-build/target
-java -jar target/Probe.jar github.com/some/repository    # wants a network and a git on the path
-```
-
-It asserts nothing and it clones for real. Keep it reaching every effectful module.
+A suite *can* now do it — it declares its own row and its bodies perform on the runner's carrier — but
+only for effects the framework's `Runner` itself declares, which today is `{Console}` alone.
+`docs/effectful-modules.md` §9.6 has the measured two-case version, what it needs (two lines in
+`eliot-test`'s `Runner`), and the alternatives. Decide that before treating a green suite as evidence
+about production.
 
 ### `eliot.paths` — LSP only
 

@@ -1,8 +1,13 @@
 # Modules That Do Things: Retiring the Pure/Effectful Split
 
-Status: **DONE**, 2026-08-12. Built against the compiler at `robertbraeutigam/eliot@f7a546b` and the
-framework at `eliotlang/eliot-test@d136e0f`. The suite went from 124 cases to 141, and the seventeen
-new ones are about code that could not previously be tested at all.
+Status: **DONE**, 2026-08-12, and **revisited 2026-09-04 — read §9 first**. Built against the compiler
+at `robertbraeutigam/eliot@f7a546b` and the framework at `eliotlang/eliot-test@d136e0f`. The suite went
+from 124 cases to 141, and the seventeen new ones are about code that could not previously be tested at
+all.
+
+§1–§8 are that refactor as it stood on the day it landed, kept as written. §9 is what the compiler and
+the framework changed under it since, what still holds, and what it now costs: **rule 2 is retired**,
+one rule is added, and the tree did not compile at all until §9.1.
 
 ## 1. The constraint that shaped these modules is gone
 
@@ -77,7 +82,8 @@ rules govern it, and all four were established by breaking them (§7).
    the real effects get theirs for free by riding `Suspend`, and writing one by hand is an orphan
    instance (neither `Process`'s module nor `ThrowCarrier`'s is ours). So the fake owns the whole row
    and reflects a raise into its own result slot.
-2. **Run-then-assert.** The run must sit in a definition with no ambient carrier of its own. Inside a
+2. **Run-then-assert.** *(Retired 2026-09-04 — the capture tag removed the requirement; see §9.4.)*
+   The run must sit in a definition with no ambient carrier of its own. Inside a
    test body pinned to `{Throw[AssertionError] | Id}` the ambient carrier *is* that pinned stack, and
    every carrier-generic callee is written at it, so a run written there fails with
    `Expected: {Throw[AssertionError] | Id} Fake[String]` / `Actual: … String`. In practice: one
@@ -174,6 +180,9 @@ Five steps, each green on its own.
 
 ## 6. What this does not replace
 
+*(`probe/` was deleted on 2026-09-04 and this section describes a directory that no longer exists.
+What replaced it, and what did not, is §9.6.)*
+
 Instantiating production code at a fake carrier resolves `Process[Fake]` — **not** `Process[IO]`.
 Ability resolution happens at monomorphization, so a module reachable only from the test suite still
 has its *real* instances unresolved and unchecked: a green suite is no evidence the code compiles in
@@ -219,6 +228,155 @@ same with `-m eliot.build.Probe` over `src probe`.
   exported surface. Merging them is tempting and probably wrong — the cache answers questions the
   resolver never asks (`refreshed`, and the ancestry check the fetcher is owed) — but worth asking
   again once the launcher has a shape.
-- **How much of the world one fake should model.** `FakeWorld`'s directories are seeded by the test
-  rather than created by the operations that would have made them. A world that only learns of a
-  directory by watching git create it would catch more, at the cost of a fake worth testing itself.
+- ~~**How much of the world one fake should model.**~~ *Answered 2026-09-04 (§9.3): the fake's
+  `git clone --mirror` makes its target exist, so the first-visit/second-visit distinction is observed
+  within one run rather than seeded. The rest of the world is still seeded, and that is still fine —
+  a directory nothing in the code creates has nothing to learn from.*
+
+
+## 9. Revisited, 2026-09-04
+
+Against compiler `3be06cc` and framework `36ccc10`, on the two questions this document exists to
+answer: *do the modules carry behaviour rather than data-oriented interfaces*, and *do the tests
+exercise that behaviour without doing I/O*. Both answers are yes. Everything below is what changed
+around them, and one of the changes is that the tree had stopped compiling.
+
+### 9.1 The tree had stopped building, and nothing said so
+
+`type Test` no longer exists. The framework removed it in *"No pinned carriers anywhere: suites are
+computations, not stored data"* (2026-08-18) — an alias may not carry an open row, so a suite states
+its row itself — and all seven suites here declared `def testCases: Test`. `FakeWorld.outcomeOf` also
+collided with an `outcomeOf` the framework gained in the same commit. Both are one-line-per-file fixes
+(`{Writer[List[TestResult]]} Unit`, and a rename to `answerOf`), and with them the 141 cases §7 claims
+are green again.
+
+Worth stating plainly, because it will happen again: **this project has no build of its own and pins no
+framework version.** The compiler and `eliot-test` are sibling checkouts at whatever commit they happen
+to be on, so a "DONE" here decays without a signal. §7's evidence table was a true statement about a
+tree that no longer compiled three weeks later.
+
+### 9.2 Do the modules carry behaviour? Yes — and §2's anaemia is gone
+
+| Module | Verdict now | Evidence |
+|---|---|---|
+| `Git` | **behaviour** | Its surface is four operations that *spawn* — `lsRemoteTags`, `mirrorClone`, `fetchTags`, `showFile` — plus the three pure readings of what git wrote. No function answers a command line for somebody else to run; `checked`/`failureOf` are private. |
+| `Cache` | **behaviour** | Six operations, all of them cache *policy* expressed in `Git`'s operations: where a mirror lives, whether it must be made, which directory each command stands in. `ProcessResult` never appears. |
+| `PackageSource` | **behaviour** | An ability with two methods and a constrained catch-all instance. `Resolution` declares `{PackageSource, Throw[ResolutionError]}` and carries no callbacks. |
+| `Descriptor`, `Clause`, `Version`, `PackageId` | **healthy, unchanged** | Parsing, ordering, canonical form. Pure subject matter, nothing withheld. |
+
+The one thing still shaped by a limitation rather than by the subject is `packageCacheRoot`, a constant
+in `PackageSource` because `Dep` cannot ride the same carrier stack as `Throw` (§4.3, §8). It is
+configuration, not behaviour, so it is not anaemia — but it is the one place a module states something
+it should be told.
+
+### 9.3 Do the tests exercise mocked behaviour? Yes, and two things now make them exercise more
+
+`GitTests` and `CacheTests` run production code on `Fake`, which has **no `Suspend` instance**, and
+`Suspend` is the only route to a native side effect: a body that tried to touch a real process or a
+real file would not compile. So "unit tests that do no I/O" is structural here rather than a
+convention, and that has not changed.
+
+What changed is how much they can see:
+
+- **A faked case costs no helper definitions.** `journalOf` and `answerOf` declare their computation
+  slot with the **capture tag** `{| Fake}` — the pinned row at zero entries, the same type as `Fake[A]`
+  but declaring that the slot hosts a computation on that carrier (compiler `docs/effects.md` §2.3,
+  shipped as W3 on 2026-09-04). The run is therefore written inline in an ordinary `pure` body, and a
+  whole *script* of operations can be, sharing one world. Fourteen private definitions — one per
+  scenario, the tax §6 called "continuity rather than a new tax" — are gone.
+- **The fake learns from git.** A successful `git clone --mirror` now makes its target directory exist
+  in the fake world, because that is what the real one does and `Cache.ensuredMirror`'s presence test
+  reads nothing else. "Clone on the first visit, not on the second" is consequently *observed within
+  one run* rather than seeded by the test, and a clone landing anywhere other than where
+  `cacheDirectory` looks now fails a case instead of passing unnoticed — the same bug class as the
+  relative-path bug of §2, one layer deeper.
+
+Three cases were added on the strength of it (144 green). They were mutation-tested rather than
+believed: making `Cache`'s presence test always answer "absent" fails exactly those three and nothing
+else.
+
+### 9.4 Rule 2 is retired; 1, 3 and 4 stand
+
+> **2. Run-then-assert.** The run must sit in a definition with no ambient carrier of its own. […]
+> This is a real constraint, not a style choice — a test cannot assert part-way through a faked run.
+
+The premise was the region rule and it is still true: a region writes every carrier-generic callee at
+*its* carrier, so an untagged fake run inside a suite is written at the suite's own stack. What changed
+is that a slot can now **declare that it hosts a computation on a carrier**, and the elaborator then
+writes nothing into it. So the run may be written where it stands, and a discharge word taking a
+`{| Fake} Unit` body would let a case interleave assertions with faked effects the way
+`eliot-test`'s own `onConsole` does.
+
+Run-then-assert survives as *the clearer shape when the assertion is about a finished answer* — which
+is most of what these suites assert — but it is now a choice. **The replacement rule: a slot that takes
+a computation on a fake carrier declares the capture tag; nothing else has to be arranged around it.**
+
+Rules 1, 3 and 4 are unchanged and were re-confirmed by this pass: the carrier still implements its row
+flat, two fakes still exist because one wide fake would collide with the constrained catch-all, and the
+fake still cannot cheat.
+
+### 9.5 The rule that had to be added: assertions cannot ride a `FileSystem` fake
+
+`Fake` implements `Throw[GitError]` and `Throw[IoError]` but deliberately **not**
+`Throw[AssertionError]`, which is what a body asserting between its own steps would need. The reason is
+not a carrier problem — it is a name collision: `AssertionError` lives in `eliot.test.Assertion`,
+`IoError` in `eliot.file.File`, and **both modules export a `message`**, so a file that fakes
+`FileSystem` cannot import the assertions ("Imported names shadow other imported names"). There is no
+selective import to reach around it, and the instance must be colocated with `Fake`, so it cannot be
+moved to a file that imports only one of them.
+
+It costs nothing *here* — the journal accumulates, so asserting it after a two-step script says
+everything asserting it between the steps would have — but it is a wall for any fake of the filesystem
+that wants interleaved assertions, and it will be hit again by anyone doing this. The fix is a rename
+in one of the two libraries (`message(e: IoError)` in the stdlib, or the infix `message` in
+`eliot.test.Assertion`); neither is this project's to make.
+
+### 9.6 The platform carrier, and what became of `probe/`
+
+`probe/` was deleted on 2026-09-04 (`f3f8d15`), and with it the only thing that ever checked that the
+effectful modules have an interpretation **on the platform**. That check is not redundant with the
+suite: ability resolution happens at monomorphization, so running production code at `Fake` resolves
+`Process[Fake]` and never `Process[IO]`, and every real instance the tool depends on stays unresolved
+and unchecked by a green faked run. As it stands, **nothing in this repository resolves
+`Process[IO]`, `FileSystem[IO]` or the git-backed `PackageSource` at a real carrier.**
+
+The framework can now express such a test — a suite declares its own row, and a body performs on
+whatever carrier the runner was compiled to — and it was measured rather than assumed. Two cases,
+in a suite declaring `{Writer[List[TestResult]], Process}`:
+
+```eliot
+"the platform" should "run git for real, and report what git said when it said no" in {
+   opening(refusalPrefix, tagReportOf("no-such-repository-anywhere", here)) shouldBe refusalPrefix
+}
+"the platform" should "raise, not answer, when a program cannot be started at all" in {
+   opening("io: ", spawnReportOf("no-such-program-anywhere", here)) shouldBe "io: "
+}
+```
+
+They compile and pass (146 green), spawning a real `git` and a real missing program, touching no
+network and writing nothing. Two things had to be arranged, and both are findings in their own right:
+
+- **The discharges live in a module that does not assert.** `Process`'s platform instance is
+  `implement[F[_] ~ Suspend & Throw[IoError] & Effect]`, so a real call needs a `Throw[IoError]` layer,
+  which a `catch` supplies — and naming `IoError` means importing `eliot.file.File`, which §9.5 says
+  cannot be done in a file that asserts. So a `RealWorld` module owns the `catch`es and answers plain
+  `String`s, and its row is `{Process}` alone.
+- **The framework's runner caps what a suite may perform.** `Runner.main` declares `{Console}` and
+  `runSuite`'s carrier is constrained `Console & Effect`, so a suite performing `Process` is correctly
+  rejected — *"This value performs the effect 'Process' but does not declare it"*, reported against the
+  framework's own `allCaseFailures`. Widening those two declarations to `{Console, Process}` is the
+  whole change, and with it the cases above pass. `FileSystem` cannot be added the same way today:
+  `Runner.els` imports `eliot.test.Assertion`, so §9.5's collision blocks it there too.
+
+That change is `eliot-test`'s API to make, not this project's, so it has not been applied and the two
+files are not in `test/`. **The choice is open**: widen the runner's row (two lines, measured to work,
+and it makes the framework state that a test binary may spawn), re-add a `probe/` `main`, or accept the
+gap until the launcher's own `main` becomes the mechanism — which is what `probe/`'s own doc comment
+said would retire it.
+
+### 9.7 Where the open questions stand
+
+`packageCacheRoot`'s home, where a test carrier lives, and whether `Cache` stays separate from
+`PackageSource` are all unchanged and still waiting on the launcher (§8). The world-modelling question
+is answered (§9.3). Two are new: the `message` collision of §9.5, and the platform-carrier decision of
+§9.6.
