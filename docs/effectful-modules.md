@@ -278,8 +278,9 @@ convention, and that has not changed.
 
 What changed is how much they can see:
 
-- **A faked case costs no helper definitions.** `journalOf` and `answerOf` declare their computation
-  slot with the **capture tag** `{| Fake}` — the pinned row at zero entries, the same type as `Fake[A]`
+- **A faked case costs no helper definitions.** *(Superseded 2026-09-04: the fixture these words lived in
+  is deleted, and `eliot.test.Mock` provides the doubles. What follows is why it worked.)* `journalOf` and
+  `answerOf` declare their computation slot with the **capture tag** `{| Fake}` — the pinned row at zero entries, the same type as `Fake[A]`
   but declaring that the slot hosts a computation on that carrier (compiler `docs/effects.md` §2.3,
   shipped as W3 on 2026-09-04). The run is therefore written inline in an ordinary `pure` body, and a
   whole *script* of operations can be, sharing one world. Fourteen private definitions — one per
@@ -409,8 +410,11 @@ Two costs, both stated rather than hidden:
 `PackageSource` are all unchanged and still waiting on the launcher (§8). The world-modelling question
 is answered (§9.3), and so is the platform-carrier one (§9.6): the real instances are checked again, by
 two ordinary tests that name the platform's run boundary, with no framework change and no entry point
-of this project's own. Two are new. The `message` collision of §9.5 stays open — a rename in the stdlib or in `eliot-test`, and
-nobody's to make from here, though `eliot-test/docs/mocking.md` §3.1 shows it can be dodged by placement.
-And the fixtures themselves: `FakeWorld.els` is 195 lines that every project writing a unit test over
-effects has to write again, which `eliot-test/docs/mocking.md` plans to move into the framework — with
-`FakeWorld` deleted at its stage 2 and `TablePackages` kept, for the rule-3 reason in §3.
+of this project's own. Two are new. **The fixture itself is gone**: `eliot.test.Mock` now ships the doubles for every base effect,
+so `FakeWorld.els` (195 lines) was deleted and `CacheTests`/`GitTests` say only what they are about —
+`eliot-test/docs/mocking.md`, built 2026-09-04. `TablePackages` stays, for §3's rule-3 reason and because an
+instance for `PackageSource` could live only in production code or in the framework. The `message` collision
+of §9.5 is settled the same way: the framework's infix `message` is now `describedAs`, so a file may name
+both a file and an assertion. The one that stays open is the language question underneath all of it: an ability may have at most one
+carrier-generic instance, which is why a double must be concrete and why the framework must own it
+(`mocking.md` §2, fact 1).

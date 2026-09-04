@@ -17,8 +17,11 @@ meta-information.
 Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
 `PackageId` (identity and ordering), `Git` and `Cache` (talking to git and mirroring repositories),
 `PackageSource` (the resolver's two questions plus the git-backed answer), `Resolution` (MVS).
-`test/` mirrors it, plus two fixtures that are not suites — `FakeWorld` and `TablePackages`, the pure
-carriers effectful code is tested on. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
+`test/` mirrors it, plus `TablePackages` — a carrier of our own for `PackageSource`, which is *this
+project's* ability and so cannot be doubled by the framework. Everything else is mocked by
+`eliot.test.Mock`: a case declares nothing, arranges with `whenSpawning`/`withDirectory`/…, acts, and
+verifies with `wasCalledOnce`/`calls`/… (`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of
+hand-written doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
 §9.6 says what that leaves unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
