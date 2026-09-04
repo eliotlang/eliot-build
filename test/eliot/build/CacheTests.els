@@ -1,22 +1,19 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
+import eliot.test.Mock
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Git
 import eliot.build.Cache
-import eliot.build.FakeWorld
 
 /**
- * Cache policy, run against a world that answers git instead of git — where a mirror goes, when one
+ * Cache policy, run against the framework's doubles instead of against git — where a mirror goes, when one
  * has to be made, and which directory each command must stand in.
  *
- * Nothing here reaches a real process or a real file: `Fake` has no `Suspend` instance, so a body that
- * tried would not compile. Every case is `pure` — the run happens in a capture slot of `journalOf` or
- * `answerOf`, which is what lets a whole script of operations be written inline and share one world,
- * so what the first one left behind is what the second one finds.
+ * Nothing here reaches a real process or a real file: the mock carrier has no `Suspend`, so a body that
+ * tried would not compile. There is no fixture either — `eliot.test.Mock` is the whole of it.
  */
 def testCases: {Writer[List[TestResult]]} Unit = {
    "cacheDirectory" should "give one directory per canonical URL segment" in pure {
@@ -26,111 +23,150 @@ def testCases: {Writer[List[TestResult]]} Unit = {
       show(cacheDirectory(cacheRoot, packageId("github.com/e/eliot//stdlib")))
          shouldBe "target/cache/github.com/e/eliot"
    }
-   "publishedTags" should "clone a mirror this build has never seen, then list what it publishes" in pure {
-      journalOf(listingWorld, publishedTags(cacheRoot, cached)) shouldBe expectedFirstVisit
+   "publishedTags" should "clone a mirror this build has never seen, then list what it publishes" in mocked {
+      listingReady
+
+      publishedTags(cacheRoot, cached)
+
+      calls shouldBe expectedFirstVisit
    }
-   "publishedTags" should "not clone again what its own clone left on disk" in pure {
-      journalOf(listingWorld, {
+   "publishedTags" should "not clone again what its own clone left on disk" in mocked {
+      listingReady
+
+      publishedTags(cacheRoot, cached)
+      publishedTags(cacheRoot, cached)
+
+      wasCalledOnce("git clone --mirror")
+      wasCalledTimes(2, "git ls-remote --tags")
+   }
+   "publishedTags" should "not clone a mirror that was already on disk" in mocked {
+      listingReady
+      withDirectory(mirrorDirectory)
+
+      publishedTags(cacheRoot, cached)
+
+      wasNeverCalled("git clone")
+      calls shouldBe (expectedPresenceCheck ++ "; " ++ expectedListing)
+   }
+   "publishedTags" should "read the versions the mirror announces" in mocked {
+      listingReady
+
+      renderedTags(publishedTags(cacheRoot, cached)) shouldBe "v1.2 aaa1, v1.3 bbb2"
+   }
+   "publishedTags" should "raise what git said when git said no" in mocked {
+      whenSpawning("ls-remote", failing(128, "no such repository"))
+
+      raising(expectedRefusal, {
          publishedTags(cacheRoot, cached)
-         publishedTags(cacheRoot, cached)
-      }) shouldBe (expectedFirstVisit ++ "; " ++ expectedListing)
+         unit
+      })
    }
-   "publishedTags" should "not clone a mirror that was already on disk" in pure {
-      journalOf(mirrored.answering("ls-remote", listing), publishedTags(cacheRoot, cached))
-         shouldBe expectedListing
+   "anchorOf" should "answer the commit the line's first release names" in mocked {
+      whenSpawning("ls-remote", succeeding(anchored))
+
+      val anchor = anchorOf(cacheRoot, 1, cached)
+
+      (anchor orElse "<none>") shouldBe "aaa1"
    }
-   "publishedTags" should "read the versions the mirror announces" in pure {
-      answerOf(mirrored.answering("ls-remote", listing), renderedTags, publishedTags(cacheRoot, cached))
-         shouldBe "v1.2 aaa1, v1.3 bbb2"
+   "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked {
+      whenSpawning("ls-remote", succeeding(anchored))
+
+      val anchor = anchorOf(cacheRoot, 3, cached)
+
+      (anchor orElse "<none>") shouldBe "<none>"
    }
-   "publishedTags" should "raise what git said when git said no" in pure {
-      answerOf(
-         mirrored.failing("ls-remote", 128, "no such repository"),
-         renderedTags,
-         publishedTags(cacheRoot, cached)
-      ) shouldBe expectedRefusal
+   "refreshed" should "fetch in the mirror, which is the repository that command stands in" in mocked {
+      withDirectory(mirrorDirectory)
+
+      refreshed(cacheRoot, cached)
+
+      calls shouldBe (expectedPresenceCheck ++ "; " ++ expectedFetch)
    }
-   "anchorOf" should "answer the commit the line's first release names" in pure {
-      answerOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 1, cached))
-         shouldBe "aaa1"
+   "refreshed" should "clone first when the build has never seen the package" in mocked {
+      cloneCreatesMirror
+
+      refreshed(cacheRoot, cached)
+
+      wereCalledInOrder(append(singleton("git clone --mirror"), "git fetch --tags --prune"))
    }
-   "anchorOf" should "answer nothing for a line the mirror does not publish" in pure {
-      answerOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 3, cached))
-         shouldBe "<none>"
+   "descriptorTextAt" should "read a descriptor out of the object database" in mocked {
+      withDirectory(mirrorDirectory)
+      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
+
+      val text = descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
+
+      (text orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
    }
-   "refreshed" should "fetch in the mirror, which is the repository that command stands in" in pure {
-      journalOf(mirrored, refreshed(cacheRoot, cached)) shouldBe expectedFetch
+   "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked {
+      withDirectory(mirrorDirectory)
+      whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
+
+      val text = descriptorTextAt(cacheRoot, Version(1, Some(9)), cached)
+
+      (text orElse "<none>") shouldBe "<none>"
    }
-   "refreshed" should "clone first when the build has never seen the package" in pure {
-      journalOf(emptyWorld, refreshed(cacheRoot, cached)) shouldBe expectedColdRefresh
-   }
-   "descriptorTextAt" should "read a descriptor out of the object database" in pure {
-      answerOf(
-         mirrored.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
-         renderedText,
-         descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
-      ) shouldBe "dep github.com/x/bar v1.1"
-   }
-   "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in pure {
-      answerOf(
-         mirrored.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
-         renderedText,
-         descriptorTextAt(cacheRoot, Version(1, Some(9)), cached)
-      ) shouldBe "<none>"
-   }
-   "the cache" should "clone once and read the mirror it made for every later question" in pure {
-      journalOf(descriptorWorld, {
-         publishedTags(cacheRoot, cached)
-         descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
-      }) shouldBe (expectedFirstVisit ++ "; " ++ expectedShow)
+   "the cache" should "clone once and read the mirror it made for every later question" in mocked {
+      listingReady
+      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
+
+      publishedTags(cacheRoot, cached)
+      descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
+
+      wasCalledOnce("git clone --mirror")
+      lastCall shouldBe expectedShow
    }
 }
 
 /**
- * A clone is launched from `.` and *names* its target, so a relative cache root is resolved in this
- * program's frame exactly once. Launching it from inside the root would resolve the same relative path
- * a second time and bury the mirror at `target/cache/target/cache/…` — the bug this line pins.
+ * The arrangement every cache scenario starts from: git answers a listing, and a clone leaves the mirror on
+ * disk — which is what makes "clone on the first visit, not on the second" something these tests *observe*
+ * rather than seed. Getting the clone target wrong would show up here as a second clone.
+ */
+private def listingReady: {Mocking} Unit = {
+   cloneCreatesMirror
+   whenSpawning("ls-remote", succeeding(listing))
+}
+
+private def cloneCreatesMirror: {Mocking} Unit = whenSpawningCreates("clone --mirror", mirrorDirectory)
+
+/**
+ * A clone is launched from `.` and *names* its target, so a relative cache root is resolved in this program's
+ * frame exactly once. Launching it from inside the root would resolve the same relative path a second time and
+ * bury the mirror at `target/cache/target/cache/…` — the bug this line pins.
  */
 private def expectedFirstVisit: String =
-   "mkdir target/cache; " ++
-      ".$ git clone --mirror https://github.com/x/foo " ++ mirrorDirectory ++ "; " ++
+   expectedPresenceCheck ++ "; createDirectories target/cache; " ++
+      ".$ git clone --mirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
       expectedListing
 
-private def expectedColdRefresh: String =
-   "mkdir target/cache; " ++
-      ".$ git clone --mirror https://github.com/x/foo " ++ mirrorDirectory ++ "; " ++
-      expectedFetch
+/**
+ * Every question the cache asks starts by looking whether the mirror is there — recorded like any other call,
+ * which the hand-written fixture this replaced quietly dropped.
+ */
+private def expectedPresenceCheck: String = "isDirectory target/cache/github.com/x/foo"
 
-private def expectedListing: String = ".$ git ls-remote --tags " ++ mirrorDirectory
+private def expectedListing: String = ".$ git ls-remote --tags target/cache/github.com/x/foo"
 
-private def expectedFetch: String = mirrorDirectory ++ "$ git fetch --tags --prune"
+private def expectedFetch: String = "target/cache/github.com/x/foo$ git fetch --tags --prune"
 
-private def expectedShow: String = mirrorDirectory ++ "$ git show v1.2:eliot.pkg"
+private def expectedShow: String = "target/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
 
 private def expectedRefusal: String =
-   "raised: 'git ls-remote --tags " ++ mirrorDirectory ++ "' failed with exit code 128: no such repository"
+   "'git ls-remote --tags target/cache/github.com/x/foo' failed with exit code 128: no such repository"
 
 private def cacheRoot: Path = path("target/cache")
 
 private def cached: PackageId = packageId("github.com/x/foo")
 
-private def mirrorDirectory: String = "target/cache/github.com/x/foo"
+private def mirrorDirectory: Path = path("target/cache/github.com/x/foo")
 
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
 private def anchored: String = "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4"
 
 /**
- * A world that has never seen the package: the mirror is not there, and the clone is what makes it
- * appear — which is what the presence test then reads.
+ * The tags of an answer, rendered `<tag> <commit>` apiece — both halves, so a test says which commit a version
+ * resolved to rather than merely that it appeared.
  */
-private def listingWorld: World = emptyWorld.answering("ls-remote", listing)
-
-private def descriptorWorld: World =
-   listingWorld.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1")
-
-/**
- * A world where the mirror was already there when this build started — a second run of the tool
- * against a cache a first one filled.
- */
-private def mirrored: World = emptyWorld.withDirectory(mirrorDirectory)
+private def renderedTags(tags: List[TagRef]): String =
+   tags.map(ref -> show(ref.taggedVersion) ++ " " ++ ref.taggedCommit).joined(", ")

@@ -16,10 +16,17 @@ import eliot.build.Resolution
  * ambiguous ("Multiple ability implementations found"). One fake per seam, each implementing the
  * minimum, is what keeps the answer unique — and a resolver test wants descriptors, not a fake git.
  *
- * `Throw[ResolutionError]` is implemented here rather than discharged with `runThrow` for the same
- * reason `eliot.build.FakeWorld` implements its own: `PackageSource[ThrowCarrier[E, Packages]]` would
- * need a lift this ability has no way to earn, so the carrier is flat and `against` reads the outcome
- * out as the `Either` the assertions already expect.
+ * `Throw[ResolutionError]` is implemented here rather than discharged with `runThrow`:
+ * `PackageSource[ThrowCarrier[E, Packages]]` would need a lift this ability has no way to earn, so the
+ * carrier is flat and `against` reads the outcome out as the `Either` the assertions already expect.
+ *
+ * **Why this is not `eliot.test.Mock`.** The framework's carrier doubles every *base* effect, and this
+ * project's own ability is not one of them — an instance may live only with its ability or with a type
+ * argument, so `implement PackageSource[Mock]` could go in `PackageSource`'s module (production code
+ * importing the test framework) or in the framework (which has never heard of it), and neither is right.
+ * A carrier of one's own is the answer, and it is also required here: the production instance is a
+ * constrained catch-all that the framework's wide `Mock` would satisfy, and two candidates is
+ * "Multiple ability implementations found".
  */
 
 /**
