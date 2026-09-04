@@ -180,8 +180,8 @@ Five steps, each green on its own.
 
 ## 6. What this does not replace
 
-*(`probe/` was deleted on 2026-09-04 and this section describes a directory that no longer exists.
-What replaced it, and what did not, is §9.6.)*
+*(`probe/` was deleted on 2026-09-04 and this section describes a directory that no longer exists. Its
+job is now done by a suite that declares `{Process}` and by this project's own entry point — §9.6.)*
 
 Instantiating production code at a fake carrier resolves `Process[Fake]` — **not** `Process[IO]`.
 Ability resolution happens at monomorphization, so a module reachable only from the test suite still
@@ -337,12 +337,11 @@ in one of the two libraries (`message(e: IoError)` in the stdlib, or the infix `
 effectful modules have an interpretation **on the platform**. That check is not redundant with the
 suite: ability resolution happens at monomorphization, so running production code at `Fake` resolves
 `Process[Fake]` and never `Process[IO]`, and every real instance the tool depends on stays unresolved
-and unchecked by a green faked run. As it stands, **nothing in this repository resolves
-`Process[IO]`, `FileSystem[IO]` or the git-backed `PackageSource` at a real carrier.**
+and unchecked by a green faked run.
 
-The framework can now express such a test — a suite declares its own row, and a body performs on
-whatever carrier the runner was compiled to — and it was measured rather than assumed. Two cases,
-in a suite declaring `{Writer[List[TestResult]], Process}`:
+Its replacement is `test/eliot/build/RealWorldTests.els`, two cases in a suite declaring
+`{Writer[List[TestResult]], Process}`, which spawn a real `git` and a real missing program — no
+network, nothing written — and assert the *shape* of what each reported:
 
 ```eliot
 "the platform" should "run git for real, and report what git said when it said no" in {
@@ -353,30 +352,51 @@ in a suite declaring `{Writer[List[TestResult]], Process}`:
 }
 ```
 
-They compile and pass (146 green), spawning a real `git` and a real missing program, touching no
-network and writing nothing. Two things had to be arranged, and both are findings in their own right:
+The `catch`es live next door in `test/eliot/build/RealWorld.els`, which answers plain `String`s and
+declares `{Process}` alone: the platform's `Process` instance is
+`implement[F[_] ~ Suspend & Throw[IoError] & Effect]`, so a real call needs a `Throw[IoError]` layer,
+which a `catch` supplies — and naming `IoError` means importing `eliot.file.File`, which §9.5 says a
+file that asserts cannot do. So the module that names the failure types is the module that does not
+assert, and it is `{Process}` because the layer is supplied in the one region that needs it.
 
-- **The discharges live in a module that does not assert.** `Process`'s platform instance is
-  `implement[F[_] ~ Suspend & Throw[IoError] & Effect]`, so a real call needs a `Throw[IoError]` layer,
-  which a `catch` supplies — and naming `IoError` means importing `eliot.file.File`, which §9.5 says
-  cannot be done in a file that asserts. So a `RealWorld` module owns the `catch`es and answers plain
-  `String`s, and its row is `{Process}` alone.
-- **The framework's runner caps what a suite may perform.** `Runner.main` declares `{Console}` and
-  `runSuite`'s carrier is constrained `Console & Effect`, so a suite performing `Process` is correctly
-  rejected — *"This value performs the effect 'Process' but does not declare it"*, reported against the
-  framework's own `allCaseFailures`. Widening those two declarations to `{Console, Process}` is the
-  whole change, and with it the cases above pass. `FileSystem` cannot be added the same way today:
-  `Runner.els` imports `eliot.test.Assertion`, so §9.5's collision blocks it there too.
+**What made it possible is a framework change, and the shape of that change is the general answer to
+"who declares the row".** A suite may only perform what the entry point running it declares, and
+`eliot.test.Runner.main` declared `{Console}`, so a spawning suite was rejected against the
+framework's own `allCaseFailures`. Widening that row would have fixed this project and nothing else:
+the row an entry point owes is the **union of what its suites perform**, which is a fact about a
+*program* — the next project's suites will perform `FileSystem`, or an ability that project declared
+itself and no library can ever name. A framework that owns `main` therefore gets widened once per
+project, forever, and still cannot serve a user-defined effect.
 
-That change is `eliot-test`'s API to make, not this project's, so it has not been applied and the two
-files are not in `test/`. **The choice is open**: widen the runner's row (two lines, measured to work,
-and it makes the framework state that a test binary may spawn), re-add a `probe/` `main`, or accept the
-gap until the launcher's own `main` becomes the mechanism — which is what `probe/`'s own doc comment
-said would retire it.
+So the mechanism moved to `eliot.test.Report`, which declares no `main` and exports the three pieces
+an entry point is assembled from, and **this project owns its entry point**
+(`test/eliot/build/TestMain.els`, run with `-m eliot.build.TestMain`):
+
+```eliot
+def main: {Console, Process} Unit = printLine(summary(allSuiteFailures))
+
+private def allSuiteFailures: {Console, Process} List[List[String]] =
+   foldNamedValues("testCases", noFailures, runSuite)
+```
+
+Adding an effect to a suite is now a change in *this* repository, in the four lines that already know
+which suites exist. Two things about it were measured rather than reasoned:
+
+- **`runSuite`'s carrier constraint does not have to grow.** Widening only the entry point's row and
+  leaving `G[_] ~ Console & Effect` alone compiles and runs: a suite's own constraints are discharged
+  where the suite is instantiated, at monomorphization, against the concrete carrier. Only the
+  definitions that *name* the concrete suites — the entry point and its fold — carry the row.
+- **The entry point must import `eliot.test.Report`, never `eliot.test.Runner`**: importing a module
+  that declares a `main` into a file that declares one is "Imported names shadow local names". That
+  is why the split is a split rather than three `private`s made public.
+
+Same 146 green either way; `eliot.test.Runner` still runs the pure suites of any project unchanged.
 
 ### 9.7 Where the open questions stand
 
 `packageCacheRoot`'s home, where a test carrier lives, and whether `Cache` stays separate from
 `PackageSource` are all unchanged and still waiting on the launcher (§8). The world-modelling question
-is answered (§9.3). Two are new: the `message` collision of §9.5, and the platform-carrier decision of
-§9.6.
+is answered (§9.3), and so is the platform-carrier one (§9.6): the real instances are checked again,
+by a suite rather than by a `main` of their own, and the entry point that runs them is this project's.
+One is new and stays open: the `message` collision of §9.5, which is a rename in the stdlib or in
+`eliot-test` and nobody's to make from here.

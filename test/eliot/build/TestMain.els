@@ -1,0 +1,30 @@
+import eliot.collection.List
+import eliot.compiler.Reflect
+import eliot.system.Process
+import eliot.test.Test
+import eliot.test.Report
+
+/**
+ * This project's test entry point, declaring the row **this project's** suites need.
+ *
+ * `eliot.test.Runner.main` exists and would do, except that it declares `{Console}` and so caps every suite at
+ * printing. That cap is not an oversight to be widened: a row is a declaration, the row an entry point owes is the
+ * union of what its suites perform, and that union is a fact about a program rather than about a test framework —
+ * `eliot.build.RealWorldTests` performs `Process`, another project's suites might perform an ability that project
+ * declared itself and no library could ever name.
+ *
+ * So the framework exports the three pieces (`noFailures`, `runSuite`, `summary`) and the program spends four lines
+ * assembling them under a row it owns. Adding an effect to a suite is then a change *here*, in the project that added
+ * it, and never in the framework.
+ *
+ * Run it with `-m eliot.build.TestMain` in place of `-m eliot.test.Runner`; the report is the same, because it is the
+ * same reporting.
+ */
+def main: {Console, Process} Unit = printLine(summary(allSuiteFailures))
+
+/**
+ * Every case of every suite in this program, as its failure lines. The row is the one thing this file adds: `Console`
+ * because the report prints, `Process` because `eliot.build.RealWorldTests` spawns a real `git`.
+ */
+private def allSuiteFailures: {Console, Process} List[List[String]] =
+   foldNamedValues("testCases", noFailures, runSuite)

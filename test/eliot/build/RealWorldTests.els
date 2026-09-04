@@ -1,0 +1,42 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.system.Process
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.RealWorld
+
+/**
+ * The two cases that run on the **platform carrier** rather than on a fake: the suite declares
+ * `{Process}`, so its bodies perform for real on whatever carrier the runner was compiled to, and
+ * what they prove is that the production instances exist and bind — `Process[IO]`, `Throw[IoError]`
+ * and `Throw[GitError]` over it, and `eliot.build.Git`'s own raise path through all three.
+ *
+ * That is exactly what a faked suite cannot say: instantiating production code at `Fake` resolves
+ * `Process[Fake]`, so every ability the platform supplies stays unresolved and unchecked. These two
+ * cases are the smallest thing that reaches them, and they are here rather than in a `probe/` `main`
+ * because a suite can now declare the row a real effect needs.
+ *
+ * **They do no network and write nothing**: one asks git about a repository that does not exist, the
+ * other asks for a program that does not exist. Both assert the *shape* of the report rather than a
+ * diagnostic, because the wording belongs to whichever git and whichever operating system is running
+ * the suite.
+ */
+def testCases: {Writer[List[TestResult]], Process} Unit = {
+   "the platform" should "run git for real, and report what git said when it said no" in {
+      opening(refusalPrefix, tagReportOf("no-such-repository-anywhere", here)) shouldBe refusalPrefix
+   }
+   "the platform" should "raise, not answer, when a program cannot be started at all" in {
+      opening("io: ", spawnReportOf("no-such-program-anywhere", here)) shouldBe "io: "
+   }
+}
+
+private def here: Path = path(".")
+
+private def refusalPrefix: String =
+   "'git ls-remote --tags no-such-repository-anywhere' failed with exit code "
+
+/**
+ * As much of `report` as `expected` is long — the report's opening, so a case pins the shape of what
+ * was reported without pinning a diagnostic that belongs to whichever git is installed.
+ */
+private def opening(expected: String, report: String): String = take(length(expected), report)

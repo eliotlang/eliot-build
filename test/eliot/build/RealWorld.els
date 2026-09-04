@@ -1,0 +1,54 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.build.Git
+
+/**
+ * The effectful modules run on the **platform's own carrier**, with the failure channels discharged
+ * here so a suite can assert on a plain `String`.
+ *
+ * This is the job `probe/` used to do, and the reason it is a job at all: ability resolution happens
+ * at monomorphization, so production code run on a test's pure carrier resolves `Process[Fake]` and
+ * never `Process[IO]`. A green faked suite is evidence about the logic and no evidence that the logic
+ * has an interpretation on the platform. Reaching the real instances is what these two definitions
+ * are for — `git` really runs, and what it says comes back through the real `Process` instance, the
+ * real `Throw` carriers and `Git`'s own raise path.
+ *
+ * **Why the discharges live here and not in the suite.** A suite asserts, so it imports
+ * `eliot.test.Assertion`; naming `IoError` in a `catch` means importing `eliot.file.File`; and both
+ * modules export a `message`, which is a hard "Imported names shadow other imported names". So the
+ * file that names the failure types is the file that does not assert. It is also why the row these
+ * answer is `{Process}` alone: the `catch` supplies the `Throw[IoError]` layer the platform's
+ * `Process` instance requires, in the one region that needs it.
+ *
+ * **Neither of these touches the network or writes anything** — one asks git about a repository that
+ * does not exist, the other asks the operating system for a program that does not exist. What is
+ * being tested is that the wiring is real, not what git does with a real repository; that is the
+ * launcher's `main` to prove, and `eliot.build.Cache`'s own suite proves the policy against a fake.
+ */
+
+/**
+ * What `git ls-remote --tags` says about `target`, run from `from` for real — the versions it
+ * published, or the report of it saying no.
+ */
+def tagReportOf(target: String, from: Path): {Process} String =
+   listedVersions(target, from)
+      catch ((broken: IoError) -> "io: " ++ show(broken))
+      catch ((failed: GitError) -> show(failed))
+
+/**
+ * What starting `executable` did, run for real — its exit code, or the report of it not being
+ * startable at all, which is the other failure channel and the one `Process` raises itself.
+ */
+def spawnReportOf(executable: String, from: Path): {Process} String =
+   exitCodeOf(executable, from) catch ((broken: IoError) -> "io: " ++ show(broken))
+
+private def listedVersions(target: String, from: Path): {Process, Throw[IoError], Throw[GitError]} String =
+   lsRemoteTags(target, from).map(ref -> show(ref.taggedVersion)).joined(", ")
+
+private def exitCodeOf(executable: String, from: Path): {Process, Throw[IoError]} String = {
+   val result = run(command(executable), from)
+
+   show(result.exitCode)
+}
