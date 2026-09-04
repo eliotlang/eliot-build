@@ -18,7 +18,7 @@ import eliot.build.Git
  * real `runThrow` over `Fake` as a base is not an alternative: `Process[ThrowCarrier[E, Fake]]` would
  * need a lift of this `Process` through `ThrowCarrier`, the real effects get theirs for free by riding
  * `Suspend`, and writing one here would be an orphan instance. So a raise lands in this carrier's own
- * result slot, rendered, and `outcomeOf` reads it back.
+ * result slot, rendered, and `answerOf` reads it back.
  *
  * **It cannot cheat.** `Fake` has no `Suspend` instance and `Suspend` is the only route to a native
  * side effect, so no line of production code run on it can reach a real process or a real file — an
@@ -148,7 +148,7 @@ def journalOf[A](world: World, computation: Fake[A]): String =
  * rendered by that error's own `Show`. One helper for both outcomes, so a test asserts a failure the
  * same way it asserts a success.
  */
-def outcomeOf[A](world: World, rendering: A => String, computation: Fake[A]): String =
+def answerOf[A](world: World, rendering: A => String, computation: Fake[A]): String =
    foldEither(err -> "raised: " ++ err, a -> rendering(a), first(runFake(computation)(world)))
 
 /**

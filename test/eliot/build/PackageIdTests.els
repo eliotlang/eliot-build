@@ -3,7 +3,7 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.PackageId
 
-def testCases: Test = {
+def testCases: {Writer[List[TestResult]]} Unit = {
    "packageId" should "leave a package already written canonically alone" in {
       canonical("github.com/x/foo") shouldBe "github.com/x/foo"
    }

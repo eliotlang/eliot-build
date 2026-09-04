@@ -7,7 +7,7 @@ import eliot.build.Version
 import eliot.build.Resolution
 import eliot.build.TablePackages
 
-def testCases: Test = {
+def testCases: {Writer[List[TestResult]]} Unit = {
    "resolveTests" should "select the version the only requirement declared" in {
       resolved("test {\n  dep github.com/x/foo v1.2\n}", publishing("github.com/x/foo@v1.2", ""))
          shouldBe "github.com/x/foo v1.2"

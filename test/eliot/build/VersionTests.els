@@ -4,7 +4,7 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.Version
 
-def testCases: Test = {
+def testCases: {Writer[List[TestResult]]} Unit = {
    "parseVersion" should "read a release on a compatibility line" in {
       parsed("v1.3") shouldBe "v1.3"
    }

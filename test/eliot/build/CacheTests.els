@@ -9,7 +9,7 @@ import eliot.build.Git
 import eliot.build.Cache
 import eliot.build.FakeWorld
 
-def testCases: Test = {
+def testCases: {Writer[List[TestResult]]} Unit = {
    "cacheDirectory" should "give one directory per canonical URL segment" in {
       show(cacheDirectory(cacheRoot, packageId("github.com/x/foo"))) shouldBe "target/cache/github.com/x/foo"
    }
@@ -86,34 +86,34 @@ private def secondVisitJournal: String =
    journalOf(mirrored.answering("ls-remote", listing), publishedTags(cacheRoot, cached))
 
 private def publishedVersions: String =
-   outcomeOf(mirrored.answering("ls-remote", listing), renderedTags, publishedTags(cacheRoot, cached))
+   answerOf(mirrored.answering("ls-remote", listing), renderedTags, publishedTags(cacheRoot, cached))
 
 private def refusedListing: String =
-   outcomeOf(
+   answerOf(
       mirrored.failing("ls-remote", 128, "no such repository"),
       renderedTags,
       publishedTags(cacheRoot, cached)
    )
 
 private def firstReleaseCommit: String =
-   outcomeOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 1, cached))
+   answerOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 1, cached))
 
 private def missingLineCommit: String =
-   outcomeOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 3, cached))
+   answerOf(mirrored.answering("ls-remote", anchored), renderedText, anchorOf(cacheRoot, 3, cached))
 
 private def refreshJournal: String = journalOf(mirrored, refreshed(cacheRoot, cached))
 
 private def coldRefreshJournal: String = journalOf(emptyWorld, refreshed(cacheRoot, cached))
 
 private def descriptorRead: String =
-   outcomeOf(
+   answerOf(
       mirrored.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
       renderedText,
       descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
    )
 
 private def descriptorMissing: String =
-   outcomeOf(
+   answerOf(
       mirrored.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
       renderedText,
       descriptorTextAt(cacheRoot, Version(1, Some(9)), cached)

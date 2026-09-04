@@ -7,7 +7,7 @@ import eliot.build.Version
 import eliot.build.Git
 import eliot.build.FakeWorld
 
-def testCases: Test = {
+def testCases: {Writer[List[TestResult]]} Unit = {
    "parseTagRefs" should "read a lightweight tag, which is listed once" in {
       tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
    }
@@ -105,10 +105,10 @@ private def listingJournal: String =
    journalOf(emptyWorld.answering("ls-remote", listing), lsRemoteTags("github.com/x/foo", here))
 
 private def listingRead: String =
-   outcomeOf(emptyWorld.answering("ls-remote", listing), renderedTags, lsRemoteTags("github.com/x/foo", here))
+   answerOf(emptyWorld.answering("ls-remote", listing), renderedTags, lsRemoteTags("github.com/x/foo", here))
 
 private def refusedListing: String =
-   outcomeOf(
+   answerOf(
       emptyWorld.failing("ls-remote", 128, "no such repository"),
       renderedTags,
       lsRemoteTags("github.com/x/foo", here)
@@ -120,19 +120,19 @@ private def cloneJournal: String =
 private def fetchJournal: String = journalOf(emptyWorld, fetchTags(mirror))
 
 private def fetchRefusal: String =
-   outcomeOf(emptyWorld.failing("fetch", 128, "not a repository"), _ -> "", fetchTags(mirror))
+   answerOf(emptyWorld.failing("fetch", 128, "not a repository"), _ -> "", fetchTags(mirror))
 
 private def showJournal: String = journalOf(emptyWorld, showFile("v1.2", "eliot.pkg", mirror))
 
 private def showRead: String =
-   outcomeOf(
+   answerOf(
       emptyWorld.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
       renderedText,
       showFile("v1.2", "eliot.pkg", mirror)
    )
 
 private def showMissing: String =
-   outcomeOf(
+   answerOf(
       emptyWorld.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
       renderedText,
       showFile("v1.9", "eliot.pkg", mirror)
