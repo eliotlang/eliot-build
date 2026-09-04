@@ -20,14 +20,23 @@ import eliot.build.Git
  * `Suspend`, and writing one here would be an orphan instance. So a raise lands in this carrier's own
  * result slot, rendered, and `answerOf` reads it back.
  *
+ * **What it deliberately does not implement is `Throw[AssertionError]`**, which is what a body
+ * asserting *between* its own steps would need. Not a design choice: `AssertionError` lives in
+ * `eliot.test.Assertion` and `IoError` in `eliot.file.File`, and both modules export a `message`, so a
+ * file faking `FileSystem` cannot import the assertions too ("Imported names shadow other imported
+ * names"). It costs nothing here — the journal accumulates, so asserting it after a two-step script
+ * says everything asserting it between the steps would have.
+ *
  * **It cannot cheat.** `Fake` has no `Suspend` instance and `Suspend` is the only route to a native
  * side effect, so no line of production code run on it can reach a real process or a real file — an
  * accidental one is a compile error rather than a test that quietly does I/O.
  *
- * **Assertions are run-then-assert.** A test case body is pinned to `{Throw[AssertionError] | Id}` and
- * a pinned region writes every carrier-generic callee at *its* carrier, so a run written inside one
- * fails to compile. Each scenario is therefore a private `def` above the suite, and the body only
- * compares what it answered.
+ * **A faked case costs no helper definitions.** Both slots that take a computation here are declared
+ * with the **capture tag** `{| Fake}` — the pinned row at zero entries, the same type as `Fake[A]` but
+ * declaring that the slot hosts a computation on that carrier — so a run, or a whole script of them,
+ * is written inline inside an ordinary `pure` body rather than in a `def` with no ambient carrier of
+ * its own. Which of the two words a test wants is the shape of what it asserts: `journalOf` answers
+ * what a run *did*, `answerOf` what it *yielded* or raised.
  */
 
 /**
@@ -44,7 +53,9 @@ data Canned(whenCommandContains: String, cannedReply: Reply)
 data World(existingDirectories: List[String], journal: List[String], replies: List[Canned])
 
 /**
- * A world in, a value or a raised error out, and the world after.
+ * A world in, a value or a raised error out, and the world after. A raise lands in the result slot
+ * already rendered by the error's own `Show`, which is what a user would have been shown, so a test
+ * asserting a failure asserts the report.
  */
 data Fake[A](runFake: Function[World, Pair[Either[String, A], World]])
 
@@ -68,19 +79,28 @@ implement Effect[Fake] {
  * Spawning: nothing runs, the command and the directory it would have run in are journalled, and the
  * canned reply is what it "wrote". Recording the working directory is the point — it is the half of a
  * git invocation a command line does not carry, and the half that has actually been wrong.
+ *
+ * A successful `git clone --mirror` also **makes its target directory exist**, because that is what
+ * the real one does and it is the only thing the cache's presence test looks at. So "clone on the
+ * first visit, not on the second" is something a test observes within one run rather than seeds, and a
+ * clone landing anywhere other than where `cacheDirectory` looks is a failing test rather than a
+ * second clone nobody notices.
  */
 implement Process[Fake] {
    def run(command: List[String], workingDirectory: Path): Fake[ProcessResult] =
-      Fake(w -> Pair(Right(replied(command, w)), noted(spawnNote(command, workingDirectory), w)))
+      Fake(w -> spawned(command, workingDirectory, w))
 
    def runInheritingIo(command: List[String], workingDirectory: Path): Fake[Int] =
-      Fake(w -> Pair(Right(replied(command, w).exitCode), noted(spawnNote(command, workingDirectory), w)))
+      Fake(w -> foldPair(
+         outcome -> after -> Pair(foldEither(err -> Left(err), result -> Right(result.exitCode), outcome), after),
+         spawned(command, workingDirectory, w)
+      ))
 }
 
 /**
- * The filesystem: directories a test seeded exist, creating one makes it exist and says so, and every
- * read nobody has needed yet answers empty. The unused ones are here because an ability is
- * all-or-nothing, not because they mean anything.
+ * The filesystem: directories a test seeded or a command created exist, creating one makes it exist
+ * and says so, and every read nobody has needed yet answers empty. The unused ones are here because an
+ * ability is all-or-nothing, not because they mean anything.
  */
 implement FileSystem[Fake] {
    def readFile(path: Path): Fake[String] = constantly("")
@@ -98,11 +118,11 @@ implement FileSystem[Fake] {
 }
 
 implement Throw[GitError, Fake] {
-   def raise[A](err: GitError): Fake[A] = Fake(w -> Pair(Left(show(err)), w))
+   def raise[A](err: GitError): Fake[A] = failed(show(err))
 }
 
 implement Throw[IoError, Fake] {
-   def raise[A](err: IoError): Fake[A] = Fake(w -> Pair(Left(show(err)), w))
+   def raise[A](err: IoError): Fake[A] = failed(show(err))
 }
 
 /**
@@ -139,8 +159,11 @@ def failing(commandFragment: String, exitCode: Int, diagnostics: String, world: 
 /**
  * Everything `computation` did against `world`, one entry per act, in order — a spawn as
  * `<directory>$ <command line>`, a directory creation as `mkdir <path>`.
+ *
+ * `computation` may be a whole script written inline, since the slot is a capture: two operations in
+ * one block share a world, so what the first one left behind is what the second one finds.
  */
-def journalOf[A](world: World, computation: Fake[A]): String =
+def journalOf[A](world: World, computation: {| Fake} A): String =
    second(runFake(computation)(world)).journal.joined("; ")
 
 /**
@@ -148,7 +171,7 @@ def journalOf[A](world: World, computation: Fake[A]): String =
  * rendered by that error's own `Show`. One helper for both outcomes, so a test asserts a failure the
  * same way it asserts a success.
  */
-def answerOf[A](world: World, rendering: A => String, computation: Fake[A]): String =
+def answerOf[A](world: World, rendering: A => String, computation: {| Fake} A): String =
    foldEither(err -> "raised: " ++ err, a -> rendering(a), first(runFake(computation)(world)))
 
 /**
@@ -162,6 +185,33 @@ def renderedTags(tags: List[TagRef]): String =
  * An optional answer, rendered — absence being an outcome several operations deliberately have.
  */
 def renderedText(text: Option[String]): String = foldOption("<none>", found -> found, text)
+
+private def failed[A](rendered: String): Fake[A] = Fake(w -> Pair(Left(rendered), w))
+
+private def spawned(
+   command: List[String],
+   workingDirectory: Path,
+   world: World
+): Pair[Either[String, ProcessResult], World] = {
+   val result = replied(command, world)
+   val spawnedIn = noted(spawnNote(command, workingDirectory), world)
+
+   Pair(Right(result), afterCloning(command, result, spawnedIn))
+}
+
+/**
+ * What a command left behind besides its output: a successful mirror clone makes its target exist, and
+ * nothing else does. Learned rather than journalled — the journal already carries the clone, and this
+ * is the directory git itself made.
+ */
+private def afterCloning(command: List[String], result: ProcessResult, world: World): World =
+   fold(
+      contains(cloneFragment, command.joined(" ")) && result.exitCode == 0,
+      foldOption(world, target -> withDirectory(target, world), command.last),
+      world
+   )
+
+private def cloneFragment: String = "clone --mirror"
 
 private def spawnNote(command: List[String], workingDirectory: Path): String =
    show(workingDirectory) ++ "$ " ++ command.joined(" ")

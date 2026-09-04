@@ -7,87 +7,119 @@ import eliot.build.Version
 import eliot.build.Git
 import eliot.build.FakeWorld
 
+/**
+ * Talking to git, with git faked: what each operation runs and where, what it reads back out of what
+ * git said, and which refusals it raises rather than answers.
+ *
+ * The reading half is pure and is asserted as such (`in pure`); the spawning half runs against
+ * `eliot.build.FakeWorld`, which journals the command *and the directory it ran in* — the half of a
+ * git invocation a command line does not carry, and the half that has actually been wrong.
+ */
 def testCases: {Writer[List[TestResult]]} Unit = {
-   "parseTagRefs" should "read a lightweight tag, which is listed once" in {
+   "parseTagRefs" should "read a lightweight tag, which is listed once" in pure {
       tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
    }
-   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in {
+   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in pure {
       tags("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
    }
-   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in {
+   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in pure {
       tags("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
    }
-   "parseTagRefs" should "read every version a repository publishes" in {
+   "parseTagRefs" should "read every version a repository publishes" in pure {
       tags("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
          shouldBe "v1.2 aaa1, v1.3 bbb2, v2.0 ccc3"
    }
-   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in {
+   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in pure {
       tags("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
    }
-   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in {
+   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in pure {
       tags("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
    }
-   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in {
+   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in pure {
       tags("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
    }
-   "parseTagRefs" should "survive the trailing empty line every listing ends with" in {
+   "parseTagRefs" should "survive the trailing empty line every listing ends with" in pure {
       tags("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
    }
-   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in {
+   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in pure {
       tags("") shouldBe ""
    }
-   "commitOf" should "find the commit a version names" in {
+   "commitOf" should "find the commit a version names" in pure {
       commit("v1.3", "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3") shouldBe "bbb2"
    }
-   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in {
+   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in pure {
       commit("v1.0", "aaa1\trefs/tags/v1") shouldBe "aaa1"
    }
-   "commitOf" should "find nothing for a version the repository does not publish" in {
+   "commitOf" should "find nothing for a version the repository does not publish" in pure {
       commit("v1.9", "aaa1\trefs/tags/v1.2") shouldBe "<none>"
    }
-   "anchorCommit" should "answer the first release of the line asked about" in {
+   "anchorCommit" should "answer the first release of the line asked about" in pure {
       anchor(1, "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4\nccc3\trefs/tags/v2.0") shouldBe "aaa1"
    }
-   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in {
+   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in pure {
       anchor(1, "aaa1\trefs/tags/v1\nbbb2\trefs/tags/v1.4") shouldBe "aaa1"
    }
-   "anchorCommit" should "find no anchor for a line whose history starts later" in {
+   "anchorCommit" should "find no anchor for a line whose history starts later" in pure {
       anchor(1, "aaa1\trefs/tags/v1.3\nbbb2\trefs/tags/v1.4") shouldBe "<none>"
    }
-   "anchorCommit" should "find no anchor for a line the repository does not publish" in {
+   "anchorCommit" should "find no anchor for a line the repository does not publish" in pure {
       anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
    }
-   "TagRef" should "order by version, so the newest release sorts last" in {
+   "TagRef" should "order by version, so the newest release sorts last" in pure {
       newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
-   "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in {
-      listingJournal shouldBe "/work$ git ls-remote --tags github.com/x/foo"
+   "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in pure {
+      journalOf(listingWorld, lsRemoteTags("github.com/x/foo", here))
+         shouldBe "/work$ git ls-remote --tags github.com/x/foo"
    }
-   "lsRemoteTags" should "read the versions the remote announced" in {
-      listingRead shouldBe "v1.2 aaa1, v1.3 bbb2"
+   "lsRemoteTags" should "read the versions the remote announced" in pure {
+      answerOf(listingWorld, renderedTags, lsRemoteTags("github.com/x/foo", here)) shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
-   "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in {
-      refusedListing shouldBe expectedRefusal
+   "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in pure {
+      answerOf(
+         emptyWorld.failing("ls-remote", 128, "no such repository"),
+         renderedTags,
+         lsRemoteTags("github.com/x/foo", here)
+      ) shouldBe expectedRefusal
    }
-   "mirrorClone" should "clone without a working tree, standing where the caller stands" in {
-      cloneJournal shouldBe "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+   "mirrorClone" should "clone without a working tree, standing where the caller stands" in pure {
+      journalOf(emptyWorld, mirrorClone("https://github.com/x/foo", show(mirror), here))
+         shouldBe "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
    }
-   "fetchTags" should "prune, so a withdrawn tag stops being selectable" in {
-      fetchJournal shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
+   "fetchTags" should "prune, so a withdrawn tag stops being selectable" in pure {
+      journalOf(emptyWorld, fetchTags(mirror)) shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
    }
-   "fetchTags" should "run in the repository it stands in, naming nothing" in {
-      fetchRefusal shouldBe "raised: 'git fetch --tags --prune' failed with exit code 128: not a repository"
+   "fetchTags" should "run in the repository it stands in, naming nothing" in pure {
+      answerOf(emptyWorld.failing("fetch", 128, "not a repository"), _ -> "", fetchTags(mirror))
+         shouldBe "raised: 'git fetch --tags --prune' failed with exit code 128: not a repository"
    }
-   "showFile" should "read one file out of the object database, in the mirror" in {
-      showJournal shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
+   "showFile" should "read one file out of the object database, in the mirror" in pure {
+      journalOf(emptyWorld, showFile("v1.2", "eliot.pkg", mirror))
+         shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
    }
-   "showFile" should "answer what that revision holds" in {
-      showRead shouldBe "dep github.com/x/bar v1.1"
+   "showFile" should "answer what that revision holds" in pure {
+      answerOf(
+         emptyWorld.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
+         renderedText,
+         showFile("v1.2", "eliot.pkg", mirror)
+      ) shouldBe "dep github.com/x/bar v1.1"
    }
-   "showFile" should "answer absent, not raise, where the revision holds no such file" in {
-      showMissing shouldBe "<none>"
+   "showFile" should "answer absent, not raise, where the revision holds no such file" in pure {
+      answerOf(
+         emptyWorld.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
+         renderedText,
+         showFile("v1.9", "eliot.pkg", mirror)
+      ) shouldBe "<none>"
    }
-   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in {
+   "git" should "name a repository from the caller's frame and stand in the one it fetches into" in pure {
+      journalOf(listingWorld, {
+         mirrorClone("https://github.com/x/foo", show(mirror), here)
+         fetchTags(mirror)
+      }) shouldBe (
+         "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
+            "/cache/github.com/x/foo$ git fetch --tags --prune")
+   }
+   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in pure {
       transportUrl("github.com/x/foo") shouldBe "https://github.com/x/foo"
    }
 }
@@ -98,45 +130,10 @@ private def mirror: Path = path("/cache/github.com/x/foo")
 
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
+private def listingWorld: World = emptyWorld.answering("ls-remote", listing)
+
 private def expectedRefusal: String =
    "raised: 'git ls-remote --tags github.com/x/foo' failed with exit code 128: no such repository"
-
-private def listingJournal: String =
-   journalOf(emptyWorld.answering("ls-remote", listing), lsRemoteTags("github.com/x/foo", here))
-
-private def listingRead: String =
-   answerOf(emptyWorld.answering("ls-remote", listing), renderedTags, lsRemoteTags("github.com/x/foo", here))
-
-private def refusedListing: String =
-   answerOf(
-      emptyWorld.failing("ls-remote", 128, "no such repository"),
-      renderedTags,
-      lsRemoteTags("github.com/x/foo", here)
-   )
-
-private def cloneJournal: String =
-   journalOf(emptyWorld, mirrorClone("https://github.com/x/foo", "/cache/github.com/x/foo", here))
-
-private def fetchJournal: String = journalOf(emptyWorld, fetchTags(mirror))
-
-private def fetchRefusal: String =
-   answerOf(emptyWorld.failing("fetch", 128, "not a repository"), _ -> "", fetchTags(mirror))
-
-private def showJournal: String = journalOf(emptyWorld, showFile("v1.2", "eliot.pkg", mirror))
-
-private def showRead: String =
-   answerOf(
-      emptyWorld.answering("show v1.2:eliot.pkg", "dep github.com/x/bar v1.1"),
-      renderedText,
-      showFile("v1.2", "eliot.pkg", mirror)
-   )
-
-private def showMissing: String =
-   answerOf(
-      emptyWorld.failing("show v1.9:eliot.pkg", 128, "path does not exist"),
-      renderedText,
-      showFile("v1.9", "eliot.pkg", mirror)
-   )
 
 /**
  * The tags `output` announces, rendered as `<tag> <commit>` per version — both halves asserted at
