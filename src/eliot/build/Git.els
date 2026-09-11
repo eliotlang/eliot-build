@@ -1,6 +1,6 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.file.Path
+import eliot.file.File
 import eliot.system.Process
 import eliot.build.Version
 
@@ -11,10 +11,10 @@ import eliot.build.Version
  * There is no embedded git library and there will not be one: the tool shells out to the `git` the
  * user already has, which is Go's original choice and the reason process spawning is the launcher's
  * load-bearing capability. So this module spawns — it does not hand command lines to somebody else to
- * spawn, which is what it used to do while a test could not reach an effect. A test now declares its
- * own carrier and interprets `{Process}` itself (`eliot.build.FakeWorld`), so the operations live here
- * with the decisions they are made of: which refs count, which commit a tag names, what a version tag
- * even looks like, and which of those questions a non-zero exit answers rather than fails.
+ * spawn, which is what it used to do while a test could not reach an effect. A test now binds a
+ * double for `{Process}` with one `with` (`eliot.test.Mock`), so the operations live here with the
+ * decisions they are made of: which refs count, which commit a tag names, what a version tag even
+ * looks like, and which of those questions a non-zero exit answers rather than fails.
  *
  * **Every operation says where it runs.** Git resolves a relative path against *its* working
  * directory, not this program's, and the split is git's own: a command that *names* a repository by
@@ -25,8 +25,8 @@ import eliot.build.Version
  *
  * Failure has two channels and they are different reports to a user: `IoError` is the standard
  * library's, raised when a program cannot be started at all, and `GitError` is this module's, raised
- * when git ran fine and *said no*. `IoError` is not declared here — it belongs to the `Process`
- * instance the carrier supplies — but the row of anything calling in carries both.
+ * when git ran fine and *said no*. `IoError` is declared by `Process`'s own operations rather than
+ * restated on every definition here, but the row of anything calling in carries both.
  */
 
 /**
@@ -117,11 +117,12 @@ def fetchTags(mirror: Path): {Process, Throw[GitError]} Unit = {
  * where the revision or the file is not there.
  *
  * The one operation that *reads* a refusal rather than raising it, and the signature says so by
- * carrying no `Throw`. A version nobody tagged and a tag carrying no such file are equally "there is
- * nothing to read", both reported by git as a non-zero exit, and a caller that reached either has a
- * dependency line to blame that this module cannot see.
+ * carrying no `Throw[GitError]`. A version nobody tagged and a tag carrying no such file are equally
+ * "there is nothing to read", both reported by git as a non-zero exit, and a caller that reached
+ * either has a dependency line to blame that this module cannot see. `Throw[IoError]` is a different
+ * statement and stays: git refusing to answer is what this reads, git failing to *start* is not.
  */
-def showFile(revision: String, file: String, mirror: Path): {Process} Option[String] = {
+def showFile(revision: String, file: String, mirror: Path): {Process, Throw[IoError]} Option[String] = {
    val shown = run(command("git").withArgument("show").withArgument(revision ++ ":" ++ file), mirror)
 
    fold(shown.exitCode == 0, Some(shown.standardOutput), None)
@@ -229,7 +230,7 @@ private def replacedTag(ref: TagRef, refs: List[TagRef]): List[TagRef] =
 private def addedTag(ref: TagRef, refs: List[TagRef]): List[TagRef] =
    fold(refs.any(other -> other.taggedVersion == ref.taggedVersion), refs, append(refs, ref))
 
-private def versionOfTag(name: String): Option[Version] = runId(runAbort(parseVersion(name)))
+private def versionOfTag(name: String): Option[Version] = runAbort(parseVersion(name))
 
 private def isPeeled(name: String): Bool = endsWith(peeledSuffix, name)
 

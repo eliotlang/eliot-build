@@ -1,4 +1,3 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
@@ -81,14 +80,14 @@ def testCases: {Writer[List[TestResult]]} Unit = {
  * absence, so a refusal is asserted the same way a reading is.
  */
 private def parsed(text: String): String =
-   foldOption("<not a version>", version -> show(version), runId(runAbort(parseVersion(text))))
+   foldOption("<not a version>", version -> show(version), runAbort(parseVersion(text)))
 
 /**
  * The version `text` spells, for the assertions that are about ordering rather than about parsing.
  * An unreadable token answers `v0`, which every one of those assertions would visibly fail on.
  */
 private def versionOf(text: String): Version =
-   foldOption(Version(0, None), version -> version, runId(runAbort(parseVersion(text))))
+   foldOption(Version(0, None), version -> version, runAbort(parseVersion(text)))
 
 private def larger(a: String, b: String): String = show(max(versionOf(a), versionOf(b)))
 

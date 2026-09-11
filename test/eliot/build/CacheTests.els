@@ -12,14 +12,15 @@ import eliot.build.Cache
  * Cache policy, run against the framework's doubles instead of against git — where a mirror goes, when one
  * has to be made, and which directory each command must stand in.
  *
- * Nothing here reaches a real process or a real file: the mock carrier has no `Suspend`, so a body that
- * tried would not compile. There is no fixture either — `eliot.test.Mock` is the whole of it.
+ * Nothing here reaches a real process or a real file: `mocked` binds a double for every effect these
+ * bodies perform, and an effect nothing doubles is not bound by that chain — so a body that tried to
+ * reach the world would not compile. There is no fixture either; `eliot.test.Mock` is the whole of it.
  */
 def testCases: {Writer[List[TestResult]]} Unit = {
-   "cacheDirectory" should "give one directory per canonical URL segment" in pure {
+   "cacheDirectory" should "give one directory per canonical URL segment" in {
       show(cacheDirectory(cacheRoot, packageId("github.com/x/foo"))) shouldBe "target/cache/github.com/x/foo"
    }
-   "cacheDirectory" should "key the repository, since a module selector is not what git fetches" in pure {
+   "cacheDirectory" should "key the repository, since a module selector is not what git fetches" in {
       show(cacheDirectory(cacheRoot, packageId("github.com/e/eliot//stdlib")))
          shouldBe "target/cache/github.com/e/eliot"
    }
@@ -56,7 +57,7 @@ def testCases: {Writer[List[TestResult]]} Unit = {
    "publishedTags" should "raise what git said when git said no" in mocked {
       whenSpawning("ls-remote", failing(128, "no such repository"))
 
-      raising(expectedRefusal, {
+      raising[GitError](expectedRefusal, {
          publishedTags(cacheRoot, cached)
          unit
       })

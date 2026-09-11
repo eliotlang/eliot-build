@@ -1,4 +1,3 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
@@ -64,19 +63,20 @@ def testCases: {Writer[List[TestResult]]} Unit = {
  * are written the same way as the successful ones.
  */
 private def parsed(text: String): String =
-   runId(runThrow[ClauseError](parseClauses(split("\n", text))))
+   runThrow[ClauseError](parseClauses(split("\n", text)))
       .foldEither(error -> show(error), clauses -> clauses.map(render).joined("\n"))
 
 private def firstClause(text: String): Option[Clause] =
    foldEither(_ -> None, clauses -> clauses.head, clausesOf(text))
 
 private def clausesOf(text: String): Either[ClauseError, List[Clause]] =
-   runId(runThrow[ClauseError](parseClauses(split("\n", text))))
+   runThrow[ClauseError](parseClauses(split("\n", text)))
 
 /**
  * The `index`-th argument of `text`'s first clause. The `{Abort}` discharge sits in its own
- * definition rather than inside the `foldOption` arm, where the arm's effect row and the discharged
- * carrier cannot be reconciled.
+ * definition rather than inside the `foldOption` arm, which the carrier model could not reconcile.
+ * Under effects v6 the arm would discharge locally and this could be inlined; it stays split because
+ * a named discharge says what `"<absent>"` means.
  */
 private def argumentOf(index: Int, text: String): String =
    foldOption("<none>", clause -> argumentText(index, clause), firstClause(text))

@@ -1,4 +1,3 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.build.Clause
 import eliot.build.PackageId
@@ -99,7 +98,7 @@ def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
    foldEither(
       error -> raise(Malformed(error)),
       clauses -> interpret(clauses),
-      runId(runThrow[ClauseError](parseClauses(lines)))
+      runThrow[ClauseError](parseClauses(lines))
    )
 
 /**
@@ -122,9 +121,10 @@ def renderDescriptor(descriptor: Descriptor): String =
 
 /**
  * Which clause a keyword introduces. A `data` sum matched with `match`, rather than a chain of
- * `if..else` over the keyword: an `if` introduces `Abort` and its arms therefore run *under* an
- * `Abort` carrier, which `Throw` has no lift through — so the arms could not raise. A `match`
- * introduces no effect and the arms keep the row they are written at.
+ * `if..else` over the keyword. The carrier model made that mandatory — an `if`'s arms ran under an
+ * `Abort` carrier that `Throw` had no lift through, so they could not raise — and effects v6 removed
+ * the constraint. It stays because naming the alternatives is clearer than testing a string four
+ * times, and because an unknown keyword is then a case rather than a fallthrough.
  */
 data ClauseKind = DepClause | ModuleClause | TestClause | ArtifactClause | UnknownClause
 
@@ -292,8 +292,9 @@ private def testDependenciesOf(clause: Clause): {Throw[DescriptorError]} List[De
 
 /**
  * The `index`-th argument, raising `problem` when there is none. The `{Abort}` is discharged to an
- * `Option` *first* and the raise happens outside it — `Throw` has no lift through an `Abort` carrier,
- * so `argument(...) else raise(...)` would ask for an instance that does not exist.
+ * `Option` *first* and the raise happens outside it. That was forced under the carrier model, where
+ * `Throw` had no lift through an `Abort` carrier; under effects v6 `argument(…) else raise(…)` would
+ * compile, and this keeps its shape only because the `Option` is what the caller reads.
  */
 private def required(index: Int, problem: String, clause: Clause): {Throw[DescriptorError]} String = {
    val found: Option[String] = optional(index, clause)
@@ -302,7 +303,7 @@ private def required(index: Int, problem: String, clause: Clause): {Throw[Descri
 }
 
 private def optional(index: Int, clause: Clause): Option[String] =
-   runId(runAbort(argument(index, clause)))
+   runAbort(argument(index, clause))
 
 private def atMostArguments(count: Int, clause: Clause): {Throw[DescriptorError]} Unit =
    requireThat(clause.arguments.size <= count, "too many arguments", clause)
@@ -317,7 +318,7 @@ private def versionOf(token: Option[String], clause: Clause): {Throw[DescriptorE
    foldOption(None, tag -> Some(checkedVersion(tag, clause)), token)
 
 private def checkedVersion(tag: String, clause: Clause): {Throw[DescriptorError]} Version = {
-   val parsed: Option[Version] = runId(runAbort(parseVersion(tag)))
+   val parsed: Option[Version] = runAbort(parseVersion(tag))
 
    foldOption(raise(Unreadable(render(clause), "a version must be a tag like 'v1.3'")), version -> version, parsed)
 }
@@ -336,9 +337,9 @@ private def requireKnown(keywords: List[String], clause: Clause): {Throw[Descrip
 
 /**
  * Raise `problem` against `clause` unless `condition` holds. Written as an `Option` eliminator rather
- * than as `if(condition) unit else raise(...)`: an `if..else` whose arms differ in whether they
- * perform effects has to stack the `Abort` it introduces underneath the `Throw`, and that pair has no
- * cross-lift.
+ * than as `if(condition) unit else raise(...)`, which the carrier model could not express — an `if`
+ * stacked its `Abort` under the `Throw` and that pair had no cross-lift. Effects v6 removed the
+ * constraint; the shape stays so that the three `require*` helpers read alike.
  */
 private def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[DescriptorError]} Unit = {
    val trouble: Option[String] = problemUnless(condition, problem)

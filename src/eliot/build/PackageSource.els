@@ -1,4 +1,3 @@
-import eliot.carrier.Effect
 import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
@@ -18,57 +17,64 @@ import eliot.build.Cache
  * package offers, so discovering that a newer release exists belongs to `eliot get` rather than here.
  *
  * This used to be a pair of callbacks threaded through every private function of
- * `eliot.build.Resolution`, because an ability method that declares a row *is* an effect, and an
- * effect with no carrier and no handler could never be discharged. A test now brings its own carrier
- * and implements the ability for it (`eliot.build.TablePackages`), which is the handler that was
- * missing, so the plumbing goes and the algorithm reads as what it is.
+ * `eliot.build.Resolution`. Declaring it as an effect is what removed the plumbing: the algorithm
+ * says `{PackageSource}` and the question of *which* source answers is the caller's, all the way up
+ * to whoever runs it.
  *
- * **One implementation per carrier, and the production one is a constrained catch-all** — the only
- * placement the orphan rule allows for an instance over an arbitrary carrier is the ability's own
- * module, which is why the git-backed source lives here rather than next to the cache it uses. The
- * consequence is a rule for tests: a fake that happens to satisfy those same constraints matches this
- * instance too and the query becomes ambiguous, so a test carrier implements the *minimum* — a
- * resolver test wants a table of descriptors, not a fake process.
+ * **What a member declares is what the resolver must handle.** Neither question fails in a way MVS
+ * can act on, so neither member declares a row: a missing descriptor is `None`, and the ways the
+ * *git-backed* source can fail — a process that will not start, a repository that is not there, a
+ * descriptor that will not parse — are declared by that implementation's own clauses and charged
+ * where it is bound, not at every call in the algorithm. A test binds a source that cannot fail at
+ * all and is charged nothing, which is why a resolver test declares no row beyond its own.
  */
-ability PackageSource[F[_]] {
+effect PackageSource {
    /**
     * What `target` published at `version`, absent where it publishes nothing there.
     */
-   def descriptorAt(version: Version, target: PackageId): {PackageSource} Option[Descriptor]
+   def descriptorAt(version: Version, target: PackageId): Option[Descriptor]
 
    /**
     * The commit `target`'s `majorLine` line starts at, absent where that line has no first release.
     */
-   def anchorAt(majorLine: Int, target: PackageId): {PackageSource} Option[String]
+   def anchorAt(majorLine: Int, target: PackageId): Option[String]
 }
 
 /**
  * Where mirrors live, until there is a launcher to decide it.
  *
- * A constant rather than a parameter or a `{Dep[…]}`, and neither is an oversight: the ability's
- * methods carry what the *resolver* knows, which is a package and a version and never a cache
- * directory, and `Dep` cannot ride the same carrier stack as `Throw` — the cross-lift matrix is
- * partial and that pair is one of the holes. So the source's own configuration sits here, at the one
- * place that binds resolution to a cache, and moves into the launcher's hands when the launcher
- * exists. `eliot.build.Cache` itself takes its root as a parameter and is indifferent.
+ * A constant rather than a parameter, and not an oversight: the effect's operations carry what the
+ * *resolver* knows, which is a package and a version and never a cache directory. So the source's own
+ * configuration sits here, at the one place that binds resolution to a cache, and moves into the
+ * launcher's hands when the launcher exists. `eliot.build.Cache` itself takes its root as a parameter
+ * and is indifferent. A `{Dep[Path]}` on the default implementation's clauses is what this becomes
+ * when there is a launcher to supply it — the shape `eliot.build.TablePackages` already uses.
  */
 def packageCacheRoot: Path = path("target/cache")
 
 /**
- * The git-backed source: any carrier that can spawn, touch the filesystem, and carry the three ways
- * this can fail.
+ * The git-backed source, and the default: it spawns git against the local mirror and reads what the
+ * mirror holds.
  *
- * A pure carrier implementing only `PackageSource` declines this candidate for want of `Process`,
- * which is what keeps a test's own instance the unique survivor — and in production nothing changes,
- * because a real carrier has all of them.
+ * Its clauses declare the three ways that can fail — a process that will not start, a repository git
+ * says no to, a descriptor that will not parse — so those are bound where *this* implementation is
+ * bound rather than at every question the resolver asks. Being the anonymous implementation in the
+ * effect's own module makes it what a run boundary picks with nothing said; a test names its own and
+ * this one is never searched.
  */
-implement[F[_] ~ Process & FileSystem & Throw[IoError] & Throw[GitError] & Throw[DescriptorError] & Effect] PackageSource[F] {
-   def descriptorAt(version: Version, target: PackageId): F[Option[Descriptor]] = {
+implement PackageSource {
+   def descriptorAt(
+         version: Version,
+         target: PackageId
+      ): {Process, FileSystem, Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
       val published = descriptorTextAt(packageCacheRoot, version, target)
 
       foldOption(None, text -> Some(parseDescriptor(split("\n", text))), published)
    }
 
-   def anchorAt(majorLine: Int, target: PackageId): F[Option[String]] =
+   def anchorAt(
+         majorLine: Int,
+         target: PackageId
+      ): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
       anchorOf(packageCacheRoot, majorLine, target)
 }

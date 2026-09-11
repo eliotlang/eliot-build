@@ -1,4 +1,3 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.file.Path
 import eliot.test.Assertion
@@ -16,56 +15,56 @@ import eliot.build.Git
  * invocation a command line does not carry, and the half that has actually been wrong.
  */
 def testCases: {Writer[List[TestResult]]} Unit = {
-   "parseTagRefs" should "read a lightweight tag, which is listed once" in pure {
+   "parseTagRefs" should "read a lightweight tag, which is listed once" in {
       tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
    }
-   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in pure {
+   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in {
       tags("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
    }
-   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in pure {
+   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in {
       tags("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
    }
-   "parseTagRefs" should "read every version a repository publishes" in pure {
+   "parseTagRefs" should "read every version a repository publishes" in {
       tags("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
          shouldBe "v1.2 aaa1, v1.3 bbb2, v2.0 ccc3"
    }
-   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in pure {
+   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in {
       tags("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
    }
-   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in pure {
+   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in {
       tags("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
    }
-   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in pure {
+   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in {
       tags("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
    }
-   "parseTagRefs" should "survive the trailing empty line every listing ends with" in pure {
+   "parseTagRefs" should "survive the trailing empty line every listing ends with" in {
       tags("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
    }
-   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in pure {
+   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in {
       tags("") shouldBe ""
    }
-   "commitOf" should "find the commit a version names" in pure {
+   "commitOf" should "find the commit a version names" in {
       commit("v1.3", "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3") shouldBe "bbb2"
    }
-   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in pure {
+   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in {
       commit("v1.0", "aaa1\trefs/tags/v1") shouldBe "aaa1"
    }
-   "commitOf" should "find nothing for a version the repository does not publish" in pure {
+   "commitOf" should "find nothing for a version the repository does not publish" in {
       commit("v1.9", "aaa1\trefs/tags/v1.2") shouldBe "<none>"
    }
-   "anchorCommit" should "answer the first release of the line asked about" in pure {
+   "anchorCommit" should "answer the first release of the line asked about" in {
       anchor(1, "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4\nccc3\trefs/tags/v2.0") shouldBe "aaa1"
    }
-   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in pure {
+   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in {
       anchor(1, "aaa1\trefs/tags/v1\nbbb2\trefs/tags/v1.4") shouldBe "aaa1"
    }
-   "anchorCommit" should "find no anchor for a line whose history starts later" in pure {
+   "anchorCommit" should "find no anchor for a line whose history starts later" in {
       anchor(1, "aaa1\trefs/tags/v1.3\nbbb2\trefs/tags/v1.4") shouldBe "<none>"
    }
-   "anchorCommit" should "find no anchor for a line the repository does not publish" in pure {
+   "anchorCommit" should "find no anchor for a line the repository does not publish" in {
       anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
    }
-   "TagRef" should "order by version, so the newest release sorts last" in pure {
+   "TagRef" should "order by version, so the newest release sorts last" in {
       newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
    "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
@@ -81,7 +80,7 @@ def testCases: {Writer[List[TestResult]]} Unit = {
    "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
       whenSpawning("ls-remote", failing(128, "no such repository"))
 
-      raising(expectedRefusal, {
+      raising[GitError](expectedRefusal, {
          lsRemoteTags("github.com/x/foo", here)
          unit
       })
@@ -99,7 +98,7 @@ def testCases: {Writer[List[TestResult]]} Unit = {
    "fetchTags" should "run in the repository it stands in, naming nothing" in mocked {
       whenSpawning("fetch", failing(128, "not a repository"))
 
-      raising("'git fetch --tags --prune' failed with exit code 128: not a repository", fetchTags(mirror))
+      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetchTags(mirror))
    }
    "showFile" should "read one file out of the object database, in the mirror" in mocked {
       showFile("v1.2", "eliot.pkg", mirror)
@@ -128,7 +127,7 @@ def testCases: {Writer[List[TestResult]]} Unit = {
          "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
             "/cache/github.com/x/foo$ git fetch --tags --prune")
    }
-   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in pure {
+   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in {
       transportUrl("github.com/x/foo") shouldBe "https://github.com/x/foo"
    }
 }

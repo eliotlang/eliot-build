@@ -1,4 +1,3 @@
-import eliot.lang.Id
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
@@ -156,10 +155,11 @@ def testCases: {Writer[List[TestResult]]} Unit = {
  * A package universe held as data: what each repository publishes at each version, as descriptor
  * text, and what each compatibility line's anchor tag names.
  *
- * The resolver never sees these tables. It declares `{PackageSource}` and names no carrier, so what
- * answers its two questions is decided by what it is run on — here `eliot.build.TablePackages`, which
- * reads them out of a `Universe`, and in the launcher a git-backed cache. That the same code runs on
- * both, unchanged and unaware, is the whole point of the source being an effect.
+ * The resolver never sees these tables. It declares `{PackageSource}` and names no implementation, so
+ * what answers its two questions is decided by whoever runs it — here `eliot.build.TablePackages`,
+ * bound by the one `with` in `against` and reading them out of a `Universe`, and in the launcher the
+ * git-backed default. That the same code runs on both, unchanged and unaware, is the whole point of
+ * the source being an effect.
  */
 private def resolved(rootText: String, universe: List[Pair[String, String]]): String =
    resolvedWithAnchors(rootText, universe, empty)

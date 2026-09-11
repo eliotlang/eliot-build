@@ -1,6 +1,5 @@
-import eliot.lang.Id
-import eliot.carrier.Effect
 import eliot.collection.List
+import eliot.build.Clause
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
@@ -8,55 +7,27 @@ import eliot.build.PackageSource
 import eliot.build.Resolution
 
 /**
- * A package source that is a table of strings: the carrier a resolver test runs on.
+ * A package source that is a table of strings: what a resolver test binds in place of git.
  *
- * It implements `PackageSource`, the failure channel resolution raises on, and nothing else —
- * deliberately. The production source is a catch-all over any carrier that can spawn and touch files,
- * so a carrier that *also* faked `Process` and `FileSystem` would match it too and the query would be
- * ambiguous ("Multiple ability implementations found"). One fake per seam, each implementing the
- * minimum, is what keeps the answer unique — and a resolver test wants descriptors, not a fake git.
+ * It is a **named implementation**, so it is never searched and never overlaps the git-backed default
+ * — there is no coherence question to answer and no "minimum" a fake has to implement to stay the
+ * unique survivor. A resolver test writes one `with` and gets descriptors instead of a subprocess.
  *
- * `Throw[ResolutionError]` is implemented here rather than discharged with `runThrow`:
- * `PackageSource[ThrowCarrier[E, Packages]]` would need a lift this ability has no way to earn, so the
- * carrier is flat and `against` reads the outcome out as the `Either` the assertions already expect.
- *
- * **Why this is not `eliot.test.Mock`.** The framework's carrier doubles every *base* effect, and this
- * project's own ability is not one of them — an instance may live only with its ability or with a type
- * argument, so `implement PackageSource[Mock]` could go in `PackageSource`'s module (production code
- * importing the test framework) or in the framework (which has never heard of it), and neither is right.
- * A carrier of one's own is the answer, and it is also required here: the production instance is a
- * constrained catch-all that the framework's wide `Mock` would satisfy, and two candidates is
- * "Multiple ability implementations found".
+ * The table itself arrives as `{Dep[Universe]}`, declared by the clauses that read it. A named
+ * implementation takes no parameters and closes over nothing: what it needs at runtime it asks an
+ * effect for, and `against` is where that ask is answered. The effect is charged at the binding site
+ * rather than at every question the resolver asks, which is why `eliot.build.Resolution` says
+ * `{PackageSource, Throw[ResolutionError]}` and nothing about tables.
  */
 
-/**
- * What a universe of packages publishes: descriptor text per `<url>@<tag>`, and anchor commits per
- * `<url>@v<major>`.
- */
 data Universe(publications: List[Pair[String, String]], lineages: List[Pair[String, String]])
 
-data Packages[A](runPackages: Function[Universe, Either[ResolutionError, A]])
+implement tablePackages: PackageSource {
+   def descriptorAt(version: Version, target: PackageId): {Dep[Universe]} Option[Descriptor] =
+      publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
-implement Effect[Packages] {
-   def pure[A](a: A): Packages[A] = Packages(_ -> Right(a))
-
-   def flatMap[A, B](f: Function[A, Packages[B]], fa: Packages[A]): Packages[B] =
-      Packages(universe -> foldEither(error -> Left(error), a -> runPackages(f(a))(universe), runPackages(fa)(universe)))
-
-   def map[A, B](f: Function[A, B], fa: Packages[A]): Packages[B] =
-      Packages(universe -> foldEither(error -> Left(error), a -> Right(f(a)), runPackages(fa)(universe)))
-}
-
-implement Throw[ResolutionError, Packages] {
-   def raise[A](err: ResolutionError): Packages[A] = Packages(_ -> Left(err))
-}
-
-implement PackageSource[Packages] {
-   def descriptorAt(version: Version, target: PackageId): Packages[Option[Descriptor]] =
-      Packages(universe -> Right(publicationIn(universe, show(target) ++ "@" ++ show(version))))
-
-   def anchorAt(majorLine: Int, target: PackageId): Packages[Option[String]] =
-      Packages(universe -> Right(universe.lineages.lookupOption(show(target) ++ "@v" ++ show(majorLine))))
+   def anchorAt(majorLine: Int, target: PackageId): {Dep[Universe]} Option[String] =
+      dependency.lineages.lookupOption(show(target) ++ "@v" ++ show(majorLine))
 }
 
 /**
@@ -67,9 +38,16 @@ def universeOf(publications: List[Pair[String, String]], lineages: List[Pair[Str
 
 /**
  * What `computation` answers against `universe` — the selections, or the error resolution raised.
+ *
+ * The one place the test source is chosen, and the one place its table is supplied: `with
+ * tablePackages` binds the slot's `PackageSource`, and `provide` answers the `Dep[Universe]` those
+ * clauses declare. Production code inside `computation` names neither.
  */
-def against[A](universe: Universe, computation: Packages[A]): Either[ResolutionError, A] =
-   runPackages(computation)(universe)
+def against[A](
+      universe: Universe,
+      computation: {PackageSource, Throw[ResolutionError]} A with tablePackages
+   ): Either[ResolutionError, A] =
+   provide(universe, runThrow[ResolutionError, A](computation))
 
 /**
  * The descriptor `text` spells, taken as empty where it spells nothing readable. A malformed
@@ -79,7 +57,7 @@ def descriptorOf(text: String): Descriptor =
    foldEither(
       _ -> emptyDescriptor,
       descriptor -> descriptor,
-      runId(runThrow[DescriptorError](parseDescriptor(split("\n", text))))
+      runThrow[DescriptorError, Descriptor](parseDescriptor(split("\n", text)))
    )
 
 private def publicationIn(universe: Universe, key: String): Option[Descriptor] =

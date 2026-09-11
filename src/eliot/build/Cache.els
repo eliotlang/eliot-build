@@ -6,6 +6,8 @@ import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Git
 
+
+
 /**
  * The local mirror of every package a build has looked at, and the questions resolution asks of one.
  *
@@ -112,9 +114,11 @@ def descriptorFileName: String = "eliot.pkg"
  * partial mirror that will look present; validating one is work for the fetcher, which has to check
  * ancestry against the objects anyway.
  *
- * Written as an `Option` eliminator rather than as `if(present) mirror else cloned(…)`: an `if`
- * introduces an `Abort` its arms then run under, and `Throw` has no lift through an `Abort` carrier,
- * so the cloning arm could not raise.
+ * Written as an `Option` eliminator rather than as `if(present) mirror else cloned(…)`, which under
+ * the carrier model was forced: an `if`'s arms ran under an `Abort` carrier and `Throw` had no lift
+ * through one, so the cloning arm could not raise. Under effects v6 that constraint is gone — `if`'s
+ * `{Abort}` slot supplies `Abort` alone and the arms ride the caller's `Throw` — and this now reads
+ * the way it does by preference rather than by necessity.
  */
 private def ensuredMirror(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
    val mirror = cacheDirectory(root, id)
