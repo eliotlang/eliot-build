@@ -6,6 +6,16 @@ import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Git
 
+/**
+ * What every question in this module runs on: git in a subprocess, the mirror on disk, and the two
+ * ways either can refuse — `IoError` when a program cannot be started or a directory cannot be made,
+ * `GitError` when git ran and said no.
+ *
+ * Named because six definitions state it and drift between them would be a silent widening rather
+ * than a compile error. It is spelled out once here; keeping the two failure channels apart is what
+ * lets a caller report "git is not installed" differently from "that repository does not exist".
+ */
+type Cached[A] = {Process, FileSystem, Throw[IoError], Throw[GitError]} A
 
 
 /**
@@ -53,7 +63,7 @@ def cacheDirectory(root: Path, id: PackageId): Path =
  * a separate act: MVS never needs to know that a newer release exists, and a resolver that refetched
  * on every question would make an offline build impossible for no gain.
  */
-def publishedTags(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} List[TagRef] = {
+def publishedTags(root: Path, id: PackageId): Cached[List[TagRef]] = {
    val mirror = ensuredMirror(root, id)
 
    lsRemoteTags(show(mirror), here)
@@ -66,7 +76,7 @@ def publishedTags(root: Path, id: PackageId): {Process, FileSystem, Throw[IoErro
  * This is the resolver's `anchorAt`: the question it asks when a requirement names a URL it has not
  * seen, to decide whether that URL is a package already selected under a different spelling.
  */
-def anchorOf(root: Path, majorLine: Int, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
+def anchorOf(root: Path, majorLine: Int, id: PackageId): Cached[Option[String]] =
    anchorCommit(majorLine, publishedTags(root, id))
 
 /**
@@ -77,7 +87,7 @@ def anchorOf(root: Path, majorLine: Int, id: PackageId): {Process, FileSystem, T
  * read", and a resolver that reached either has a dependency line to blame that this module cannot
  * see. `showFile` reports both the same way, by answering nothing.
  */
-def descriptorTextAt(root: Path, version: Version, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] = {
+def descriptorTextAt(root: Path, version: Version, id: PackageId): Cached[Option[String]] = {
    val mirror = ensuredMirror(root, id)
 
    showFile(show(version), descriptorFileName, mirror)
@@ -92,7 +102,7 @@ def descriptorTextAt(root: Path, version: Version, id: PackageId): {Process, Fil
  * which is what lets the project-model query stay offline and lets fetching be something a user
  * invokes rather than something opening an editor does.
  */
-def refreshed(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+def refreshed(root: Path, id: PackageId): Cached[Path] = {
    val mirror = ensuredMirror(root, id)
 
    fetchTags(mirror)
@@ -120,7 +130,7 @@ def descriptorFileName: String = "eliot.pkg"
  * `{Abort}` slot supplies `Abort` alone and the arms ride the caller's `Throw` — and this now reads
  * the way it does by preference rather than by necessity.
  */
-private def ensuredMirror(root: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+private def ensuredMirror(root: Path, id: PackageId): Cached[Path] = {
    val mirror = cacheDirectory(root, id)
    val absent = missingMirror(isDirectory(mirror), mirror)
 
@@ -134,7 +144,7 @@ private def missingMirror(present: Bool, mirror: Path): Option[Path] = fold(pres
  * the per-package chain needs no help; the root is made anyway to state that the cache is a directory
  * this tool owns rather than one that appears as a side effect of the first fetch.
  */
-private def cloned(root: Path, mirror: Path, id: PackageId): {Process, FileSystem, Throw[IoError], Throw[GitError]} Path = {
+private def cloned(root: Path, mirror: Path, id: PackageId): Cached[Path] = {
    createDirectories(root)
    mirrorClone(transportUrl(repository(id).url), show(mirror), here)
    mirror
