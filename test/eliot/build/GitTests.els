@@ -10,11 +10,13 @@ import eliot.build.Git
  * Talking to git, with git faked: what each operation runs and where, what it reads back out of what
  * git said, and which refusals it raises rather than answers.
  *
- * The reading half is pure and is asserted as such (`in pure`); the spawning half runs against the
- * framework's process double, which records the command *and the directory it ran in* — the half of a git
- * invocation a command line does not carry, and the half that has actually been wrong.
+ * The reading half is pure, and the bare `Test` this suite declares is what keeps it so: a case may
+ * assert and nothing else, so `in { … }` is already the strictest body there is. The spawning half adds
+ * `mocked`, whose own slot binds the framework's process double — which records the command *and the
+ * directory it ran in*, the half of a git invocation a command line does not carry, and the half that
+ * has actually been wrong.
  */
-def testCases: {Writer[List[TestResult]]} Unit = {
+def testCases: Test = {
    "parseTagRefs" should "read a lightweight tag, which is listed once" in {
       tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
    }

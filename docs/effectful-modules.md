@@ -236,6 +236,10 @@ same with `-m eliot.build.Probe` over `src probe`.
 
 ## 9. Revisited, 2026-09-04
 
+> **Superseded by §10 (2026-09-12).** Effects v6 deleted the carrier, and with it every mechanism named
+> below — `Fake`, `Suspend`, capture tags, `runMain`, `RealWorldTests`. The verdicts still hold; read
+> §10 for what carries them now.
+
 Against compiler `3be06cc` and framework `36ccc10`, on the two questions this document exists to
 answer: *do the modules carry behaviour rather than data-oriented interfaces*, and *do the tests
 exercise that behaviour without doing I/O*. Both answers are yes. Everything below is what changed
@@ -418,3 +422,68 @@ of §9.5 is settled the same way: the framework's infix `message` is now `descri
 both a file and an assertion. The one that stays open is the language question underneath all of it: an ability may have at most one
 carrier-generic instance, which is why a double must be concrete and why the framework must own it
 (`mocking.md` §2, fact 1).
+
+## 10. Revisited, 2026-09-12 — effects v6, and a framework that names the row once
+
+Against compiler `ea3e27ed` and framework `df32fc9`. 144 cases green. **Everything §1–§9 describe as a
+mechanism is deleted**; the two questions those sections answer are still answered, by other means, and
+the point of this section is to say which means, and what is no longer checked by anything at all.
+
+### 10.1 Every carrier-era mechanism is gone, and three of the four rules with it
+
+| §1–§9 said | Now |
+|---|---|
+| A test declares a carrier (`Fake`, `Packages`), production code is instantiated *at* it | There are no carriers. A row says what a definition performs; an implementation is a **name**. `TablePackages` is `implement tablePackages: PackageSource`, bound by one `with` on `against`'s slot type, reading its table from `{Dep[Universe]}`. |
+| **Rule 1** — the carrier implements the row flat, failure channels included | No subject. A named implementation's clauses declare their own rows and are charged where the implementation is bound. |
+| **Rule 2** — run-then-assert | Retired already in §9.4, and now without even a capture tag to arrange: a mocked body acts and asserts in whatever order reads best. |
+| **Rule 3** — two fakes, because one wide fake would collide with the constrained catch-all | No subject. A named implementation is never searched and never checked for overlap, so nothing can collide with the git-backed default. Worth knowing that the compiler only began *enforcing* this in `d9cd8d3f` (2026-09-12) — before it, a named implementation declared in an ability's own module did answer the search. |
+| **Rule 4** — the fake cannot cheat, having no `Suspend` | Stands, on a different footing: a user module declares no natives, so a double reaches the world only through effects its own clauses declare. |
+| §9.5 — assertions cannot ride a `FileSystem` fake, because `IoError` and `AssertionError` both export `message` | Settled by the framework, which renamed its infix `message` to `describedAs`. A file may now name both a file and an assertion. |
+
+### 10.2 A suite names its row once again
+
+`type Test` is back, and this project uses it. §9.1 recorded its removal — an alias may not carry an
+open row, so all seven suites wrote `{Writer[List[TestResult]]} Unit` out by hand. `ecb63954` made a
+row alias declare its row on its own declaration and resolve like any other name, so it crosses files,
+honours import scope and composes with a written-out row (`{Console} Test`); the framework took the
+alias back in `8ed5702`, and the hand-written row is gone from all seven suites here.
+
+The alias is load-bearing, not cosmetic, and this was measured rather than believed: adding a
+`printLine` to a bare `Test` suite fails at the reference — *"This value performs the effect 'Console'
+but does not declare it"*. So the return type, and nothing in `in` or `mocked`, is what decides what a
+case may do.
+
+§9.1's warning stands unchanged and is the reason this section exists: **this project has no build of
+its own and pins no framework version**, so a green tree here is a statement about two sibling
+checkouts on the day it was made.
+
+### 10.3 The standing gap: nothing runs the real thing any more
+
+`probe/` (deleted 2026-09-04) and then `RealWorldTests.els` (deleted by the v6 port, `76e50fb`) were
+the only things that ever checked that these modules have an interpretation **on the platform**.
+`RealWorldTests` worked by naming the jvm run boundary `runMain` to fix the carrier to `IO`; v6 has no
+carrier and no such value, and a case that performs `Process` now propagates it to
+`eliot.test.Runner`, which caps at `{Console}` by design. A platform check is therefore a program with
+a `main` of its own rather than a test case — and nobody has written that program.
+
+What a green 144 does not establish, measured by breaking each on purpose:
+
+- **The git-backed `PackageSource` is not compiled against anything.** No test binds it — resolver
+  tests bind `tablePackages` — so it is reachable from no `main`, and use-site verification never
+  reaches it. Passing a `String` where `anchorOf` wants a `PackageId`, inside its `anchorAt` clause,
+  **compiles green**. That is the sharpest form of the gap: not "untested" but *untypechecked*.
+- **No platform instance of `Process` or `FileSystem` is ever resolved.** `mocked` binds the doubles by
+  name, and `Git`/`Cache` are only ever reached through it.
+
+Until the launcher exists, the cheapest thing that would close most of this is a `main` that names the
+git-backed source once, which would at least drag the whole stack through monomorphization.
+
+### 10.4 Where the open questions stand
+
+`packageCacheRoot`'s home is unchanged and still waiting on the launcher, though §4.3's *reason* for it
+is void: `Dep` and `Throw` no longer ride a carrier stack, so nothing stops `{Dep[Path]}` on the
+default implementation's clauses — it is now a question of who supplies the value, not of whether the
+shape is expressible. "Where a test carrier lives" has no subject. The language question §9.7 left open
+— an ability may have at most one carrier-generic instance, so a double must be concrete and the
+framework must own it — is answered by named implementations: a double is a name, never searched, so
+this project's own `PackageSource` is doubled here in eight lines and no framework change was needed.

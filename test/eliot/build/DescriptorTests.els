@@ -5,7 +5,7 @@ import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
 
-def testCases: {Writer[List[TestResult]]} Unit = {
+def testCases: Test = {
    "parseDescriptor" should "read the minimal library descriptor of the design" in {
       roundTrip("dep github.com/eliot-lang/eliot//stdlib v1\ndep github.com/somelib/collections v1.3")
    }

@@ -17,22 +17,29 @@ meta-information.
 Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
 `PackageId` (identity and ordering), `Git` and `Cache` (talking to git and mirroring repositories),
 `PackageSource` (the resolver's two questions plus the git-backed answer), `Resolution` (MVS).
-`test/` mirrors it, plus `TablePackages` — a carrier of our own for `PackageSource`, which is *this
-project's* ability and so cannot be doubled by the framework. Everything else is mocked by
+`test/` mirrors it, plus `TablePackages` — a *named* implementation of `PackageSource`, which is this
+project's own effect and so cannot be doubled by the framework. Everything else is mocked by
 `eliot.test.Mock`: a case declares nothing, arranges with `whenSpawning`/`withDirectory`/…, acts, and
 verifies with `wasCalledOnce`/`calls`/… (`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of
 hand-written doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
 §9.6 says what that leaves unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §9 of it first**, and read it before touching `Git`, `Cache`,
-`PackageSource` or a fixture. It carries four rules, three of which are still a compile error to
-break; the fourth (run-then-assert) is retired.
+`docs/effectful-modules.md` — **read §10 of it first**, and read it before touching `Git`, `Cache`,
+`PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions the
+document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four rules)
+was deleted by effects v6; §10 says what replaced each one and what is now genuinely unchecked.
 
-A suite declares its own effect row — `def testCases: {Writer[List[TestResult]]} Unit` — because the
-framework's `type Test` alias is gone (an alias may not carry an open row). A faked run goes in a
-capture slot (`{| Fake}`), so it is written inline in a `pure` body rather than in a definition of its
-own.
+A suite declares `def testCases: Test` — the framework's row alias for
+`{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
+resolved through import scope rather than matched by spelling within one file.
+
+**That return type is the only thing deciding what a case may do.** A bare `Test` admits bodies that
+assert and nothing else — a `printLine` in one is a compile error at the reference, verified. `in`
+supplies `Throw[AssertionError]` per case and is transparent to everything else, so a case wanting
+doubles writes `in mocked { … }` and they are bound by `mocked`'s own slot; a suite whose cases must
+*really* perform composes the alias with a written-out row, `{Console} Test`. No suite here needs
+that. There is no `pure` any more, no capture tag and no carrier.
 
 ## Building and running (compiler CLI)
 
@@ -59,21 +66,19 @@ is **fully qualified** — `eliot.test.Runner`, not `Runner`.
 Every source root that should contribute tests must be passed: the framework's `src`, this project's
 `src`, and this project's `test`.
 
-### The real-carrier check — two ordinary tests, no entry point of our own
+### The real-carrier check — there isn't one, and that is the standing gap
 
-A green faked suite says nothing about whether the code compiles in production: tests run effectful
-modules on a pure carrier, which resolves `Process[Fake]` and never `Process[IO]`. `probe/` used to be
-the `main` that resolved the real instances; `test/eliot/build/RealWorldTests.els` is now, with the
-`catch`es next door in `RealWorld.els` (a module that does not assert, because naming `IoError` and
-asserting cannot happen in one file — `docs/effectful-modules.md` §9.5).
+A green suite says nothing about whether the effectful modules have an interpretation **on the
+platform**: `mocked` binds the doubles by name, so the platform's own `Process` and `FileSystem`
+implementations are never resolved and a green run never touches them.
 
-**Nothing about it touches the framework.** A test names the platform carrier the same way it names a
-fake one: `runMain(...)` — the jvm layer's run boundary, `def runMain[A](io: IO[A]): A` in
-`eliot.jvm.IO` — fixes the carrier to `IO`, so the effect is performed and charged *there*. The case is
-written `in pure` and the suite declares `{Writer[List[TestResult]]}` like every other. A suite's row
-never grows, so `eliot.test.Runner` never needs widening, for this effect or any future one (§9.6).
-Importing `eliot.jvm.IO` does pin that file to the jvm platform — correct for a test about the
-platform's own instances. Keep those cases reaching every effectful module.
+Two things used to check that and both are gone. `probe/` was deleted on 2026-09-04; its replacement,
+`test/eliot/build/RealWorldTests.els`, was deleted by the v6 port (`76e50fb`) because it worked by
+naming the jvm run boundary `runMain` to fix the carrier to `IO`, and v6 has no carrier and no such
+value. A case that performs `Process` now simply propagates it to `eliot.test.Runner`, which caps at
+`{Console}` by design — so a platform check has to be a program with a `main` of its own rather than a
+test case. **Nobody has written that program.** `docs/effectful-modules.md` §10 records exactly what it
+leaves unchecked; do not read a green 144 as evidence the tool runs.
 
 ### `eliot.paths` — LSP only
 

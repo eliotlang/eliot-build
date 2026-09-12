@@ -3,7 +3,7 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.Clause
 
-def testCases: {Writer[List[TestResult]]} Unit = {
+def testCases: Test = {
    "parseClauses" should "read a flat sequence of clauses" in {
       parsed("dep github.com/x/foo v1.3\ndep github.com/y/bar v2")
          shouldBe "dep github.com/x/foo v1.3\ndep github.com/y/bar v2"

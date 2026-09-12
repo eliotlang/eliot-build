@@ -16,7 +16,7 @@ import eliot.build.Cache
  * bodies perform, and an effect nothing doubles is not bound by that chain — so a body that tried to
  * reach the world would not compile. There is no fixture either; `eliot.test.Mock` is the whole of it.
  */
-def testCases: {Writer[List[TestResult]]} Unit = {
+def testCases: Test = {
    "cacheDirectory" should "give one directory per canonical URL segment" in {
       show(cacheDirectory(cacheRoot, packageId("github.com/x/foo"))) shouldBe "target/cache/github.com/x/foo"
    }
