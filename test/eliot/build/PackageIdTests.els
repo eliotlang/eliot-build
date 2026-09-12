@@ -49,16 +49,22 @@ def testCases: Test = {
    "PackageId" should "order packages stably, so anything keyed by package has one line order" in {
       sortedIds shouldBe "github.com/a/two github.com/b/one github.com/b/one//jvm"
    }
-   "repository" should "drop the module selector, since a tag versions the whole repository" in {
+   "repositoryOf" should "drop the module selector, since a tag versions the whole repository" in {
       canonicalRepository("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot"
    }
-   "repository" should "leave a package with no selector alone" in {
+   "repositoryOf" should "leave a package with no selector alone" in {
       canonicalRepository("github.com/x/foo") shouldBe "github.com/x/foo"
    }
-   "isSibling" should "recognise a module of the repository being read" in {
+   "repositoryOf" should "answer nothing for a sibling, which is a module of whatever is being read" in {
+      canonicalRepository("//stdlib") shouldBe "<sibling>"
+   }
+   "repositoryAt" should "canonicalize a repository URL the way a dependency line is" in {
+      show(repositoryAt("https://GitHub.com/x/foo.git/")) shouldBe "github.com/x/foo"
+   }
+   "PackageId" should "read a module of the repository being read as a sibling" in {
       kindOfReference("//stdlib") shouldBe "sibling"
    }
-   "isSibling" should "call a selector into a foreign repository foreign" in {
+   "PackageId" should "read a selector into a foreign repository as foreign" in {
       kindOfReference("github.com/eliot-lang/eliot//stdlib") shouldBe "foreign"
    }
 }
@@ -69,11 +75,15 @@ def testCases: Test = {
  */
 private def canonical(text: String): String = show(packageId(text))
 
-private def canonicalRepository(text: String): String = show(repository(packageId(text)))
+private def canonicalRepository(text: String): String =
+   foldOption("<sibling>", found -> show(found), repositoryOf(packageId(text)))
 
 private def same(a: String, b: String): String = fold(packageId(a) == packageId(b), "same", "different")
 
-private def kindOfReference(text: String): String = fold(isSibling(packageId(text)), "sibling", "foreign")
+private def kindOfReference(text: String): String = packageId(text) match {
+   case Sibling(_) -> "sibling"
+   case Foreign(_) -> "foreign"
+}
 
 /**
  * Three packages given out of order and sorted back, rendered on one line: the property a lockfile

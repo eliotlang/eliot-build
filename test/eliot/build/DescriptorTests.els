@@ -78,6 +78,13 @@ def testCases: Test = {
    "parseDescriptor" should "reject a dep with no URL at all" in {
       parsed("dep") shouldBe "a dep needs a package URL in 'dep'"
    }
+   "parseDescriptor" should "reject a foreign dependency that declares no minimum" in {
+      parsed("dep github.com/x/foo") shouldBe "a foreign dependency needs a minimum version in 'dep github.com/x/foo'"
+   }
+   "parseDescriptor" should "reject a version on a sibling module, which versions with its repository" in {
+      parsed("module jvm {\n   dep //stdlib v1.2\n}")
+         shouldBe "a sibling module versions with its repository and carries no version in 'dep //stdlib v1.2'"
+   }
    "parseDescriptor" should "reject a dep carrying more than a URL and a version" in {
       parsed("dep github.com/x/foo v1 extra") shouldBe "too many arguments in 'dep github.com/x/foo v1 extra'"
    }

@@ -17,11 +17,16 @@ import eliot.build.Version
  */
 
 /**
- * A dependency: a package and the *minimum* version acceptable of it. Never a range and never an
- * upper bound — resolution picks the maximum of the declared minimums, so a version token is only
- * ever a floor. Absent for a sibling module, which versions with the repository it lives in.
+ * A dependency: either a *sibling* — a module of the repository being read, which versions with that
+ * repository and so carries no version of its own — or a *requirement* on a foreign package at a
+ * *minimum* version. Never a range and never an upper bound — resolution picks the maximum of the
+ * declared minimums, so a version token is only ever a floor. Two constructors rather than an
+ * optional version, because the version is absent exactly when the target is a sibling, and a shape
+ * that could say otherwise would leave the resolver a case to refuse.
  */
-data Dependency(reference: PackageId, minimumVersion: Option[Version])
+data Dependency =
+   SiblingDependency(dependencyModule: ModuleName) |
+   Requirement(requiredPackage: Package, minimumVersion: Version)
 
 /**
  * One jar of a compiler plugin's flat closure: an exact Maven coordinate and the SHA-256 the
@@ -40,7 +45,7 @@ data Plugin(pluginCoordinate: String, pluginJars: List[JarPin])
  * sources; examples, applications and test fixtures are `internal`.
  */
 data BuildModule(
-   moduleName: String,
+   moduleName: ModuleName,
    exported: Bool,
    moduleDependencies: List[Dependency],
    moduleTestDependencies: List[Dependency],
@@ -194,8 +199,9 @@ private def withArtifact(clause: Clause, descriptor: Descriptor): {Throw[Descrip
 }
 
 /**
- * `dep <url> [<version>]`. The version is optional exactly for a sibling module (`dep //other`),
- * which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
+ * `dep <url> <version>` or `dep //module`. The version is required for a foreign package — a
+ * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling
+ * module, which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
  */
 private def dependencyOf(clause: Clause): {Throw[DescriptorError]} Dependency = {
    val target = required(0, "a dep needs a package URL", clause)
@@ -203,8 +209,33 @@ private def dependencyOf(clause: Clause): {Throw[DescriptorError]} Dependency = 
    val version = versionOf(optional(1, clause), clause)
 
    atMostArguments(2, clause)
-   Dependency(reference, version)
+   reference match {
+      case Sibling(name)    -> siblingDependencyOf(name, version, clause)
+      case Foreign(package) -> requirementOf(package, version, clause)
+   }
 }
+
+private def siblingDependencyOf(
+   name: ModuleName,
+   version: Option[Version],
+   clause: Clause
+): {Throw[DescriptorError]} Dependency =
+   foldOption(
+      SiblingDependency(name),
+      _ -> raise(Unreadable(render(clause), "a sibling module versions with its repository and carries no version")),
+      version
+   )
+
+private def requirementOf(
+   package: Package,
+   version: Option[Version],
+   clause: Clause
+): {Throw[DescriptorError]} Dependency =
+   foldOption(
+      raise(Unreadable(render(clause), "a foreign dependency needs a minimum version")),
+      minimum -> Requirement(package, minimum),
+      version
+   )
 
 /**
  * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less is an invariant of the
@@ -223,7 +254,7 @@ private def moduleOf(clause: Clause): {Throw[DescriptorError]} BuildModule = {
    atMostArguments(1, clause)
    knownChildren(moduleKeywords, clause)
    BuildModule(
-      name,
+      ModuleName(name),
       isEmpty(clause.childrenNamed("internal")),
       dependenciesOf(clause),
       testDependenciesOf(clause),
@@ -367,11 +398,13 @@ private def artifactKeywords: List[String] = append(append(empty, "dep"), "backe
 
 private def pluginKeywords: List[String] = singleton("jar")
 
-private def renderDependency(dependency: Dependency): String =
-   "dep " ++ show(dependency.reference) ++ foldOption("", version -> " " ++ show(version), dependency.minimumVersion)
+private def renderDependency(dependency: Dependency): String = dependency match {
+   case SiblingDependency(name)         -> "dep //" ++ show(name)
+   case Requirement(package, minimum)   -> "dep " ++ show(package) ++ " " ++ show(minimum)
+}
 
 private def renderModule(built: BuildModule): String =
-   "module " ++ built.moduleName ++ renderBlock(
+   "module " ++ show(built.moduleName) ++ renderBlock(
       renderInternal(built) ++
          built.moduleDependencies.map(renderDependency) ++
          renderTestBlock(built.moduleTestDependencies) ++

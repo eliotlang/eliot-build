@@ -31,19 +31,19 @@ effect PackageSource {
    /**
     * What `target` published at `version`, absent where it publishes nothing there.
     */
-   def descriptorAt(version: Version, target: PackageId): Option[Descriptor]
+   def descriptorAt(version: Version, target: Repository): Option[Descriptor]
 
    /**
-    * The commit `target`'s `majorLine` line starts at, absent where that line has no first release.
+    * The commit `target`'s `line` starts at, absent where that line has no first release.
     */
-   def anchorAt(majorLine: Int, target: PackageId): Option[Commit]
+   def anchorAt(line: Line, target: Repository): Option[Commit]
 }
 
 /**
  * Where mirrors live, until there is a launcher to decide it.
  *
  * A constant rather than a parameter, and not an oversight: the effect's operations carry what the
- * *resolver* knows, which is a package and a version and never a cache directory. So the source's own
+ * *resolver* knows, which is a repository and a version and never a cache directory. So the source's own
  * configuration sits here, at the one place that binds resolution to a cache, and moves into the
  * launcher's hands when the launcher exists. `eliot.build.Cache` itself takes its root as a parameter
  * and is indifferent. A `{Dep[Path]}` on the default implementation's clauses is what this becomes
@@ -69,7 +69,7 @@ def packageCacheRoot: Path = path("target/cache")
 implement gitPackages: PackageSource {
    def descriptorAt(
          version: Version,
-         target: PackageId
+         target: Repository
       ): {Git, FileSystem, Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
       val published = descriptorTextAt(packageCacheRoot, version, target)
 
@@ -77,8 +77,8 @@ implement gitPackages: PackageSource {
    }
 
    def anchorAt(
-         majorLine: Int,
-         target: PackageId
+         line: Line,
+         target: Repository
       ): {Git, FileSystem, Throw[IoError], Throw[GitError]} Option[Commit] =
-      anchorOf(packageCacheRoot, majorLine, target)
+      anchorOf(packageCacheRoot, line, target)
 }

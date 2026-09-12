@@ -20,11 +20,7 @@ import eliot.build.TableGit
  */
 def testCases: Test = {
    "cacheDirectory" should "give one directory per canonical URL segment" in {
-      show(cacheDirectory(cacheRoot, packageId("github.com/x/foo"))) shouldBe "target/cache/github.com/x/foo"
-   }
-   "cacheDirectory" should "key the repository, since a module selector is not what git fetches" in {
-      show(cacheDirectory(cacheRoot, packageId("github.com/e/eliot//stdlib")))
-         shouldBe "target/cache/github.com/e/eliot"
+      show(cacheDirectory(cacheRoot, cached)) shouldBe "target/cache/github.com/x/foo"
    }
    "publishedTags" should "clone a mirror this build has never seen, then list what it publishes" in mocked {
       provide(listed, publishedTags(cacheRoot, cached) with tableGit)
@@ -58,10 +54,10 @@ def testCases: Test = {
       } with tableGit))
    }
    "anchorOf" should "answer the commit the line's first release names" in mocked {
-      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, 1, cached)) with tableGit) shouldBe "aaa1"
+      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, Line(1), cached)) with tableGit) shouldBe "aaa1"
    }
    "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked {
-      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, 3, cached)) with tableGit) shouldBe "<none>"
+      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, Line(3), cached)) with tableGit) shouldBe "<none>"
    }
    "refreshed" should "fetch the mirror it found" in mocked {
       withDirectory(mirrorPath)
@@ -78,19 +74,19 @@ def testCases: Test = {
    "descriptorTextAt" should "read a descriptor out of the object database" in mocked {
       withDirectory(mirrorPath)
 
-      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)) with tableGit)
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)) with tableGit)
          shouldBe "dep github.com/x/bar v1.1"
    }
    "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked {
       withDirectory(mirrorPath)
 
-      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(1, Some(9)), cached)) with tableGit)
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
          shouldBe "<none>"
    }
    "the cache" should "clone once and read the mirror it made for every later question" in mocked {
       provide(listed, {
          publishedTags(cacheRoot, cached)
-         descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
+         descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)
       } with tableGit)
 
       wasCalledOnce("cloneMirror")
@@ -137,7 +133,7 @@ private def expectedRefusal: String =
 
 private def cacheRoot: Path = path("target/cache")
 
-private def cached: PackageId = packageId("github.com/x/foo")
+private def cached: Repository = repositoryAt("github.com/x/foo")
 
 private def mirrorPath: Path = path("target/cache/github.com/x/foo")
 

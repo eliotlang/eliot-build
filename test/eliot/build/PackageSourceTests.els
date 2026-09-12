@@ -23,31 +23,31 @@ def testCases: Test = {
    "descriptorAt" should "read what the package published at that version" in mocked {
       withDirectory(mirrorPath)
 
-      provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
+      provide(mirrors, rendered(descriptorAt(Version(Line(1), Some(2)), cached)) with gitPackages with tableGit)
          shouldBe "dep github.com/x/bar v1.1"
    }
    "descriptorAt" should "answer nothing where the version publishes no descriptor" in mocked {
       withDirectory(mirrorPath)
 
-      provide(mirrors, rendered(descriptorAt(Version(1, Some(9)), cached)) with gitPackages with tableGit)
+      provide(mirrors, rendered(descriptorAt(Version(Line(1), Some(9)), cached)) with gitPackages with tableGit)
          shouldBe "<none>"
    }
    "descriptorAt" should "read the mirror under the source's own cache root" in mocked {
       withDirectory(mirrorPath)
 
-      provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
+      provide(mirrors, rendered(descriptorAt(Version(Line(1), Some(2)), cached)) with gitPackages with tableGit)
 
       lastCall shouldBe "log fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
    }
    "anchorAt" should "answer the commit the line's first release names" in mocked {
       withDirectory(mirrorPath)
 
-      provide(mirrors, renderedCommit(anchorAt(1, cached)) with gitPackages with tableGit) shouldBe "aaa1"
+      provide(mirrors, renderedCommit(anchorAt(Line(1), cached)) with gitPackages with tableGit) shouldBe "aaa1"
    }
    "anchorAt" should "answer nothing for a line whose history starts later" in mocked {
       withDirectory(mirrorPath)
 
-      provide(mirrors, renderedCommit(anchorAt(2, cached)) with gitPackages with tableGit) shouldBe "<none>"
+      provide(mirrors, renderedCommit(anchorAt(Line(2), cached)) with gitPackages with tableGit) shouldBe "<none>"
    }
 }
 
@@ -68,6 +68,6 @@ private def mirrors: Mirrors =
       singleton(Pair("v1.2:eliot.pkg", "dep github.com/x/bar v1.1"))
    )
 
-private def cached: PackageId = packageId("github.com/x/foo")
+private def cached: Repository = repositoryAt("github.com/x/foo")
 
 private def mirrorPath: Path = path("target/cache/github.com/x/foo")

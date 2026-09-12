@@ -5,6 +5,7 @@ import eliot.system.Process
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.test.Mock
+import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Git
 
@@ -73,30 +74,30 @@ def testCases: Test = {
       newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
    "remoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
-      remoteTags(remoteOf("github.com/x/foo")) with shellGit
+      remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
 
       calls shouldBe ".$ git ls-remote --tags https://github.com/x/foo"
    }
    "remoteTags" should "read the versions the remote announced" in mocked {
       whenSpawning("ls-remote", succeeding(listing))
 
-      renderedTags(remoteTags(remoteOf("github.com/x/foo")) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+      renderedTags(remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
    "remoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
       whenSpawning("ls-remote", failing(128, "no such repository"))
 
       raising[GitError](expectedRefusal, {
-         remoteTags(remoteOf("github.com/x/foo")) with shellGit
+         remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
          unit
       })
    }
    "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked {
-      cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
+      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
 
       calls shouldBe ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
    }
    "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked {
-      val made = cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
+      val made = cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
 
       show(made.mirrorDirectory) shouldBe "/cache/github.com/x/foo"
    }
@@ -145,7 +146,7 @@ def testCases: Test = {
       (shown orElse "<none>") shouldBe "<none>"
    }
    "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
-      cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
+      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
       fetch(mirror) with shellGit
 
       calls shouldBe (
@@ -153,7 +154,7 @@ def testCases: Test = {
             "/cache/github.com/x/foo$ git fetch --tags --prune")
    }
    "remoteOf" should "supply the scheme a descriptor deliberately does not carry" in {
-      remoteOf("github.com/x/foo").remoteUrl shouldBe "https://github.com/x/foo"
+      remoteOf(repositoryAt("github.com/x/foo")).remoteUrl shouldBe "https://github.com/x/foo"
    }
    "revisionName" should "spell a version as the tag it was published as" in {
       revisionName(AtVersion(version("v1.2"))) shouldBe "v1.2"
@@ -192,6 +193,6 @@ private def commit(tag: String, output: String): String =
    renderedCommit(commitOf(version(tag), parseTagRefs(output)))
 
 private def anchor(majorLine: Int, output: String): String =
-   renderedCommit(anchorCommit(majorLine, parseTagRefs(output)))
+   renderedCommit(anchorCommit(Line(majorLine), parseTagRefs(output)))
 
-private def version(tag: String): Version = parseVersion(tag) else Version(0, None)
+private def version(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

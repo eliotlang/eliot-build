@@ -14,7 +14,14 @@
  * Every version token in a descriptor is a *minimum* — resolution answers with the maximum of the
  * declared minimums — so there is no range to model here and no operator to parse.
  */
-data Version(major: Int, minor: Option[Int])
+data Version(major: Line, minor: Option[Int])
+
+/**
+ * A compatibility line: the `vN` branch a major version is, and the unit the append-only signature
+ * contract is made per. Two requirements on different lines of one package cannot both be satisfied,
+ * a lineage anchor is per line, and a bare `v1` in a descriptor names a line rather than a release.
+ */
+data Line(majorNumber: Int)
 
 /**
  * The version `text` spells, aborting when it spells anything else.
@@ -33,14 +40,20 @@ def parseVersion(text: String): {Abort} Version = {
    val majorPart = natural(before(".", body))
    val minorPart = minorOf(body)
 
-   Version(majorPart, minorPart)
+   Version(Line(majorPart), minorPart)
 }
 
 /**
- * The git branch `version` lives on — its compatibility line, which is what `git ls-remote` is asked
- * about to discover the versions available.
+ * The first release of `line` — `vN.0`, the tag whose commit anchors the line's identity, and the
+ * point a bare `vN` requirement orders at.
  */
-def branchName(version: Version): String = "v" ++ show(version.major)
+def firstRelease(line: Line): Version = Version(line, Some(0))
+
+/**
+ * The git branch `line` is — `v1`, `v2` — which is what a remote is asked about to discover the
+ * versions available on it, and how a version renders its major part.
+ */
+def branchName(line: Line): String = "v" ++ show(line.majorNumber)
 
 /**
  * `true` when both versions are releases of one compatibility line, and are therefore
@@ -61,7 +74,15 @@ def orderedMinor(version: Version): Int = version.minor.foldOption(0, part -> pa
  */
 implement Show[Version] {
    def show(value: Version): String =
-      "v" ++ show(value.major) ++ value.minor.foldOption("", part -> "." ++ show(part))
+      branchName(value.major) ++ value.minor.foldOption("", part -> "." ++ show(part))
+}
+
+implement Eq[Line] {
+   def equals(a: Line, b: Line): Bool = a.majorNumber == b.majorNumber
+}
+
+implement Compare[Line] {
+   def lessThanOrEqual(a: Line, b: Line): Bool = a.majorNumber <= b.majorNumber
 }
 
 /**

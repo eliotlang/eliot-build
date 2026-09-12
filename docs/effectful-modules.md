@@ -590,3 +590,29 @@ read like the method calls while the behaviour stays in `Git` and the double sta
 - What is *not* abstracted, on purpose: the in-repository `path: String` of `fileAt` (one constant,
   `descriptorFileName`), the `majorLine: Int` of the anchor questions (it is `Version.major`), and
   `GitError`'s command text, which is a report.
+
+### 11.6 The rest of the primitives, typed
+
+Same day, 159 cases green. A sweep of the modules for values spelled as `String`/`Int` that the design
+names as concepts, done in one pass:
+
+- **`Repository` versus `Package` versus `PackageId`.** A `Repository` is what is cloned, tagged, cached
+  and selected; a `Package` is a repository plus the module wanted of it; `PackageId` is the sum a `dep`
+  line spells — `Sibling(module)` or `Foreign(package)`. The empty-URL sentinel and `isSibling` are gone;
+  `Cache`, `PackageSource`, `Git.remoteOf` and `Selection` take a `Repository`, so "drop the selector
+  before you select or clone" is now a type, not a convention. `repositoryAt(text)` builds one from a URL;
+  `repositoryOf(id)` reads one off a `PackageId`, absent for a sibling.
+- **`Dependency` is a sum**: `SiblingDependency(module)` or `Requirement(package, minimum)`. The minimum
+  is mandatory, checked by the descriptor parser (two new rejections), and `NoMinimum` left
+  `ResolutionError`; the resolver's `withRequirement` is a `match`.
+- **`Line`** is the compatibility line; `Version(major: Line, minor)`, `firstRelease(line)`,
+  `branchName(line)`, and every anchor question takes a `Line`. The accessor is `major` rather than
+  `line` because `ClauseError` already exports `line`/`lineNumber` and a module importing both would
+  see the two imports shadow each other — a per-file, whole-module import has that cost.
+- **`Configuration`** is `TestScope | ArtifactNamed(name)`, and `resolve(configuration, descriptor)`
+  replaces the two entry points.
+- **`ModuleName`** ties the `//name` selector to the `module` clause's name.
+
+Left as primitives on purpose: `Clause` (the syntax layer), backend parameters (free-form by design),
+`JarPin`'s coordinate and digest (the feature is transitional), and `Artifact.artifactName` (wrapped by
+`ArtifactNamed` where it is used as a configuration).

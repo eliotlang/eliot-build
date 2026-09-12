@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
 import eliot.system.Process
+import eliot.build.PackageId
 import eliot.build.Version
 
 /**
@@ -183,7 +184,8 @@ implement shellGit: Git {
 
    def cloneMirror(remote: Remote, target: Path): {Process, Throw[IoError], Throw[GitError]} Mirror = {
       val cloned = checked(
-         command("git").withArgument("clone").withArgument("--mirror").withArgument(remote.remoteUrl).withArgument(show(target)),
+         command("git").withArgument("clone").withArgument("--mirror")
+            .withArgument(remote.remoteUrl).withArgument(show(target)),
          here
       )
 
@@ -239,7 +241,7 @@ def commitOf(version: Version, refs: List[TagRef]): Option[Commit] =
    foldOption(None, ref -> Some(ref.taggedCommit), refs.find(ref -> ref.taggedVersion == version))
 
 /**
- * The lineage anchor of the `majorLine` compatibility line: the commit its *first* release names.
+ * The lineage anchor of the compatibility line `line`: the commit its *first* release names.
  *
  * This is the identity test the resolver falls back on when two canonical URLs disagree. It works
  * because git is content-addressed and the first release tag of a line is immutable, carried by every
@@ -247,11 +249,11 @@ def commitOf(version: Version, refs: List[TagRef]): Option[Commit] =
  * the identity question is about. Absent is a legitimate answer and unifies nothing: a line whose
  * history was migrated may start at `v1.3` and have no first release at all.
  */
-def anchorCommit(majorLine: Int, refs: List[TagRef]): Option[Commit] =
-   commitOf(Version(majorLine, Some(0)), refs)
+def anchorCommit(line: Line, refs: List[TagRef]): Option[Commit] =
+   commitOf(firstRelease(line), refs)
 
 /**
- * How to actually reach the repository at `canonicalUrl`, which a descriptor deliberately does not say.
+ * How to actually reach `repository`, which a descriptor deliberately does not say.
  *
  * Dependency URLs are scheme-less by invariant — that is what keeps `//` unambiguously the module
  * selector and what stops two spellings of one transport becoming two identities. So the scheme is
@@ -259,7 +261,7 @@ def anchorCommit(majorLine: Int, refs: List[TagRef]): Option[Commit] =
  * where a package is fetched from is consumer configuration, and this is the function that will grow
  * a mirror table when there is one to grow.
  */
-def remoteOf(canonicalUrl: String): Remote = Remote("https://" ++ canonicalUrl)
+def remoteOf(repository: Repository): Remote = Remote("https://" ++ repository.repositoryUrl)
 
 /**
  * `revision` as git is asked for it: a version by the tag it was published as, a commit by its hash.

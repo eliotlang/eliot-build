@@ -67,10 +67,16 @@ def testCases: Test = {
       oneLine("v1.9", "v2.0") shouldBe "two lines"
    }
    "branchName" should "name the branch a release lives on" in {
-      branchName(versionOf("v1.4")) shouldBe "v1"
+      branchName(versionOf("v1.4").major) shouldBe "v1"
+   }
+   "firstRelease" should "be the vN.0 that anchors a line" in {
+      show(firstRelease(Line(2))) shouldBe "v2.0"
+   }
+   "firstRelease" should "order where a bare major does" in {
+      fold(firstRelease(Line(1)) == versionOf("v1"), "same", "different") shouldBe "same"
    }
    "branchName" should "name the branch a bare major already is" in {
-      branchName(versionOf("v2")) shouldBe "v2"
+      branchName(versionOf("v2").major) shouldBe "v2"
    }
 }
 
@@ -86,7 +92,7 @@ private def parsed(text: String): String =
  * An unreadable token answers `v0`, which every one of those assertions would visibly fail on.
  */
 private def versionOf(text: String): Version =
-   foldOption(Version(0, None), version -> version, runAbort(parseVersion(text)))
+   foldOption(Version(Line(0), None), version -> version, runAbort(parseVersion(text)))
 
 private def larger(a: String, b: String): String = show(max(versionOf(a), versionOf(b)))
 

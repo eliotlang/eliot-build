@@ -30,7 +30,7 @@ import eliot.build.PackageSource
  * Notably absent from the algebra is version listing: MVS never enumerates what a package offers, so
  * discovering that a newer release exists belongs to `eliot get` rather than here.
  */
-data Selection(selectedPackage: PackageId, selectedVersion: Version, lineageAnchor: Option[Commit])
+data Selection(selectedRepository: Repository, selectedVersion: Version, lineageAnchor: Option[Commit])
 
 /**
  * What one configuration resolved to, in canonical package order — the order is the resolution's,
@@ -44,16 +44,27 @@ data Resolution(selections: List[Selection])
  * attribute to a dependency line is a failure they cannot fix.
  */
 data ResolutionError =
-   NoSuchConfiguration(configurationName: String) |
-   NoMinimum(unversionedPackage: PackageId) |
-   Unavailable(missingPackage: PackageId, missingVersion: Version) |
-   MajorConflict(conflictedPackage: PackageId, oneVersion: Version, otherVersion: Version) |
+   NoSuchConfiguration(missingConfiguration: Configuration) |
+   Unavailable(missingRepository: Repository, missingVersion: Version) |
+   MajorConflict(conflictedRepository: Repository, oneVersion: Version, otherVersion: Version) |
    TooDeep(reachedDepth: Int)
+
+/**
+ * The unit of resolution: which of a descriptor's dependency scopes are closed over the graph. The
+ * test scope is a configuration like any other — it just needs no `artifact` clause to name it.
+ */
+data Configuration = TestScope | ArtifactNamed(artifactName: String)
+
+implement Show[Configuration] {
+   def show(value: Configuration): String = value match {
+      case TestScope           -> "test"
+      case ArtifactNamed(name) -> name
+   }
+}
 
 implement Show[ResolutionError] {
    def show(value: ResolutionError): String = value match {
-      case NoSuchConfiguration(name) -> "no configuration named '" ++ name ++ "'"
-      case NoMinimum(unversioned)    -> "no minimum version declared for " ++ show(unversioned)
+      case NoSuchConfiguration(configuration) -> "no configuration named '" ++ show(configuration) ++ "'"
       case Unavailable(absent, version) -> show(absent) ++ " publishes no " ++ show(version)
       case MajorConflict(conflicted, one, other) ->
          show(conflicted) ++ " is required at both " ++ show(one) ++ " and " ++ show(other) ++
@@ -63,7 +74,7 @@ implement Show[ResolutionError] {
 }
 
 implement Show[Selection] {
-   def show(value: Selection): String = show(value.selectedPackage) ++ " " ++ show(value.selectedVersion)
+   def show(value: Selection): String = show(value.selectedRepository) ++ " " ++ show(value.selectedVersion)
 }
 
 /**
@@ -71,46 +82,39 @@ implement Show[Selection] {
  * of the order the closure happened to discover them in.
  */
 implement Compare[Selection] {
-   def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedPackage <= b.selectedPackage
+   def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedRepository <= b.selectedRepository
 }
 
 /**
- * What the artifact named `configurationName` resolves to: the repository's base dependencies plus
- * that artifact's own — the platform layers among them — closed over the graph.
+ * What `configuration` resolves to: the repository's base dependencies plus the configuration's own
+ * — for an artifact, the platform layers among them; for the test scope, the framework and a platform
+ * the build host can run — closed over the graph.
  *
  * ```eliot
- * val resolution = resolveArtifact("controller-jvm", descriptor)
+ * val resolution = resolve(ArtifactNamed("controller-jvm"), descriptor)
  * ```
  */
-def resolveArtifact(
-   configurationName: String,
+def resolve(
+   configuration: Configuration,
    descriptor: Descriptor
-): {PackageSource, Throw[ResolutionError]} Resolution = {
-   val artifact = artifactNamed(configurationName, descriptor)
-
-   foldOption(
-      raise(NoSuchConfiguration(configurationName)),
-      found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies),
-      artifact
-   )
+): {PackageSource, Throw[ResolutionError]} Resolution = configuration match {
+   case TestScope           -> resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies)
+   case ArtifactNamed(name) ->
+      foldOption(
+         raise(NoSuchConfiguration(configuration)),
+         found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies),
+         artifactNamed(name, descriptor)
+      )
 }
-
-/**
- * What the test scope resolves to: the base dependencies plus the test-scoped ones (the framework
- * and a platform layer the build host can run). Test is a configuration like any other — it just
- * needs no `artifact` clause to name it.
- */
-def resolveTests(descriptor: Descriptor): {PackageSource, Throw[ResolutionError]} Resolution =
-   resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies)
 
 /**
  * The version `resolution` selected for `repositoryId`, absent when the closure never reached it.
  */
-def selectedVersionOf(repositoryId: PackageId, resolution: Resolution): Option[Version] =
+def selectedVersionOf(repository: Repository, resolution: Resolution): Option[Version] =
    foldOption(
       None,
       selection -> Some(selection.selectedVersion),
-      resolution.selections.find(selection -> selection.selectedPackage == repositoryId)
+      resolution.selections.find(selection -> selection.selectedRepository == repository)
    )
 
 /**
@@ -160,10 +164,10 @@ private def withDependenciesOf(
    selection: Selection,
    state: ResolutionState
 ): {PackageSource, Throw[ResolutionError]} ResolutionState = {
-   val published = descriptorAt(selection.selectedVersion, selection.selectedPackage)
+   val published = descriptorAt(selection.selectedVersion, selection.selectedRepository)
 
    foldOption(
-      raise(Unavailable(selection.selectedPackage, selection.selectedVersion)),
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
       descriptor -> withRequirements(mountedDependencies(descriptor), state),
       published
    )
@@ -188,29 +192,19 @@ private def withRequirements(
 /**
  * A sibling (`dep //stdlib`) selects nothing: it names a module of the repository that declared it,
  * which is already selected at the version its tag gave it. It matters to what gets mounted, not to
- * what gets chosen.
+ * what gets chosen. A requirement selects its *repository* — the module it wants narrows what is
+ * mounted later and has no bearing on which version is chosen, since a tag is repository-wide.
  */
 private def withRequirement(
    dependency: Dependency,
    state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState =
-   foldOption(state, foreign -> withForeign(foreign, state), foreignOf(dependency))
-
-private def foreignOf(dependency: Dependency): Option[Dependency] =
-   fold(isSibling(dependency.reference), None, Some(dependency))
-
-private def withForeign(
-   dependency: Dependency,
-   state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState =
-   foldOption(
-      raise(NoMinimum(dependency.reference)),
-      minimum -> withMinimum(repository(dependency.reference), minimum, state),
-      dependency.minimumVersion
-   )
+): {PackageSource, Throw[ResolutionError]} ResolutionState = dependency match {
+   case SiblingDependency(_)          -> state
+   case Requirement(package, minimum) -> withMinimum(package.packageRepository, minimum, state)
+}
 
 private def withMinimum(
-   target: PackageId,
+   target: Repository,
    minimum: Version,
    state: ResolutionState
 ): {PackageSource, Throw[ResolutionError]} ResolutionState = {
@@ -227,13 +221,13 @@ private def withMinimum(
  * Identity, URL first: the canonical URL settles the common case with no source call at all, and only
  * a requirement naming an unfamiliar URL is worth a lineage lookup.
  */
-private def identified(target: PackageId, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
-   val byUrl = state.selected.find(selection -> selection.selectedPackage == target)
+private def identified(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
+   val byUrl = state.selected.find(selection -> selection.selectedRepository == target)
 
    foldOption(byLineage(target, minimum, state), known -> Identified(Some(known), known.lineageAnchor), byUrl)
 }
 
-private def byLineage(target: PackageId, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
+private def byLineage(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
    val anchor = anchorAt(minimum.major, target)
 
    Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
@@ -264,11 +258,11 @@ private def conflictBetween(known: Selection, minimum: Version): Option[Resoluti
    fold(
       sameLine(known.selectedVersion, minimum),
       None,
-      Some(MajorConflict(known.selectedPackage, known.selectedVersion, minimum))
+      Some(MajorConflict(known.selectedRepository, known.selectedVersion, minimum))
    )
 
 /**
- * The known selection keeps its package — the URL the closure reached first, which is the root's
+ * The known selection keeps its repository — the URL the closure reached first, which is the root's
  * spelling before any dependency's — and takes the higher version. A requirement that asks for no
  * more than what is already selected changes nothing, and so queues nothing.
  */
@@ -276,7 +270,7 @@ private def upgraded(known: Selection, minimum: Version, state: ResolutionState)
    fold(
       minimum <= known.selectedVersion,
       state,
-      replaced(Selection(known.selectedPackage, minimum, known.lineageAnchor), state)
+      replaced(Selection(known.selectedRepository, minimum, known.lineageAnchor), state)
    )
 
 private def inserted(selection: Selection, state: ResolutionState): ResolutionState =
@@ -284,7 +278,7 @@ private def inserted(selection: Selection, state: ResolutionState): ResolutionSt
 
 private def replaced(selection: Selection, state: ResolutionState): ResolutionState =
    ResolutionState(
-      append(state.selected.filter(other -> other.selectedPackage != selection.selectedPackage), selection),
+      append(state.selected.filter(other -> other.selectedRepository != selection.selectedRepository), selection),
       append(state.pending, selection)
    )
 
@@ -295,8 +289,8 @@ private def replaced(selection: Selection, state: ResolutionState): ResolutionSt
 private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution =
    foldOption(Resolution(state.selected.sorted), _ -> raise(TooDeep(resolutionDepthLimit)), state.pending.head)
 
-private def artifactNamed(configurationName: String, descriptor: Descriptor): Option[Artifact] =
-   descriptor.artifacts.find(artifact -> artifact.artifactName == configurationName)
+private def artifactNamed(name: String, descriptor: Descriptor): Option[Artifact] =
+   descriptor.artifacts.find(artifact -> artifact.artifactName == name)
 
 /**
  * The rounds a closure may take, as data: user code cannot loop, so depth is a list to fold over

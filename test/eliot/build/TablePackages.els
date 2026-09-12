@@ -24,11 +24,15 @@ import eliot.build.Resolution
 data Universe(publications: List[Pair[String, String]], lineages: List[Pair[String, String]])
 
 implement tablePackages: PackageSource {
-   def descriptorAt(version: Version, target: PackageId): {Dep[Universe]} Option[Descriptor] =
+   def descriptorAt(version: Version, target: Repository): {Dep[Universe]} Option[Descriptor] =
       publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
-   def anchorAt(majorLine: Int, target: PackageId): {Dep[Universe]} Option[Commit] =
-      foldOption(None, hash -> Some(Commit(hash)), dependency.lineages.lookupOption(show(target) ++ "@v" ++ show(majorLine)))
+   def anchorAt(line: Line, target: Repository): {Dep[Universe]} Option[Commit] =
+      foldOption(
+         None,
+         hash -> Some(Commit(hash)),
+         dependency.lineages.lookupOption(show(target) ++ "@" ++ branchName(line))
+      )
 }
 
 /**

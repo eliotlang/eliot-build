@@ -14,13 +14,17 @@ meta-information.
 
 ## Architecture
 
-Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
-`PackageId` (identity and ordering), `Git` (`effect Git` — five operations over `Remote`, `Mirror`,
+Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format; a `Dependency` is
+a `SiblingDependency` or a `Requirement` with a mandatory minimum, checked at parse time), `Version`
+(with `Line`, the compatibility line, and `firstRelease`) and `PackageId` (`Repository` is what is
+cloned, cached and selected; `Package` adds the module wanted; the `PackageId` sum is what a `dep`
+line spells, `Sibling` or `Foreign`, never an empty-URL sentinel), `Git` (`effect Git` — five operations over `Remote`, `Mirror`,
 `Commit` and `Revision`, git's own vocabulary; a mirror is a bare `--mirror` clone and nothing is ever
 checked out — plus the pure reading of git's output, plus `shellGit`, the *named* implementation that
 spawns and alone decides which directory each command stands in), `Cache` (mirroring repositories, on
 `{Git, FileSystem}`), `PackageSource` (the resolver's two questions plus
-`gitPackages`, the named git-backed answer), `Resolution` (MVS). Neither `Git` nor `PackageSource` has
+`gitPackages`, the named git-backed answer), `Resolution` (MVS over a `Configuration`: `TestScope` or
+`ArtifactNamed`). Neither `Git` nor `PackageSource` has
 a default: a run boundary writes `with gitPackages with shellGit` once. `test/` mirrors it, plus
 `TablePackages` and `TableGit` — named implementations of this project's own two effects, which the
 framework cannot double. **Bind a named implementation with an expression `with` inside `mocked`'s
@@ -48,6 +52,12 @@ supplies `Throw[AssertionError]` per case and is transparent to everything else,
 doubles writes `in mocked { … }` and they are bound by `mocked`'s own slot; a suite whose cases must
 *really* perform composes the alias with a written-out row, `{Console} Test`. No suite here needs
 that. There is no `pure` any more, no capture tag and no carrier.
+
+## Committing
+
+**Commit and push automatically** once a change builds and the suite is green — do not wait to be
+asked. One commit per coherent change, with a message that says what the code now means and why, in
+the style of the existing history.
 
 ## Building and running (compiler CLI)
 
@@ -88,7 +98,7 @@ naming the jvm run boundary `runMain` to fix the carrier to `IO`, and v6 has no 
 value. A case that performs `Process` now simply propagates it to `eliot.test.Runner`, which caps at
 `{Console}` by design — so a platform check has to be a program with a `main` of its own rather than a
 test case. **Nobody has written that program.** `docs/effectful-modules.md` §11.4 records exactly what
-it leaves unchecked; do not read a green 155 as evidence the tool runs.
+it leaves unchecked; do not read a green 159 as evidence the tool runs.
 
 Two build gotchas recorded in §11.3: a rename that fails at `Git.els:1:1: Could not find '…'` with
 correct sources is the stale incremental cache — delete `target/.eliot-index-*` and

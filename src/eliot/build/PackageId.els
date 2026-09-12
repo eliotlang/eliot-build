@@ -18,9 +18,35 @@
  * A `//name` selector narrows a multi-module repository to one of its modules. It is part of the
  * identity — `…/eliot//stdlib` and `…/eliot//jvm` are different dependencies — but not of the
  * *repository*, which is what git fetches and what tags version: modules of one repository version
- * together, since a tag is repository-wide.
+ * together, since a tag is repository-wide. That is why there are three types here rather than one:
+ * a `Repository` is what is cloned, tagged, cached and selected; a `Package` is a repository plus the
+ * module a dependency wants of it; a `PackageId` is what a `dep` line spells, which may also be a
+ * *sibling* — a module of the repository being read, with no URL and no version of its own.
  */
-data PackageId(url: String, selectedModule: Option[String])
+/**
+ * A repository, by its canonical URL: the unit git works in — what is cloned, what a version tag
+ * applies to, what the cache keys a mirror by, and what resolution selects a version of.
+ */
+data Repository(repositoryUrl: String)
+
+/**
+ * The name of a build module inside a multi-module repository — what `//name` selects and what a
+ * `module` clause declares.
+ */
+data ModuleName(moduleNameText: String)
+
+/**
+ * A foreign package a dependency refers to: a repository and, optionally, the one module of it wanted.
+ */
+data Package(packageRepository: Repository, selectedModule: Option[ModuleName])
+
+/**
+ * What a `dep` line, or a `backend` clause, names: a module of the repository being read (`//stdlib`),
+ * or a package in a foreign repository. A sibling is a *constructor* rather than a package with an
+ * empty URL, so the code that must treat the two differently — resolution selects nothing for a
+ * sibling — matches on it rather than testing a sentinel.
+ */
+data PackageId = Sibling(siblingModule: ModuleName) | Foreign(foreignPackage: Package)
 
 /**
  * The package `text` identifies, in canonical form.
@@ -36,29 +62,60 @@ data PackageId(url: String, selectedModule: Option[String])
  */
 def packageId(text: String): PackageId = {
    val body = withoutScheme(text)
+   val url = before("//", body)
 
-   PackageId(canonicalUrl(before("//", body)), selectorOf(body))
+   foldOption(
+      Foreign(Package(Repository(canonicalUrl(url)), None)),
+      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), Some(name)))),
+      selectorOf(body)
+   )
 }
 
 /**
- * The repository `id` lives in: the same identity with its module selector dropped. This is the unit
- * git works in — what is cloned, and what a version tag applies to.
+ * The repository `text` names, in canonical form — for the places that hold a repository URL rather
+ * than a dependency line: a lockfile entry, a cache key, a test.
  */
-def repository(id: PackageId): PackageId = PackageId(id.url, None)
+def repositoryAt(text: String): Repository = Repository(canonicalUrl(withoutScheme(text)))
 
 /**
- * `true` when `id` names a module of the repository being read (`dep //stdlib`) rather than a
- * foreign package. A sibling carries no URL and no version: it is whatever the repository around it
- * is, at the version that repository was resolved to.
+ * The repository `id` lives in, absent for a sibling: a sibling is a module of whatever repository is
+ * being read, which this type cannot know.
  */
-def isSibling(id: PackageId): Bool = id.url == ""
+def repositoryOf(id: PackageId): Option[Repository] = id match {
+   case Sibling(_)       -> None
+   case Foreign(package) -> Some(package.packageRepository)
+}
+
+implement Show[Repository] {
+   def show(value: Repository): String = value.repositoryUrl
+}
+
+implement Eq[Repository] {
+   def equals(a: Repository, b: Repository): Bool = a.repositoryUrl == b.repositoryUrl
+}
+
+/**
+ * An arbitrary but stable total order, so anything the tool writes out keyed by repository — a
+ * lockfile above all — has one canonical line order and diffs only where the resolution changed.
+ */
+implement Compare[Repository] {
+   def lessThanOrEqual(a: Repository, b: Repository): Bool = a.repositoryUrl <= b.repositoryUrl
+}
+
+implement Show[ModuleName] {
+   def show(value: ModuleName): String = value.moduleNameText
+}
+
+implement Eq[ModuleName] {
+   def equals(a: ModuleName, b: ModuleName): Bool = a.moduleNameText == b.moduleNameText
+}
 
 /**
  * The canonical spelling, which is also what a descriptor is written back out as.
  */
-implement Show[PackageId] {
-   def show(value: PackageId): String =
-      value.url ++ value.selectedModule.foldOption("", name -> "//" ++ name)
+implement Show[Package] {
+   def show(value: Package): String =
+      show(value.packageRepository) ++ value.selectedModule.foldOption("", name -> "//" ++ show(name))
 }
 
 /**
@@ -66,22 +123,33 @@ implement Show[PackageId] {
  * comparing the rendering is comparing the identity — and it stays right by construction as the
  * canonical form grows.
  */
+implement Eq[Package] {
+   def equals(a: Package, b: Package): Bool = show(a) == show(b)
+}
+
+implement Compare[Package] {
+   def lessThanOrEqual(a: Package, b: Package): Bool = show(a) <= show(b)
+}
+
+implement Show[PackageId] {
+   def show(value: PackageId): String = value match {
+      case Sibling(name)    -> "//" ++ show(name)
+      case Foreign(package) -> show(package)
+   }
+}
+
 implement Eq[PackageId] {
    def equals(a: PackageId, b: PackageId): Bool = show(a) == show(b)
 }
 
-/**
- * An arbitrary but stable total order, so anything the tool writes out keyed by package — a
- * lockfile above all — has one canonical line order and diffs only where the resolution changed.
- */
 implement Compare[PackageId] {
    def lessThanOrEqual(a: PackageId, b: PackageId): Bool = show(a) <= show(b)
 }
 
 private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)
 
-private def selectorOf(body: String): Option[String] =
-   fold(contains("//", body), Some(after("//", body)), None)
+private def selectorOf(body: String): Option[ModuleName] =
+   fold(contains("//", body), Some(ModuleName(after("//", body))), None)
 
 /**
  * The suffixes are stripped outermost first, so a URL wearing both (`…/foo.git/`) loses both.
