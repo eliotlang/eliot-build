@@ -5,7 +5,7 @@ import eliot.collection.List
  *
  * The whole grammar is one rule — a clause is `keyword args…`, optionally followed by a `{ … }`
  * block of sub-clauses — so parsing is deliberately separated from *interpreting*: this module
- * decides only what the file's shape is, and `eliot.build.Descriptor` decides what the shapes mean.
+ * decides only what the file's shape is, and `eliot.build.format.PackageFile` decides what the shapes mean.
  * That split is what lets the descriptor stay inert data readable by tools that know nothing of the
  * build model, and it keeps every "unknown clause" diagnostic in one place instead of scattered
  * through the syntax.
@@ -18,7 +18,7 @@ data Clause(keyword: String, arguments: List[String], children: List[Clause])
 
 /**
  * A syntax error, carrying the line it was found on so a diagnostic can point at it. Interpretation
- * errors — an unknown keyword, a missing argument — are `eliot.build.Descriptor`'s to raise; this
+ * errors — an unknown keyword, a missing argument — are `eliot.build.format.PackageFile`'s to raise; this
  * type is only about shape.
  */
 data ClauseError(lineNumber: Int, line: String, reason: String)

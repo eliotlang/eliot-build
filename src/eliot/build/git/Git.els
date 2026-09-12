@@ -1,9 +1,7 @@
 import eliot.collection.List
 import eliot.file.Path
-import eliot.file.File
-import eliot.system.Process
-import eliot.build.PackageId
-import eliot.build.Version
+import eliot.build.model.PackageId
+import eliot.build.model.Version
 
 /**
  * Talking to git: the operations the tool performs on a repository, as an effect, and the reading of what
@@ -11,11 +9,13 @@ import eliot.build.Version
  *
  * There is no embedded git library and there will not be one: the tool shells out to the `git` the
  * user already has, which is Go's original choice and the reason process spawning is the launcher's
- * load-bearing capability. That is `shellGit`'s business, though, and nobody else's: `Git`'s members say
- * what an operation means and which refusal it raises, and `{Process}` and `{Throw[IoError]}` appear
- * only on the clauses of the implementation that spawns, charged where it is bound. A caller declares
- * `{Git}` and says nothing about subprocesses — exactly as it declares `{Console}` and says nothing
- * about file descriptors — and a test of a caller binds a double for `Git` rather than scripting what
+ * load-bearing capability. That is `eliot.build.git.ShellGit`'s business, though, and nobody else's — a
+ * module of its own, so that the separation is one the *imports* state rather than one the signatures
+ * merely promise: nothing here names `eliot.system.Process`. `Git`'s members say what an operation
+ * means and which refusal it raises, and `{Process}` and `{Throw[IoError]}` appear only on the clauses
+ * of the implementation that spawns, charged where it is bound. A caller declares `{Git}` and says
+ * nothing about subprocesses — exactly as it declares `{Console}` and says nothing about file
+ * descriptors — and a test of a caller binds a double for `Git` rather than scripting what
  * `ls-remote` would print. The decisions the operations are made of live here either way: which refs
  * count, which commit a tag names, what a version tag even looks like, and which of those questions a
  * non-zero exit answers rather than fails.
@@ -32,7 +32,8 @@ import eliot.build.Version
  * by remote or by mirror directory — must run where this program stands, while one that operates on
  * the repository it is standing in runs inside the mirror and names nothing. Getting it backwards is
  * silent — git reports a missing repository — so `shellGit` decides the frame from the subject's
- * type, and no caller says a working directory.
+ * type, and no caller says a working directory. Naming the subjects apart is what lets it: a `Remote`
+ * and a `Mirror` are different types precisely so the rule can be read off an argument.
  *
  * Failure has two channels and they are different reports to a user: `GitError` is this module's,
  * raised when git ran fine and *said no*, and `IoError` is the standard library's, raised when a
@@ -162,63 +163,6 @@ effect Git {
 }
 
 /**
- * The `Git` that talks to a repository: it spawns the `git` the user already has, once per operation,
- * in the directory the operation's subject decides — where this program stands for a command that
- * names a remote or a mirror, inside the mirror for a command that operates on the one it is in.
- *
- * **Named, and deliberately not the default.** An implementation's clause rows are bound where the *name*
- * is bound, and the binding comes from the scope of that `with` — so `tags(mirror) with shellGit`
- * inside a mocked test reaches the framework's process double, which is how this implementation is
- * tested at all. An anonymous default is bound at a slot or at `main` with nothing written, and its
- * clauses then bind the platform's own `Process`: nothing short of a real subprocess could ever check it.
- * The price is one `with shellGit` at the program's run boundary, where the launcher composes the tool,
- * and a `{Git}` reaching `main` without it is a compile error naming the effect — which is the honest
- * state of an effect the program has not yet decided how to run.
- *
- * Its clauses are where `{Process}` and `{Throw[IoError]}` enter the program: git failing to *start* is
- * this implementation's failure, and no caller declaring `{Git}` ever names it.
- */
-implement shellGit: Git {
-   def remoteTags(remote: Remote): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
-      parseTagRefs(checked(lsRemoteTags(remote.remoteUrl), here))
-
-   def cloneMirror(remote: Remote, target: Path): {Process, Throw[IoError], Throw[GitError]} Mirror = {
-      val cloned = checked(
-         command("git").withArgument("clone").withArgument("--mirror")
-            .withArgument(remote.remoteUrl).withArgument(show(target)),
-         here
-      )
-
-      Mirror(target)
-   }
-
-   def fetch(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Unit = {
-      val fetched = checked(
-         command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune"),
-         mirror.mirrorDirectory
-      )
-
-      unit
-   }
-
-   def tags(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
-      parseTagRefs(checked(lsRemoteTags(show(mirror.mirrorDirectory)), here))
-
-   /**
-    * `Throw[IoError]` is a different statement from the refusal this reads, and stays: git refusing to
-    * answer is what this reads, git failing to *start* is not.
-    */
-   def fileAt(revision: Revision, path: String, mirror: Mirror): {Process, Throw[IoError]} Option[String] = {
-      val shown = run(
-         command("git").withArgument("show").withArgument(revisionName(revision) ++ ":" ++ path),
-         mirror.mirrorDirectory
-      )
-
-      fold(shown.exitCode == 0, Some(shown.standardOutput), None)
-   }
-}
-
-/**
  * The versions `output` announces, where `output` is what `git ls-remote --tags` wrote.
  *
  * Anything that is not a version tag is dropped rather than reported. A repository is free to carry
@@ -270,46 +214,6 @@ def revisionName(revision: Revision): String = revision match {
    case AtVersion(version) -> show(version)
    case AtCommit(commit)   -> show(commit)
 }
-
-/**
- * The directory this program was started in — the frame every relative path it is given is expressed
- * in, and therefore the directory every command that *names* a repository must run in. A cache root
- * may be relative (`target/cache` is the obvious thing for a caller to pass), and a command launched
- * from inside it would resolve that same relative path a second time, burying a mirror at
- * `target/cache/target/cache/…`. An absolute directory is indifferent to the frame, so one rule serves
- * both.
- */
-private def here: Path = path(".")
-
-/**
- * `git ls-remote --tags <target>`, for a remote and for a mirror directory alike: both are things git
- * is *told about*, so both run in `here`.
- */
-private def lsRemoteTags(target: String): List[String] =
-   command("git").withArgument("ls-remote").withArgument("--tags").withArgument(target)
-
-/**
- * Run `arguments` in `workingDirectory` and answer what it wrote, raising when it exited non-zero —
- * the step every clause of `shellGit` is made of, bar one.
- *
- * The standard library is right that a non-zero exit is data rather than a failure — it is how a
- * program reports a decision — but the decisions reported by the operations above are all the same
- * one: git was asked about a repository and could not answer. The single operation that genuinely
- * wants to *read* a refusal is `fileAt`, and it calls `run` itself.
- */
-private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[IoError], Throw[GitError]} String = {
-   val result = run(arguments, workingDirectory)
-   val failure = failureOf(arguments, result)
-
-   foldOption(result.standardOutput, error -> raise(error), failure)
-}
-
-private def failureOf(arguments: List[String], result: ProcessResult): Option[GitError] =
-   fold(
-      result.exitCode == 0,
-      None,
-      Some(GitError(arguments.joined(" "), result.exitCode, result.standardError))
-   )
 
 private def withTagLine(line: String, refs: List[TagRef]): List[TagRef] =
    foldOption(refs, name -> withTagName(name, Commit(before("\t", line)), refs), tagNameOf(line))

@@ -1,7 +1,7 @@
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
-import eliot.build.PackageId
+import eliot.build.model.PackageId
 
 def testCases: Test = {
    "packageId" should "leave a package already written canonically alone" in {

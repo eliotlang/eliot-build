@@ -1,9 +1,10 @@
 import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Git
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.format.PackageFile
+import eliot.build.git.Git
 
 /**
  * What every question in this module runs on: git, the mirror on disk, and the two ways either can
@@ -31,7 +32,7 @@ type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
  * and a stale memo of a wrong shape is worse than a second `ls-remote` against a local directory.
  *
  * This module owns *cache policy* — where a mirror lives, whether it has to be made, when it is
- * brought up to date — and `eliot.build.Git` owns git. The row is `{Git, FileSystem}` plus both
+ * brought up to date — and `eliot.build.git.Git` owns git. The row is `{Git, FileSystem}` plus both
  * failure channels: `GitError` when git said no to a repository, `IoError` when a directory cannot be
  * made. Keeping them apart is what lets a caller report "that repository does not exist" differently
  * from "the cache directory cannot be created".
@@ -101,11 +102,6 @@ def refreshed(root: Path, repository: Repository): Cached[Mirror] = {
    fetch(mirror)
    mirror
 }
-
-/**
- * The descriptor's file name, at the root of every package.
- */
-def descriptorFileName: String = "eliot.pkg"
 
 /**
  * The mirror of `repository`, cloned if this is the first time the cache has been asked about it.

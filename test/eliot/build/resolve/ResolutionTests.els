@@ -1,10 +1,10 @@
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Resolution
-import eliot.build.TablePackages
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.TablePackages
 
 def testCases: Test = {
    "resolve" should "select the version the only requirement declared" in {
@@ -152,7 +152,7 @@ def testCases: Test = {
  * text, and what each compatibility line's anchor tag names.
  *
  * The resolver never sees these tables. It declares `{PackageSource}` and names no implementation, so
- * what answers its two questions is decided by whoever runs it — here `eliot.build.TablePackages`,
+ * what answers its two questions is decided by whoever runs it — here `eliot.build.resolve.TablePackages`,
  * bound by the one `with` in `against` and reading them out of a `Universe`, and in the launcher the
  * git-backed default. That the same code runs on both, unchanged and unaware, is the whole point of
  * the source being an effect.

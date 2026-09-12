@@ -4,12 +4,14 @@ import eliot.file.File
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.test.Mock
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Descriptor
-import eliot.build.Git
-import eliot.build.TableGit
-import eliot.build.PackageSource
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.format.PackageFile
+import eliot.build.git.Git
+import eliot.build.git.TableGit
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.GitPackages
 
 /**
  * The git-backed `PackageSource`, answering the resolver's two questions out of a mirror.

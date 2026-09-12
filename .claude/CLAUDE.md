@@ -14,29 +14,41 @@ meta-information.
 
 ## Architecture
 
-Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format; a `Dependency` is
-a `SiblingDependency` or a `Requirement` with a mandatory minimum, checked at parse time), `Version`
-(with `Line`, the compatibility line, and `firstRelease`) and `PackageId` (`Repository` is what is
-cloned, cached and selected; `Package` adds the module wanted; the `PackageId` sum is what a `dep`
-line spells, `Sibling` or `Foreign`, never an empty-URL sentinel), `Git` (`effect Git` — five operations over `Remote`, `Mirror`,
-`Commit` and `Revision`, git's own vocabulary; a mirror is a bare `--mirror` clone and nothing is ever
-checked out — plus the pure reading of git's output, plus `shellGit`, the *named* implementation that
-spawns and alone decides which directory each command stands in), `Cache` (mirroring repositories, on
-`{Git, FileSystem}`), `PackageSource` (the resolver's two questions plus
-`gitPackages`, the named git-backed answer), `Resolution` (MVS over a `Configuration`: `TestScope` or
-`ArtifactNamed`). Neither `Git` nor `PackageSource` has
-a default: a run boundary writes `with gitPackages with shellGit` once. `test/` mirrors it, plus
-`TablePackages` and `TableGit` — named implementations of this project's own two effects, which the
-framework cannot double. **Bind a named implementation with an expression `with` inside `mocked`'s
-body, never on a slot's type**: a slot's `with` binds the implementation's own clause effects to the
-platform's real ones (`docs/effectful-modules.md` §11.2). Everything else is mocked by
-`eliot.test.Mock`: a case declares nothing, arranges with `whenSpawning`/`withDirectory`/…, acts, and
-verifies with `wasCalledOnce`/`calls`/… (`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of
-hand-written doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
-§9.6 says what that leaves unchecked.)
+Two source roots, four packages each. `src/eliot/build/` is the tool, split by what a file is allowed
+to know — `resolve` → `git` → `format` → `model`, and `model` imports nothing of the tool
+(`docs/effectful-modules.md` §12):
+
+- **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
+  line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; `Package`
+  adds the module wanted; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`, never
+  an empty-URL sentinel), and `Descriptor` — the typed `eliot.pkg` model as data alone, where a
+  `Dependency` is a `SiblingDependency` or a `Requirement` with a mandatory minimum.
+- **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser; `PackageFile`
+  interprets one into a `Descriptor`, writes one back out, owns `DescriptorError` and
+  `descriptorFileName`, and is the only place that knows the vocabulary. The minimum on a requirement is
+  checked here, at parse time.
+- **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror`, `Commit` and `Revision`,
+  git's own vocabulary; a mirror is a bare `--mirror` clone and nothing is ever checked out — plus the
+  pure reading of git's output), `ShellGit` (`shellGit`, the *named* implementation that spawns and alone
+  decides which directory each command stands in; the only module naming `eliot.system.Process`), and
+  `Cache` (mirroring repositories, on `{Git, FileSystem}`).
+- **`resolve/`** — `PackageSource` (the resolver's two questions), `GitPackages` (`gitPackages`, the
+  named git-backed answer), `Resolution` (MVS over a `Configuration`: `TestScope` or `ArtifactNamed`).
+
+Neither `Git` nor `PackageSource` has a default: a run boundary writes `with gitPackages with shellGit`
+once, and `ShellGit`/`GitPackages` are the two modules nothing but that boundary imports. `test/` mirrors
+the tree package for package, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
+this project's own two effects, which the framework cannot double. **Bind a named implementation with an
+expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `with` binds the
+implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
+Everything else is mocked by `eliot.test.Mock`: a case declares nothing, arranges with
+`whenSpawning`/`withDirectory`/…, acts, and verifies with `wasCalledOnce`/`calls`/…
+(`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of hand-written doubles — was deleted when that
+landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 says what that leaves
+unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10 and §11 of it first**, and read them before touching `Git`,
+`docs/effectful-modules.md` — **read §10, §11 and §12 of it first**, and read them before touching `Git`,
 `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an

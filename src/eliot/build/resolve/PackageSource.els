@@ -1,0 +1,38 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.git.Git
+
+
+/**
+ * Where a resolver's answers come from: the two questions minimal version selection asks of the world,
+ * as an algebra rather than as arguments.
+ *
+ * Resolution asks a remote exactly two things — *what does this package require at this version*, and
+ * *is this URL a package I already have* — and notably not a third: MVS never enumerates what a
+ * package offers, so discovering that a newer release exists belongs to `eliot get` rather than here.
+ *
+ * This used to be a pair of callbacks threaded through every private function of
+ * `eliot.build.resolve.Resolution`. Declaring it as an effect is what removed the plumbing: the algorithm
+ * says `{PackageSource}` and the question of *which* source answers is the caller's, all the way up
+ * to whoever runs it.
+ *
+ * **What a member declares is what the resolver must handle.** Neither question fails in a way MVS
+ * can act on, so neither member declares a row: a missing descriptor is `None`, and the ways the
+ * *git-backed* source can fail — a process that will not start, a repository that is not there, a
+ * descriptor that will not parse — are declared by that implementation's own clauses and charged
+ * where it is bound, not at every call in the algorithm. A test binds a source that cannot fail at
+ * all and is charged nothing, which is why a resolver test declares no row beyond its own.
+ */
+effect PackageSource {
+   /**
+    * What `target` published at `version`, absent where it publishes nothing there.
+    */
+   def descriptorAt(version: Version, target: Repository): Option[Descriptor]
+
+   /**
+    * The commit `target`'s `line` starts at, absent where that line has no first release.
+    */
+   def anchorAt(line: Line, target: Repository): Option[Commit]
+}

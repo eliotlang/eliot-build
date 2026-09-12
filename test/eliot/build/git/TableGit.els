@@ -2,7 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
 import eliot.test.Mock
-import eliot.build.Git
+import eliot.build.git.Git
 
 /**
  * A git that is a table: what a test of anything *using* git binds in place of the one that spawns.
@@ -10,7 +10,7 @@ import eliot.build.Git
  * It is a **named implementation**, so it is never searched and never overlaps `shellGit` — a test of
  * cache policy writes `provide(mirrors, publishedTags(root, id) with tableGit)` and gets tags and file
  * contents instead of a scripted `ls-remote` listing. What it answers arrives as `{Dep[Mirrors]}`,
- * declared by the clauses that read it and supplied by that `provide`, the way `eliot.build.TablePackages`
+ * declared by the clauses that read it and supplied by that `provide`, the way `eliot.build.resolve.TablePackages`
  * takes its universe.
  *
  * **Bind it with an expression `with`, inside the mocked body, and not on a slot's type.** A clause row is

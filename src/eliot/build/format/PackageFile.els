@@ -1,82 +1,24 @@
 import eliot.collection.List
-import eliot.build.Clause
-import eliot.build.PackageId
-import eliot.build.Version
+import eliot.build.format.Clause
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
 
 /**
- * The typed `eliot.pkg` model, and the interpretation of a clause tree into it.
+ * The `eliot.pkg` file: the interpretation of a clause tree into the typed model, and the writing of
+ * one back out.
  *
- * `eliot.build.Clause` decides what shape a descriptor has; this module decides what the shapes
- * *mean*, and it is the only place that knows the vocabulary. Keeping the two apart is what lets a
- * foreign tool read the file's literal content without knowing the build model, and it puts every
- * "this descriptor needs a newer eliot" diagnostic in one place.
+ * `eliot.build.format.Clause` decides what shape a descriptor has; this module decides what the
+ * shapes *mean*, and it is the only place that knows the vocabulary. Keeping the two apart is what
+ * lets a foreign tool read the file's literal content without knowing the build model, and it puts
+ * every "this descriptor needs a newer eliot" diagnostic in one place. The model itself is
+ * `eliot.build.model.Descriptor`, which holds no syntax at all — so a consumer that only reads a
+ * descriptor never imports this module.
  *
  * Unknown clauses are fatal by design — that is how the format evolves without a version field: a
  * descriptor using a clause this launcher does not know refuses to build rather than silently
  * ignoring the line that would have changed the outcome.
  */
-
-/**
- * A dependency: either a *sibling* — a module of the repository being read, which versions with that
- * repository and so carries no version of its own — or a *requirement* on a foreign package at a
- * *minimum* version. Never a range and never an upper bound — resolution picks the maximum of the
- * declared minimums, so a version token is only ever a floor. Two constructors rather than an
- * optional version, because the version is absent exactly when the target is a sibling, and a shape
- * that could say otherwise would leave the resolver a case to refuse.
- */
-data Dependency =
-   SiblingDependency(dependencyModule: ModuleName) |
-   Requirement(requiredPackage: Package, minimumVersion: Version)
-
-/**
- * One jar of a compiler plugin's flat closure: an exact Maven coordinate and the SHA-256 the
- * consumer verifies it against. Author-computed at release time, so the consumer's launcher never
- * resolves a POM.
- */
-data JarPin(jarCoordinate: String, jarSha256: String)
-
-/**
- * A compiler plugin a package ships: its own exact coordinate plus the full flat jar closure.
- */
-data Plugin(pluginCoordinate: String, pluginJars: List[JarPin])
-
-/**
- * A build module of a multi-module repository. `exported` decides whether dependents mount its
- * sources; examples, applications and test fixtures are `internal`.
- */
-data BuildModule(
-   moduleName: ModuleName,
-   exported: Bool,
-   moduleDependencies: List[Dependency],
-   moduleTestDependencies: List[Dependency],
-   modulePlugins: List[Plugin]
-)
-
-/**
- * A backend invocation: which package's plugin to call (absent when the artifact's dependencies
- * offer exactly one candidate) and the parameters to call it with. The parameters stay free-form
- * here and are validated against the plugin's own declared schema.
- */
-data Backend(backendPackage: Option[PackageId], backendParameters: List[Pair[String, String]])
-
-/**
- * A build configuration: the unit of dependency resolution. Its own dependencies are where platform
- * layers are declared — flat-listing two platforms would mount both layers into one resolution and
- * collide on every name the layers implement.
- */
-data Artifact(artifactName: String, artifactDependencies: List[Dependency], artifactBackend: Option[Backend])
-
-/**
- * Everything an `eliot.pkg` says. Deliberately absent: the package's own name (the URL is the
- * identity), its version (the git tag carries it), and a toolchain directive (the toolchain is an
- * ordinary dependency).
- */
-data Descriptor(
-   baseDependencies: List[Dependency],
-   modules: List[BuildModule],
-   testDependencies: List[Dependency],
-   artifacts: List[Artifact]
-)
 
 /**
  * Why a descriptor could not be read: either it is not a well-formed clause file, or it is but says
@@ -93,6 +35,14 @@ implement Show[DescriptorError] {
 }
 
 /**
+ * The descriptor's file name, at the root of every package.
+ *
+ * A fact about the *format*, so it lives with the format: `eliot.build.git.Cache` reads the file out
+ * of a mirror and needs the name, but nothing about which name it is belongs to cache policy.
+ */
+def descriptorFileName: String = "eliot.pkg"
+
+/**
  * The descriptor `lines` spell.
  *
  * ```eliot
@@ -105,11 +55,6 @@ def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
       clauses -> interpret(clauses),
       runThrow[ClauseError](parseClauses(lines))
    )
-
-/**
- * The empty descriptor — what a file of nothing but comments means.
- */
-def emptyDescriptor: Descriptor = Descriptor(empty, empty, empty, empty)
 
 /**
  * `descriptor` written back out in `eliot.pkg` syntax, canonically ordered. Not a byte-for-byte

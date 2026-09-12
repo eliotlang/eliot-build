@@ -1,0 +1,80 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+
+/**
+ * The typed `eliot.pkg` model: what a descriptor *says*, as data.
+ *
+ * Nothing here knows the file's syntax. `eliot.build.format.Clause` decides what shape a descriptor
+ * has and `eliot.build.format.PackageFile` decides what the shapes mean; this module is only the
+ * vocabulary the two of them agree on, and the one the resolver reads. That is why it sits in
+ * `model` with the rest of the domain: a consumer that holds a descriptor — resolution above all —
+ * imports these types and drags no parser behind it.
+ */
+
+/**
+ * A dependency: either a *sibling* — a module of the repository being read, which versions with that
+ * repository and so carries no version of its own — or a *requirement* on a foreign package at a
+ * *minimum* version. Never a range and never an upper bound — resolution picks the maximum of the
+ * declared minimums, so a version token is only ever a floor. Two constructors rather than an
+ * optional version, because the version is absent exactly when the target is a sibling, and a shape
+ * that could say otherwise would leave the resolver a case to refuse.
+ */
+data Dependency =
+   SiblingDependency(dependencyModule: ModuleName) |
+   Requirement(requiredPackage: Package, minimumVersion: Version)
+
+/**
+ * One jar of a compiler plugin's flat closure: an exact Maven coordinate and the SHA-256 the
+ * consumer verifies it against. Author-computed at release time, so the consumer's launcher never
+ * resolves a POM.
+ */
+data JarPin(jarCoordinate: String, jarSha256: String)
+
+/**
+ * A compiler plugin a package ships: its own exact coordinate plus the full flat jar closure.
+ */
+data Plugin(pluginCoordinate: String, pluginJars: List[JarPin])
+
+/**
+ * A build module of a multi-module repository. `exported` decides whether dependents mount its
+ * sources; examples, applications and test fixtures are `internal`.
+ */
+data BuildModule(
+   moduleName: ModuleName,
+   exported: Bool,
+   moduleDependencies: List[Dependency],
+   moduleTestDependencies: List[Dependency],
+   modulePlugins: List[Plugin]
+)
+
+/**
+ * A backend invocation: which package's plugin to call (absent when the artifact's dependencies
+ * offer exactly one candidate) and the parameters to call it with. The parameters stay free-form
+ * here and are validated against the plugin's own declared schema.
+ */
+data Backend(backendPackage: Option[PackageId], backendParameters: List[Pair[String, String]])
+
+/**
+ * A build configuration: the unit of dependency resolution. Its own dependencies are where platform
+ * layers are declared — flat-listing two platforms would mount both layers into one resolution and
+ * collide on every name the layers implement.
+ */
+data Artifact(artifactName: String, artifactDependencies: List[Dependency], artifactBackend: Option[Backend])
+
+/**
+ * Everything an `eliot.pkg` says. Deliberately absent: the package's own name (the URL is the
+ * identity), its version (the git tag carries it), and a toolchain directive (the toolchain is an
+ * ordinary dependency).
+ */
+data Descriptor(
+   baseDependencies: List[Dependency],
+   modules: List[BuildModule],
+   testDependencies: List[Dependency],
+   artifacts: List[Artifact]
+)
+
+/**
+ * The empty descriptor — what a file of nothing but comments means.
+ */
+def emptyDescriptor: Descriptor = Descriptor(empty, empty, empty, empty)

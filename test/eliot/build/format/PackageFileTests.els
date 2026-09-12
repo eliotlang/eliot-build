@@ -1,9 +1,10 @@
 import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Descriptor
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.format.PackageFile
 
 def testCases: Test = {
    "parseDescriptor" should "read the minimal library descriptor of the design" in {

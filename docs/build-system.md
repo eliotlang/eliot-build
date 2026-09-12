@@ -486,7 +486,7 @@ What the Eliot-written launcher demands is a set of jvm-layer effects/natives, a
 feature rather than an obstacle: the build tool is the forcing function for the effect system and
 stdlib the way `namedValues` was for reflection — a real, fully effectful program we control. It
 worked. `eliot.file.File`/`Path`, `eliot.system.Process` and `eliot.system.Environment` all exist
-now, and `eliot.build.Cache` is a real `{Process, FileSystem}` program running against real
+now, and `eliot.build.git.Cache` is a real `{Process, FileSystem}` program running against real
 repositories — so "can the launcher be written in Eliot at all" is answered rather than assumed.
 HTTP GET and sha256 are still absent and are the remaining two: both are reachable by shelling out
 (`curl`, `sha256sum`) if they stay absent, at the cost of one more thing that must be installed.

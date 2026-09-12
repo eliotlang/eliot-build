@@ -1,0 +1,116 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.system.Process
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.test.Mock
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.git.Git
+import eliot.build.git.ShellGit
+
+/**
+ * Talking to git, with git faked: what each operation runs, where it runs, and which refusals it
+ * raises rather than answers.
+ *
+ * `shellGit` is bound by a `with` written inside `mocked`'s body so that its clauses' `{Process}`
+ * resolves to the framework's process double — which records the command *and the directory it ran
+ * in*, the half of a git invocation a command line does not carry, the half `shellGit` decides from
+ * the subject's type, and the half that has actually been wrong.
+ */
+def testCases: Test = {
+   "remoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
+      remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
+
+      calls shouldBe ".$ git ls-remote --tags https://github.com/x/foo"
+   }
+   "remoteTags" should "read the versions the remote announced" in mocked {
+      whenSpawning("ls-remote", succeeding(listing))
+
+      renderedTags(remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+   }
+   "remoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
+      whenSpawning("ls-remote", failing(128, "no such repository"))
+
+      raising[GitError](expectedRefusal, {
+         remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
+         unit
+      })
+   }
+   "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked {
+      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+
+      calls shouldBe ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+   }
+   "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked {
+      val made = cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+
+      show(made.mirrorDirectory) shouldBe "/cache/github.com/x/foo"
+   }
+   "fetch" should "prune, so a withdrawn tag stops being selectable" in mocked {
+      fetch(mirror) with shellGit
+
+      calls shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
+   }
+   "fetch" should "run inside the mirror, naming nothing" in mocked {
+      whenSpawning("fetch", failing(128, "not a repository"))
+
+      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetch(mirror) with shellGit)
+   }
+   "tags" should "list the mirror by naming its directory, from where this program stands" in mocked {
+      tags(mirror) with shellGit
+
+      calls shouldBe ".$ git ls-remote --tags /cache/github.com/x/foo"
+   }
+   "tags" should "read the versions the mirror holds" in mocked {
+      whenSpawning("ls-remote", succeeding(listing))
+
+      renderedTags(tags(mirror) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+   }
+   "fileAt" should "read one file out of the object database, inside the mirror" in mocked {
+      fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
+
+      calls shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
+   }
+   "fileAt" should "read at a commit by its hash" in mocked {
+      fileAt(AtCommit(Commit("aaa1")), "eliot.pkg", mirror) with shellGit
+
+      calls shouldBe "/cache/github.com/x/foo$ git show aaa1:eliot.pkg"
+   }
+   "fileAt" should "answer what that revision holds" in mocked {
+      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
+
+      val shown = fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
+
+      (shown orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
+   }
+   "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked {
+      whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
+
+      val shown = fileAt(AtVersion(version("v1.9")), "eliot.pkg", mirror) with shellGit
+
+      (shown orElse "<none>") shouldBe "<none>"
+   }
+   "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
+      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+      fetch(mirror) with shellGit
+
+      calls shouldBe (
+         ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
+            "/cache/github.com/x/foo$ git fetch --tags --prune")
+   }
+}
+
+private def mirrorPath: Path = path("/cache/github.com/x/foo")
+
+private def mirror: Mirror = Mirror(mirrorPath)
+
+private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
+
+private def expectedRefusal: String =
+   "'git ls-remote --tags https://github.com/x/foo' failed with exit code 128: no such repository"
+
+private def renderedTags(refs: List[TagRef]): String =
+   refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
+
+private def version(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

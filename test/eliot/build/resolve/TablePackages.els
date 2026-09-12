@@ -1,11 +1,12 @@
 import eliot.collection.List
-import eliot.build.Clause
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Descriptor
-import eliot.build.Git
-import eliot.build.PackageSource
-import eliot.build.Resolution
+import eliot.build.format.Clause
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.format.PackageFile
+import eliot.build.git.Git
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Resolution
 
 /**
  * A package source that is a table of strings: what a resolver test binds in place of git.
@@ -17,7 +18,7 @@ import eliot.build.Resolution
  * The table itself arrives as `{Dep[Universe]}`, declared by the clauses that read it. A named
  * implementation takes no parameters and closes over nothing: what it needs at runtime it asks an
  * effect for, and `against` is where that ask is answered. The effect is charged at the binding site
- * rather than at every question the resolver asks, which is why `eliot.build.Resolution` says
+ * rather than at every question the resolver asks, which is why `eliot.build.resolve.Resolution` says
  * `{PackageSource, Throw[ResolutionError]}` and nothing about tables.
  */
 
@@ -56,7 +57,7 @@ def against[A](
 
 /**
  * The descriptor `text` spells, taken as empty where it spells nothing readable. A malformed
- * descriptor is `eliot.build.Descriptor`'s subject, and nothing here is about it.
+ * descriptor is `eliot.build.format.PackageFile`'s subject, and nothing here is about it.
  */
 def descriptorOf(text: String): Descriptor =
    foldEither(

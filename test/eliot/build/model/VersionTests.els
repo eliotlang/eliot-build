@@ -1,6 +1,6 @@
 import eliot.test.Assertion
 import eliot.test.Test
-import eliot.build.Version
+import eliot.build.model.Version
 
 def testCases: Test = {
    "parseVersion" should "read a release on a compatibility line" in {

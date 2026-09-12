@@ -616,3 +616,51 @@ names as concepts, done in one pass:
 Left as primitives on purpose: `Clause` (the syntax layer), backend parameters (free-form by design),
 `JarPin`'s coordinate and digest (the feature is transitional), and `Artifact.artifactName` (wrapped by
 `ArtifactNamed` where it is used as a configuration).
+
+## 12. Revisited, 2026-09-12 — four packages, and what each file is allowed to know
+
+Same compiler and framework as §10 and §11, 159 cases green before and after: this changed no code, only
+where the code lives. Every module reference in §1–§11 above is a reference to the *old* flat package and
+is left as written; the mapping below is what those names mean now.
+
+`src/eliot/build/` had eight modules in one package, and three of them carried two jobs at once. The
+split is by **what a file is allowed to know**:
+
+```
+model/    Version, PackageId, Descriptor        the vocabulary: no syntax, no I/O, no effects
+format/   Clause, PackageFile                   the eliot.pkg file, read and written
+git/      Git, ShellGit, Cache                  talking to repositories
+resolve/  PackageSource, GitPackages, Resolution   minimal version selection
+```
+
+Three modules were cut in two, and each cut separates a *declaration* from a *decision*:
+
+- **`Descriptor` → `model.Descriptor` + `format.PackageFile`.** 451 lines holding the typed model, the
+  interpretation of a clause tree into it, and the writer. The model is what `Resolution` reads, so it
+  had been dragging the whole parser into the resolver's imports for nothing. `model.Descriptor` is now
+  data and `emptyDescriptor`, nothing else; `format.PackageFile` holds `DescriptorError`,
+  `parseDescriptor`, `renderDescriptor` and every private that serves them.
+- **`Git` → `git.Git` + `git.ShellGit`.** The effect, the vocabulary and the pure reading of git's output
+  stay; `shellGit` moves out. The point is the import list: `git.Git` no longer names
+  `eliot.system.Process` at all, so "a caller declaring `{Git}` says nothing about subprocesses" is a fact
+  about the module graph rather than a promise the signatures make. `GitTests` split the same way — the
+  pure reading suite declares a bare `Test` and mocks nothing, `ShellGitTests` is the one that binds
+  `shellGit` inside `mocked` (§11.2's arrangement, unchanged).
+- **`PackageSource` → `resolve.PackageSource` + `resolve.GitPackages`.** Same reason: the effect is the
+  question, `gitPackages` is one answer, and the two named implementations the run boundary composes —
+  `shellGit` and `gitPackages` — are now the two modules nothing but that boundary imports.
+
+One definition changed home rather than module shape: **`descriptorFileName` left `Cache` for
+`format.PackageFile`**. Which file a descriptor is written in is a fact about the format; cache policy
+only needs the name. The resulting direction is `resolve → git → format → model`, acyclic, with `model`
+importing nothing of the tool.
+
+Test doubles moved next to what they double — `TableGit` under `test/…/git/`, `TablePackages` under
+`test/…/resolve/`. `DescriptorTests` became `format/PackageFileTests` and `PackageSourceTests` became
+`resolve/GitPackagesTests`, each named after the module it now exercises. Source *roots* did not change,
+so the compiler CLI invocation and `eliot.paths` are untouched; suite discovery is by `namedValues`, so
+nothing about the runner cares which directory a suite sits in.
+
+Two things were deliberately not split. `Dependency` stays inside `model.Descriptor` — as its own module
+it would be twenty lines, and every consumer of it holds a `Descriptor` anyway. `Configuration` stays
+inside `resolve.Resolution`: it is the unit *resolution* resolves, not something the descriptor says.

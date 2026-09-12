@@ -3,19 +3,19 @@ import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.test.Mock
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Git
-import eliot.build.Cache
-import eliot.build.TableGit
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.git.Git
+import eliot.build.git.Cache
+import eliot.build.git.TableGit
 
 /**
  * Cache policy, run against a table instead of against git — where a mirror goes, when one has to be
  * made, and which directory each operation is told to stand in.
  *
  * Nothing here reaches a real process, a real file, or the implementation that spawns: `mocked` binds the
- * framework's doubles for the filesystem, and `with tableGit` binds `eliot.build.TableGit` for `{Git}`, so
- * a body that tried to reach the world would not compile. What git *runs* is `eliot.build.Git`'s own business
+ * framework's doubles for the filesystem, and `with tableGit` binds `eliot.build.git.TableGit` for `{Git}`, so
+ * a body that tried to reach the world would not compile. What git *runs* is `eliot.build.git.Git`'s own business
  * and `GitTests`' subject; this suite sees operations, not command lines.
  */
 def testCases: Test = {

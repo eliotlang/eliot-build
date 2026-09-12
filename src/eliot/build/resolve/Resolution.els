@@ -1,9 +1,9 @@
 import eliot.collection.List
-import eliot.build.PackageId
-import eliot.build.Version
-import eliot.build.Descriptor
-import eliot.build.Git
-import eliot.build.PackageSource
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.git.Git
+import eliot.build.resolve.PackageSource
 
 /**
  * Minimal version selection: the closure of what a build configuration depends on, and the version
@@ -24,7 +24,7 @@ import eliot.build.PackageSource
  * decides what gets mounted afterwards, which is the assembly step's business rather than this one's.
  *
  * **The source is an effect, not an argument.** Everything here declares `{PackageSource}` — the two
- * questions the algorithm asks the world, declared as an effect in `eliot.build.PackageSource` and
+ * questions the algorithm asks the world, declared as an effect in `eliot.build.resolve.PackageSource` and
  * answered by whichever implementation the caller binds: the git-backed cache by default, a table of
  * descriptors under test. Nothing in this module names one, and no function takes a source.
  * Notably absent from the algebra is version listing: MVS never enumerates what a package offers, so
