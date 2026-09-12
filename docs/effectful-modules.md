@@ -487,3 +487,79 @@ shape is expressible. "Where a test carrier lives" has no subject. The language 
 — an ability may have at most one carrier-generic instance, so a double must be concrete and the
 framework must own it — is answered by named implementations: a double is a name, never searched, so
 this project's own `PackageSource` is doubled here in eight lines and no framework change was needed.
+
+## 11. Revisited, 2026-09-12 — `Git` is an effect, and what binding an implementation actually does
+
+Against compiler `ea3e27ed` and framework `df32fc9`, same as §10. 149 cases green, five of them new.
+The change is the one §10 left implicit: a caller that talks to git should say `{Git}`, the way it says
+`{Console}`, and nothing about subprocesses.
+
+### 11.1 What changed
+
+- **`eliot.build.Git` declares `effect Git`** with the four operations — `lsRemoteTags`, `mirrorClone`,
+  `fetchTags`, `showFile` — and keeps the reading half (`parseTagRefs`, `commitOf`, `anchorCommit`,
+  `transportUrl`) as plain functions, which is the "minimal algebra, derived combinators outside" rule.
+  `Throw[GitError]` stays **on the members** that can be refused: a refusal is part of what the operation
+  means, a double must be able to say no, and a caller may want to handle one per call. `Process` and
+  `Throw[IoError]` are **on the clauses of `shellGit`** alone — how that implementation does its job.
+- **`Cache`'s row is `{Git, FileSystem, Throw[IoError], Throw[GitError]}`**, still named `Cached[A]`.
+  `IoError` is now only its own directory creation. `PackageSource`'s git-backed clauses say `{Git}` too.
+- **Both git-backed implementations are named** — `shellGit: Git` and `gitPackages: PackageSource` — for
+  the reason in §11.2. Neither effect has a default. A run boundary writes `with gitPackages with shellGit`
+  once; a `{Git}` reaching `main` without it is a compile error naming the effect.
+- **`test/eliot/build/TableGit.els`** is the `Git` double, `tableGit`, the same shape as `tablePackages`:
+  answers from `{Dep[Mirrors]}`, reports each operation through `Log` into the framework's journal, and
+  makes a clone leave its directory behind by arranging it with `withDirectory`. `CacheTests` runs on it
+  and asserts on operations rather than command lines; `GitTests` binds `shellGit` and asserts on command
+  lines and working directories as before. **`PackageSourceTests` is new**, and binds the git-backed source
+  over the table — §10.3's "untypechecked" is closed: the `String`-for-`PackageId` mutation now fails with
+  "Type mismatch. Expected: PackageId" (measured).
+
+### 11.2 A slot's `with` binds an implementation's clause rows to the platform, by design
+
+This is the fact that decided everything above, and it was measured before it was read. The first cut
+made `Git`'s shell implementation the anonymous default and reached it from a test through a slot
+supplying `{Git}`; it compiled, and then **spawned a real `git` in `/work`** under `mocked`. The first cut
+of the double reported through `Log` and was bound on a slot's type, `computation: {Git} A with tableGit`,
+the shape `against` uses; it compiled, and its journal went to **standard output**.
+
+The rule is in `BindingWriter.slotImplementation` and in `docs/effects.md` (the Route A survey, item 2):
+a slot's `with` resolves the named implementation's *own* clause-row entries against a scope that binds
+them to `Default`, because the scope that would cover them belongs to the caller and the slot cannot see
+it. An anonymous default bound at a slot is the same case. `Default` for `Process`, `FileSystem` and `Log`
+is the platform's real one. `against` gets away with the slot form because `Dep` is discharged by a *frame*
+(`provide`) rather than bound by a scope, and the framework's own `Mocking` and `Calls` defaults ride
+`State[Recording]` through `mocked`'s frame the same way.
+
+So the working shape is: **bind a named implementation with an expression `with`, written inside the
+scope whose bindings its clauses should see** — `lsRemoteTags(…) with shellGit` inside `mocked { … }`
+reaches `mockProcess`; `provide(mirrors, publishedTags(…) with tableGit)` inside `mocked { … }` reaches
+`mockLog` and `mockFileSystem`. A slot-typed helper cannot do this, which is why `TableGit` exports no
+`onGit`. And it is why the git-backed implementations are named: an anonymous default has no name to
+write in an expression `with`, so its clauses could only ever bind the platform's own, and nothing short of
+a real subprocess could check `shellGit`.
+
+### 11.3 Two compiler findings, both worked around here and neither fixed
+
+- **Stale incremental cache reports a rename as "Could not find".** Turning `lsRemoteTags` and `fetchTags`
+  from top-level defs into effect members made the build fail with `Git.els:1:1: Could not find
+  'fetchTags'` (and `'lsRemoteTags'`), twice each, with the sources correct — the same sources compiled
+  clean from a scratch path. The cache is `target/.eliot-index-*` / `.eliot-objects-*`, not
+  `target/probe-cache`; deleting those files fixed it. `IncrementalFactGenerator.currentErrors` is meant to
+  drop exactly this diagnostic, so its reachability filter has a hole for a def that became a member. When
+  a build fails at `1:1` about a name that plainly exists, clear the cache before reading the code.
+- **`provide` at `Option[Descriptor]` is emitted without its native.** `provide$Mirrors$Option$Descriptor`
+  is in the jar; `withCellInternal$Mirrors$Option$Descriptor$Option$Descriptor` is not, and the run dies
+  with `NoSuchMethodError` at that call. Every other instantiation in the program — `Option[String]`,
+  `List[TagRef]`, `Path`, `Unit`, `Either[ResolutionError, Resolution]` — has both halves. Reached with or
+  without an effect member in between (measured both ways). `PackageSourceTests` renders the descriptor
+  *inside* the `provide` so its result is a `String`; the comment on `rendered` says to undo that when the
+  instance is generated.
+
+### 11.4 Where the standing gap stands now
+
+§10.3's first bullet is closed: the git-backed `PackageSource` is bound by a test, typechecked, and
+exercised over the table double. Its second bullet stands unchanged and is now the whole of the gap: **no
+platform instance of `Process` or `FileSystem` is ever resolved**, `shellGit` is only ever bound under
+`mocked`, and the program with a `main` that writes `with gitPackages with shellGit` against a real
+repository is still unwritten. `packageCacheRoot` is unchanged and still waiting on that launcher.

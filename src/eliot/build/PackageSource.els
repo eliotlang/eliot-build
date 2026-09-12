@@ -1,7 +1,6 @@
 import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
-import eliot.system.Process
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
@@ -53,20 +52,25 @@ effect PackageSource {
 def packageCacheRoot: Path = path("target/cache")
 
 /**
- * The git-backed source, and the default: it spawns git against the local mirror and reads what the
- * mirror holds.
+ * The git-backed source: it asks `Git` about the local mirror and reads what the mirror holds.
  *
- * Its clauses declare the three ways that can fail — a process that will not start, a repository git
- * says no to, a descriptor that will not parse — so those are bound where *this* implementation is
- * bound rather than at every question the resolver asks. Being the anonymous implementation in the
- * effect's own module makes it what a run boundary picks with nothing said; a test names its own and
- * this one is never searched.
+ * Its clauses declare what it runs on — `{Git}` and the mirror on disk — and the three ways that can
+ * fail: a repository git says no to, a cache directory that cannot be made, a descriptor that will not
+ * parse. Those are bound where *this* implementation is bound rather than at every question the resolver
+ * asks, and `Git` is bound one step further out again, so nothing here says whether git is a subprocess.
+ *
+ * Named rather than the default for the reason `eliot.build.Git` gives for `shellGit`: a clause row is
+ * bound in the scope of the `with` that binds the name, so a test can write
+ * `descriptorAt(…) with gitPackages with tableGit` and reach these clauses with a table beneath them,
+ * where an anonymous default would bind them to whatever `Git` the platform has — which is none. The
+ * launcher's run boundary writes `with gitPackages with shellGit` once, and that is the whole of the
+ * tool's composition.
  */
-implement PackageSource {
+implement gitPackages: PackageSource {
    def descriptorAt(
          version: Version,
          target: PackageId
-      ): {Process, FileSystem, Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
+      ): {Git, FileSystem, Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
       val published = descriptorTextAt(packageCacheRoot, version, target)
 
       foldOption(None, text -> Some(parseDescriptor(split("\n", text))), published)
@@ -75,6 +79,6 @@ implement PackageSource {
    def anchorAt(
          majorLine: Int,
          target: PackageId
-      ): {Process, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
+      ): {Git, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
       anchorOf(packageCacheRoot, majorLine, target)
 }

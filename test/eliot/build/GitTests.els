@@ -1,5 +1,7 @@
 import eliot.collection.List
 import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.test.Mock
@@ -11,10 +13,10 @@ import eliot.build.Git
  * git said, and which refusals it raises rather than answers.
  *
  * The reading half is pure, and the bare `Test` this suite declares is what keeps it so: a case may
- * assert and nothing else, so `in { … }` is already the strictest body there is. The spawning half adds
- * `mocked`, whose own slot binds the framework's process double — which records the command *and the
- * directory it ran in*, the half of a git invocation a command line does not carry, and the half that
- * has actually been wrong.
+ * assert and nothing else, so `in { … }` is already the strictest body there is. The spawning half is
+ * `shellGit`, bound by a `with` written inside `mocked`'s body so that its clauses' `{Process}` resolves
+ * to the framework's process double — which records the command *and the directory it ran in*, the half
+ * of a git invocation a command line does not carry, and the half that has actually been wrong.
  */
 def testCases: Test = {
    "parseTagRefs" should "read a lightweight tag, which is listed once" in {
@@ -70,60 +72,60 @@ def testCases: Test = {
       newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
    "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
-      lsRemoteTags("github.com/x/foo", here)
+      lsRemoteTags("github.com/x/foo", here) with shellGit
 
       calls shouldBe "/work$ git ls-remote --tags github.com/x/foo"
    }
    "lsRemoteTags" should "read the versions the remote announced" in mocked {
       whenSpawning("ls-remote", succeeding(listing))
 
-      renderedTags(lsRemoteTags("github.com/x/foo", here)) shouldBe "v1.2 aaa1, v1.3 bbb2"
+      renderedTags(lsRemoteTags("github.com/x/foo", here) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
    "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
       whenSpawning("ls-remote", failing(128, "no such repository"))
 
       raising[GitError](expectedRefusal, {
-         lsRemoteTags("github.com/x/foo", here)
+         lsRemoteTags("github.com/x/foo", here) with shellGit
          unit
       })
    }
    "mirrorClone" should "clone without a working tree, standing where the caller stands" in mocked {
-      mirrorClone("https://github.com/x/foo", show(mirror), here)
+      mirrorClone("https://github.com/x/foo", show(mirror), here) with shellGit
 
       calls shouldBe "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
    }
    "fetchTags" should "prune, so a withdrawn tag stops being selectable" in mocked {
-      fetchTags(mirror)
+      fetchTags(mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
    }
    "fetchTags" should "run in the repository it stands in, naming nothing" in mocked {
       whenSpawning("fetch", failing(128, "not a repository"))
 
-      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetchTags(mirror))
+      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetchTags(mirror) with shellGit)
    }
    "showFile" should "read one file out of the object database, in the mirror" in mocked {
-      showFile("v1.2", "eliot.pkg", mirror)
+      showFile("v1.2", "eliot.pkg", mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
    }
    "showFile" should "answer what that revision holds" in mocked {
       whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
 
-      val shown = showFile("v1.2", "eliot.pkg", mirror)
+      val shown = showFile("v1.2", "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
    }
    "showFile" should "answer absent, not raise, where the revision holds no such file" in mocked {
       whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
 
-      val shown = showFile("v1.9", "eliot.pkg", mirror)
+      val shown = showFile("v1.9", "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "<none>"
    }
    "git" should "name a repository from the caller's frame and stand in the one it fetches into" in mocked {
-      mirrorClone("https://github.com/x/foo", show(mirror), here)
-      fetchTags(mirror)
+      mirrorClone("https://github.com/x/foo", show(mirror), here) with shellGit
+      fetchTags(mirror) with shellGit
 
       calls shouldBe (
          "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++

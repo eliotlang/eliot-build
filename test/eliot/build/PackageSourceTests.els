@@ -1,0 +1,75 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.test.Mock
+import eliot.build.PackageId
+import eliot.build.Version
+import eliot.build.Descriptor
+import eliot.build.Git
+import eliot.build.TableGit
+import eliot.build.PackageSource
+
+/**
+ * The git-backed `PackageSource`, answering the resolver's two questions out of a mirror.
+ *
+ * `with gitPackages with tableGit` is the whole arrangement: the outer `with` binds the source, the inner
+ * one binds the `Git` its clauses perform, and `provide` answers the table's `Dep`. Until this suite
+ * existed the git-backed source was reachable from no `main` and no test, and use-site verification never
+ * typechecked its clauses at all; these cases exist to drag it through.
+ */
+def testCases: Test = {
+   "descriptorAt" should "read what the package published at that version" in mocked {
+      withDirectory(mirrorDirectory)
+
+      provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
+         shouldBe "dep github.com/x/bar v1.1"
+   }
+   "descriptorAt" should "answer nothing where the version publishes no descriptor" in mocked {
+      withDirectory(mirrorDirectory)
+
+      provide(mirrors, rendered(descriptorAt(Version(1, Some(9)), cached)) with gitPackages with tableGit)
+         shouldBe "<none>"
+   }
+   "descriptorAt" should "read the mirror under the source's own cache root" in mocked {
+      withDirectory(mirrorDirectory)
+
+      provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
+
+      lastCall shouldBe "log showFile v1.2:eliot.pkg in target/cache/github.com/x/foo"
+   }
+   "anchorAt" should "answer the commit the line's first release names" in mocked {
+      withDirectory(mirrorDirectory)
+
+      val anchor = provide(mirrors, anchorAt(1, cached) with gitPackages with tableGit)
+
+      (anchor orElse "<none>") shouldBe "aaa1"
+   }
+   "anchorAt" should "answer nothing for a line whose history starts later" in mocked {
+      withDirectory(mirrorDirectory)
+
+      val anchor = provide(mirrors, anchorAt(2, cached) with gitPackages with tableGit)
+
+      (anchor orElse "<none>") shouldBe "<none>"
+   }
+}
+
+/**
+ * Rendered *inside* the `provide` rather than after it, and not by preference: as of compiler `ea3e27ed` a
+ * `provide` whose result is `Option[Descriptor]` is emitted without its `withCellInternal` instance and
+ * fails at run time with `NoSuchMethodError`, while `Option[String]` and every other type here is fine.
+ * Rendering first makes the result a `String`. Undo this once the compiler generates the instance.
+ */
+private def rendered(published: Option[Descriptor]): String =
+   foldOption("<none>", renderDescriptor, published)
+
+private def mirrors: Mirrors =
+   mirrorsOf(
+      "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v2.1\n",
+      singleton(Pair("v1.2:eliot.pkg", "dep github.com/x/bar v1.1"))
+   )
+
+private def cached: PackageId = packageId("github.com/x/foo")
+
+private def mirrorDirectory: Path = path("target/cache/github.com/x/foo")

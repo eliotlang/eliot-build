@@ -15,20 +15,26 @@ meta-information.
 ## Architecture
 
 Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
-`PackageId` (identity and ordering), `Git` and `Cache` (talking to git and mirroring repositories),
-`PackageSource` (the resolver's two questions plus the git-backed answer), `Resolution` (MVS).
-`test/` mirrors it, plus `TablePackages` — a *named* implementation of `PackageSource`, which is this
-project's own effect and so cannot be doubled by the framework. Everything else is mocked by
+`PackageId` (identity and ordering), `Git` (`effect Git` — the four repository operations — plus the
+pure reading of git's output, plus `shellGit`, the *named* implementation that spawns), `Cache`
+(mirroring repositories, on `{Git, FileSystem}`), `PackageSource` (the resolver's two questions plus
+`gitPackages`, the named git-backed answer), `Resolution` (MVS). Neither `Git` nor `PackageSource` has
+a default: a run boundary writes `with gitPackages with shellGit` once. `test/` mirrors it, plus
+`TablePackages` and `TableGit` — named implementations of this project's own two effects, which the
+framework cannot double. **Bind a named implementation with an expression `with` inside `mocked`'s
+body, never on a slot's type**: a slot's `with` binds the implementation's own clause effects to the
+platform's real ones (`docs/effectful-modules.md` §11.2). Everything else is mocked by
 `eliot.test.Mock`: a case declares nothing, arranges with `whenSpawning`/`withDirectory`/…, acts, and
 verifies with `wasCalledOnce`/`calls`/… (`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of
 hand-written doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md`
 §9.6 says what that leaves unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10 of it first**, and read it before touching `Git`, `Cache`,
-`PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions the
-document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four rules)
-was deleted by effects v6; §10 says what replaced each one and what is now genuinely unchecked.
+`docs/effectful-modules.md` — **read §10 and §11 of it first**, and read them before touching `Git`,
+`Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
+the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
+rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
+implementation actually does and what is now genuinely unchecked.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
@@ -69,16 +75,23 @@ Every source root that should contribute tests must be passed: the framework's `
 ### The real-carrier check — there isn't one, and that is the standing gap
 
 A green suite says nothing about whether the effectful modules have an interpretation **on the
-platform**: `mocked` binds the doubles by name, so the platform's own `Process` and `FileSystem`
-implementations are never resolved and a green run never touches them.
+platform**: `mocked` binds the doubles by name, `shellGit` is only ever bound under it, so the
+platform's own `Process` and `FileSystem` implementations are never resolved and a green run never
+touches them. (The git-backed `PackageSource` *is* typechecked and tested now, over `tableGit` —
+that half of the gap closed on 2026-09-12.)
 
 Two things used to check that and both are gone. `probe/` was deleted on 2026-09-04; its replacement,
 `test/eliot/build/RealWorldTests.els`, was deleted by the v6 port (`76e50fb`) because it worked by
 naming the jvm run boundary `runMain` to fix the carrier to `IO`, and v6 has no carrier and no such
 value. A case that performs `Process` now simply propagates it to `eliot.test.Runner`, which caps at
 `{Console}` by design — so a platform check has to be a program with a `main` of its own rather than a
-test case. **Nobody has written that program.** `docs/effectful-modules.md` §10 records exactly what it
-leaves unchecked; do not read a green 144 as evidence the tool runs.
+test case. **Nobody has written that program.** `docs/effectful-modules.md` §11.4 records exactly what
+it leaves unchecked; do not read a green 149 as evidence the tool runs.
+
+Two build gotchas recorded in §11.3: a rename that fails at `Git.els:1:1: Could not find '…'` with
+correct sources is the stale incremental cache — delete `target/.eliot-index-*` and
+`target/.eliot-objects-*`; and a `provide` whose result is `Option[Descriptor]` dies at run time with
+`NoSuchMethodError` (its native instance is not generated), so render inside the `provide`.
 
 ### `eliot.paths` — LSP only
 

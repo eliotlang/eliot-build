@@ -1,21 +1,20 @@
 import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
-import eliot.system.Process
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Git
 
 /**
- * What every question in this module runs on: git in a subprocess, the mirror on disk, and the two
- * ways either can refuse — `IoError` when a program cannot be started or a directory cannot be made,
- * `GitError` when git ran and said no.
+ * What every question in this module runs on: git, the mirror on disk, and the two ways either can
+ * refuse — `GitError` when git said no to a repository, `IoError` when a directory cannot be made.
  *
  * Named because six definitions state it and drift between them would be a silent widening rather
- * than a compile error. It is spelled out once here; keeping the two failure channels apart is what
- * lets a caller report "git is not installed" differently from "that repository does not exist".
+ * than a compile error. Nothing here says `Process`: that is how `shellGit` does its job, declared on
+ * that implementation's clauses and charged where it is bound, so a question the cache answers reads the
+ * same whether git is a subprocess or a test's table.
  */
-type Cached[A] = {Process, FileSystem, Throw[IoError], Throw[GitError]} A
+type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
 
 
 /**
@@ -32,10 +31,10 @@ type Cached[A] = {Process, FileSystem, Throw[IoError], Throw[GitError]} A
  * and a stale memo of a wrong shape is worse than a second `ls-remote` against a local directory.
  *
  * This module owns *cache policy* — where a mirror lives, whether it has to be made, which directory
- * a command must stand in — and `eliot.build.Git` owns git. The row is `{Process, FileSystem}` plus
- * both failure channels: `IoError` when a program cannot be started or a directory cannot be made,
- * `GitError` when git ran and said no. Keeping them apart is what lets a caller report "git is not
- * installed" differently from "that repository does not exist".
+ * a command must stand in — and `eliot.build.Git` owns git. The row is `{Git, FileSystem}` plus both
+ * failure channels: `GitError` when git said no to a repository, `IoError` when a directory cannot be
+ * made. Keeping them apart is what lets a caller report "that repository does not exist" differently
+ * from "the cache directory cannot be created".
  */
 
 /**
