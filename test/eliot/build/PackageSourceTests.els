@@ -21,48 +21,46 @@ import eliot.build.PackageSource
  */
 def testCases: Test = {
    "descriptorAt" should "read what the package published at that version" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
       provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
          shouldBe "dep github.com/x/bar v1.1"
    }
    "descriptorAt" should "answer nothing where the version publishes no descriptor" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
       provide(mirrors, rendered(descriptorAt(Version(1, Some(9)), cached)) with gitPackages with tableGit)
          shouldBe "<none>"
    }
    "descriptorAt" should "read the mirror under the source's own cache root" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
       provide(mirrors, rendered(descriptorAt(Version(1, Some(2)), cached)) with gitPackages with tableGit)
 
-      lastCall shouldBe "log showFile v1.2:eliot.pkg in target/cache/github.com/x/foo"
+      lastCall shouldBe "log fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
    }
    "anchorAt" should "answer the commit the line's first release names" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
-      val anchor = provide(mirrors, anchorAt(1, cached) with gitPackages with tableGit)
-
-      (anchor orElse "<none>") shouldBe "aaa1"
+      provide(mirrors, renderedCommit(anchorAt(1, cached)) with gitPackages with tableGit) shouldBe "aaa1"
    }
    "anchorAt" should "answer nothing for a line whose history starts later" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
-      val anchor = provide(mirrors, anchorAt(2, cached) with gitPackages with tableGit)
-
-      (anchor orElse "<none>") shouldBe "<none>"
+      provide(mirrors, renderedCommit(anchorAt(2, cached)) with gitPackages with tableGit) shouldBe "<none>"
    }
 }
 
 /**
- * Rendered *inside* the `provide` rather than after it, and not by preference: as of compiler `ea3e27ed` a
- * `provide` whose result is `Option[Descriptor]` is emitted without its `withCellInternal` instance and
- * fails at run time with `NoSuchMethodError`, while `Option[String]` and every other type here is fine.
- * Rendering first makes the result a `String`. Undo this once the compiler generates the instance.
+ * Rendered *inside* the `provide` rather than after it, and not by preference: as of compiler `ea3e27ed`
+ * two `provide[Mirrors, Option[_]]` instantiations at different element types get one `withCellInternal`
+ * native between them — their JVM descriptors are identical — and the other fails at run time with
+ * `NoSuchMethodError`. A `String` result sidesteps it. Undo this once the compiler emits both.
  */
 private def rendered(published: Option[Descriptor]): String =
    foldOption("<none>", renderDescriptor, published)
+
+private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
 
 private def mirrors: Mirrors =
    mirrorsOf(
@@ -72,4 +70,4 @@ private def mirrors: Mirrors =
 
 private def cached: PackageId = packageId("github.com/x/foo")
 
-private def mirrorDirectory: Path = path("target/cache/github.com/x/foo")
+private def mirrorPath: Path = path("target/cache/github.com/x/foo")

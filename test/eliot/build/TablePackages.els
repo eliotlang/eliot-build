@@ -3,6 +3,7 @@ import eliot.build.Clause
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
+import eliot.build.Git
 import eliot.build.PackageSource
 import eliot.build.Resolution
 
@@ -26,8 +27,8 @@ implement tablePackages: PackageSource {
    def descriptorAt(version: Version, target: PackageId): {Dep[Universe]} Option[Descriptor] =
       publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
-   def anchorAt(majorLine: Int, target: PackageId): {Dep[Universe]} Option[String] =
-      dependency.lineages.lookupOption(show(target) ++ "@v" ++ show(majorLine))
+   def anchorAt(majorLine: Int, target: PackageId): {Dep[Universe]} Option[Commit] =
+      foldOption(None, hash -> Some(Commit(hash)), dependency.lineages.lookupOption(show(target) ++ "@v" ++ show(majorLine)))
 }
 
 /**

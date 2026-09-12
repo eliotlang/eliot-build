@@ -16,36 +16,37 @@ import eliot.build.Git
  * assert and nothing else, so `in { … }` is already the strictest body there is. The spawning half is
  * `shellGit`, bound by a `with` written inside `mocked`'s body so that its clauses' `{Process}` resolves
  * to the framework's process double — which records the command *and the directory it ran in*, the half
- * of a git invocation a command line does not carry, and the half that has actually been wrong.
+ * of a git invocation a command line does not carry, the half `shellGit` now decides from the subject's
+ * type, and the half that has actually been wrong.
  */
 def testCases: Test = {
    "parseTagRefs" should "read a lightweight tag, which is listed once" in {
-      tags("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
+      parsed("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
    }
    "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in {
-      tags("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
+      parsed("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
    }
    "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in {
-      tags("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
+      parsed("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
    }
    "parseTagRefs" should "read every version a repository publishes" in {
-      tags("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
+      parsed("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
          shouldBe "v1.2 aaa1, v1.3 bbb2, v2.0 ccc3"
    }
    "parseTagRefs" should "keep a bare major tag, which names the start of its line" in {
-      tags("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
+      parsed("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
    }
    "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in {
-      tags("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
+      parsed("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
    }
    "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in {
-      tags("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
+      parsed("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
    }
    "parseTagRefs" should "survive the trailing empty line every listing ends with" in {
-      tags("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
+      parsed("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
    }
    "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in {
-      tags("") shouldBe ""
+      parsed("") shouldBe ""
    }
    "commitOf" should "find the commit a version names" in {
       commit("v1.3", "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3") shouldBe "bbb2"
@@ -71,98 +72,126 @@ def testCases: Test = {
    "TagRef" should "order by version, so the newest release sorts last" in {
       newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
    }
-   "lsRemoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
-      lsRemoteTags("github.com/x/foo", here) with shellGit
+   "remoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
+      remoteTags(remoteOf("github.com/x/foo")) with shellGit
 
-      calls shouldBe "/work$ git ls-remote --tags github.com/x/foo"
+      calls shouldBe ".$ git ls-remote --tags https://github.com/x/foo"
    }
-   "lsRemoteTags" should "read the versions the remote announced" in mocked {
+   "remoteTags" should "read the versions the remote announced" in mocked {
       whenSpawning("ls-remote", succeeding(listing))
 
-      renderedTags(lsRemoteTags("github.com/x/foo", here) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+      renderedTags(remoteTags(remoteOf("github.com/x/foo")) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
-   "lsRemoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
+   "remoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
       whenSpawning("ls-remote", failing(128, "no such repository"))
 
       raising[GitError](expectedRefusal, {
-         lsRemoteTags("github.com/x/foo", here) with shellGit
+         remoteTags(remoteOf("github.com/x/foo")) with shellGit
          unit
       })
    }
-   "mirrorClone" should "clone without a working tree, standing where the caller stands" in mocked {
-      mirrorClone("https://github.com/x/foo", show(mirror), here) with shellGit
+   "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked {
+      cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
 
-      calls shouldBe "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
+      calls shouldBe ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
    }
-   "fetchTags" should "prune, so a withdrawn tag stops being selectable" in mocked {
-      fetchTags(mirror) with shellGit
+   "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked {
+      val made = cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
+
+      show(made.mirrorDirectory) shouldBe "/cache/github.com/x/foo"
+   }
+   "fetch" should "prune, so a withdrawn tag stops being selectable" in mocked {
+      fetch(mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
    }
-   "fetchTags" should "run in the repository it stands in, naming nothing" in mocked {
+   "fetch" should "run inside the mirror, naming nothing" in mocked {
       whenSpawning("fetch", failing(128, "not a repository"))
 
-      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetchTags(mirror) with shellGit)
+      raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetch(mirror) with shellGit)
    }
-   "showFile" should "read one file out of the object database, in the mirror" in mocked {
-      showFile("v1.2", "eliot.pkg", mirror) with shellGit
+   "tags" should "list the mirror by naming its directory, from where this program stands" in mocked {
+      tags(mirror) with shellGit
+
+      calls shouldBe ".$ git ls-remote --tags /cache/github.com/x/foo"
+   }
+   "tags" should "read the versions the mirror holds" in mocked {
+      whenSpawning("ls-remote", succeeding(listing))
+
+      renderedTags(tags(mirror) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+   }
+   "fileAt" should "read one file out of the object database, inside the mirror" in mocked {
+      fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
    }
-   "showFile" should "answer what that revision holds" in mocked {
+   "fileAt" should "read at a commit by its hash" in mocked {
+      fileAt(AtCommit(Commit("aaa1")), "eliot.pkg", mirror) with shellGit
+
+      calls shouldBe "/cache/github.com/x/foo$ git show aaa1:eliot.pkg"
+   }
+   "fileAt" should "answer what that revision holds" in mocked {
       whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
 
-      val shown = showFile("v1.2", "eliot.pkg", mirror) with shellGit
+      val shown = fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
    }
-   "showFile" should "answer absent, not raise, where the revision holds no such file" in mocked {
+   "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked {
       whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
 
-      val shown = showFile("v1.9", "eliot.pkg", mirror) with shellGit
+      val shown = fileAt(AtVersion(version("v1.9")), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "<none>"
    }
-   "git" should "name a repository from the caller's frame and stand in the one it fetches into" in mocked {
-      mirrorClone("https://github.com/x/foo", show(mirror), here) with shellGit
-      fetchTags(mirror) with shellGit
+   "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
+      cloneMirror(remoteOf("github.com/x/foo"), mirrorPath) with shellGit
+      fetch(mirror) with shellGit
 
       calls shouldBe (
-         "/work$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
+         ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
             "/cache/github.com/x/foo$ git fetch --tags --prune")
    }
-   "transportUrl" should "supply the scheme a descriptor deliberately does not carry" in {
-      transportUrl("github.com/x/foo") shouldBe "https://github.com/x/foo"
+   "remoteOf" should "supply the scheme a descriptor deliberately does not carry" in {
+      remoteOf("github.com/x/foo").remoteUrl shouldBe "https://github.com/x/foo"
+   }
+   "revisionName" should "spell a version as the tag it was published as" in {
+      revisionName(AtVersion(version("v1.2"))) shouldBe "v1.2"
+   }
+   "revisionName" should "spell a commit as its hash" in {
+      revisionName(AtCommit(Commit("aaa1"))) shouldBe "aaa1"
    }
 }
 
-private def here: Path = path("/work")
+private def mirrorPath: Path = path("/cache/github.com/x/foo")
 
-private def mirror: Path = path("/cache/github.com/x/foo")
+private def mirror: Mirror = Mirror(mirrorPath)
 
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
 private def expectedRefusal: String =
-   "'git ls-remote --tags github.com/x/foo' failed with exit code 128: no such repository"
+   "'git ls-remote --tags https://github.com/x/foo' failed with exit code 128: no such repository"
 
 /**
  * The tags `output` announces, rendered as `<tag> <commit>` per version — both halves asserted at
  * once, so a test says which commit a version resolved to rather than merely that it appeared.
  */
-private def tags(output: String): String = renderedTags(parseTagRefs(output))
+private def parsed(output: String): String = renderedTags(parseTagRefs(output))
 
 private def renderedTags(refs: List[TagRef]): String =
-   refs.map(ref -> show(ref.taggedVersion) ++ " " ++ ref.taggedCommit).joined(", ")
+   refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
 
 private def renderedText(text: Option[String]): String = foldOption("<none>", found -> found, text)
+
+private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
 
 private def newestOf(output: String): String =
    foldOption("<none>", newest -> renderedTags(singleton(newest)), parseTagRefs(output).sorted.last)
 
 private def commit(tag: String, output: String): String =
-   renderedText(commitOf(version(tag), parseTagRefs(output)))
+   renderedCommit(commitOf(version(tag), parseTagRefs(output)))
 
 private def anchor(majorLine: Int, output: String): String =
-   renderedText(anchorCommit(majorLine, parseTagRefs(output)))
+   renderedCommit(anchorCommit(majorLine, parseTagRefs(output)))
 
 private def version(tag: String): Version = parseVersion(tag) else Version(0, None)

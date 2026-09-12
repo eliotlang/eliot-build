@@ -19,12 +19,19 @@ import eliot.build.Version
  * count, which commit a tag names, what a version tag even looks like, and which of those questions a
  * non-zero exit answers rather than fails.
  *
- * **Every operation says where it runs.** Git resolves a relative path against *its* working
- * directory, not this program's, and the split is git's own: a command that *names* a repository by
- * path (`clone`, `ls-remote`) is given that path in the caller's frame and so must run where the
- * caller stands, while one that operates on the repository it is standing in (`fetch`, `show`) runs in
- * the mirror and names nothing. Getting it backwards is silent — git reports a missing repository —
- * so the frame is a parameter of the operation rather than a convention of the implementation.
+ * **The vocabulary is git's own.** A *mirror* is a `git clone --mirror`: a bare repository — object
+ * database and refs, no working tree — whose refs are an exact copy of the remote's. Nothing here is
+ * ever checked out; every question is answered out of a mirror's object database. A *remote* is the
+ * address git is given to reach a repository. A *commit* is a content hash. A *revision* is what a
+ * file is read at — a version's tag or a commit. `fetch` brings a mirror up to date and touches no
+ * working tree (there is none); `pull` would merge into a branch and has no meaning in a mirror.
+ *
+ * **Every operation's subject says where it runs.** Git resolves a relative path against *its* working
+ * directory, not this program's, and the split is git's own: a command that *names* a repository —
+ * by remote or by mirror directory — must run where this program stands, while one that operates on
+ * the repository it is standing in runs inside the mirror and names nothing. Getting it backwards is
+ * silent — git reports a missing repository — so `shellGit` decides the frame from the subject's
+ * type, and no caller says a working directory.
  *
  * Failure has two channels and they are different reports to a user: `GitError` is this module's,
  * raised when git ran fine and *said no*, and `IoError` is the standard library's, raised when a
@@ -50,6 +57,38 @@ implement Show[GitError] {
 }
 
 /**
+ * A commit, by its hash: what a tag ultimately names, what a lockfile pins, and what identity compares.
+ * Two commits are one commit when their hashes agree, which is git being content-addressed.
+ */
+data Commit(hash: String)
+
+implement Eq[Commit] {
+   def equals(a: Commit, b: Commit): Bool = a.hash == b.hash
+}
+
+implement Show[Commit] {
+   def show(value: Commit): String = value.hash
+}
+
+/**
+ * A mirror on disk — a bare, exact copy of a remote, known by the directory it lives in. Made by
+ * `cloneMirror` and by nothing else; a `Mirror` in hand says that a clone finished there once.
+ */
+data Mirror(mirrorDirectory: Path)
+
+/**
+ * The address git is given to reach a repository — a transport URL, scheme included, which is what a
+ * canonical package URL deliberately is not. Made by `remoteOf`, the one place the scheme is decided.
+ */
+data Remote(remoteUrl: String)
+
+/**
+ * A point in a repository's history a file is read at: the tag a version was published as, or a commit
+ * outright. Spelled to git by `revisionName`.
+ */
+data Revision = AtVersion(revisionVersion: Version) | AtCommit(revisionCommit: Commit)
+
+/**
  * A tag naming a version, and the commit that tag ultimately points at.
  *
  * "Ultimately" is the whole subtlety of reading `git ls-remote`: an annotated tag — which is what a
@@ -57,7 +96,7 @@ implement Show[GitError] {
  * the commit it wraps. The commit is what a lockfile pins and what an ancestry check compares, so the
  * peeled line is the one that matters and the tag object's own hash is noise.
  */
-data TagRef(taggedVersion: Version, taggedCommit: String)
+data TagRef(taggedVersion: Version, taggedCommit: Commit)
 
 /**
  * Tags order by the version they name, newest last — so the newest release a repository publishes is
@@ -70,65 +109,64 @@ implement Compare[TagRef] {
 }
 
 /**
- * What the tool asks of a repository. Four operations, each saying where it runs, and nothing about
- * how they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
+ * What the tool asks of git. Five operations, each about a remote or a mirror, and nothing about how
+ * they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
  * caller declaring `{Git}` cannot tell them apart.
  *
  * The members carry `Throw[GitError]` where the operation can be refused, because a refusal is part of
- * what the operation means and a caller may want to handle one per call. `showFile` carries none: it is
+ * what the operation means and a caller may want to handle one per call. `fileAt` carries none: it is
  * the one operation that *reads* a refusal rather than raising it.
  */
 effect Git {
    /**
-    * The versions the repository at `target` publishes — a listing that fetches none of it.
-    *
-    * `target` is a URL or a path indifferently, which is why one operation serves both discovery against
-    * a remote and reading back a mirror already on disk. Either way it is spelled in the caller's frame,
-    * so the operation runs in `from` rather than in the repository it asks about.
+    * The versions `remote` publishes — a listing that fetches none of it. The question `eliot get`
+    * asks of a repository it has never mirrored.
     */
-   def lsRemoteTags(target: String, from: Path): {Throw[GitError]} List[TagRef]
+   def remoteTags(remote: Remote): {Throw[GitError]} List[TagRef]
 
    /**
-    * Clone `source` to `target` as a mirror — the whole repository, no working tree.
+    * Mirror `remote` at `target` — the whole repository, no working tree — and answer the mirror.
     *
     * A mirror rather than a checkout because nothing here wants files on disk: a descriptor is read out
-    * of the object database with `showFile`, and the ancestry check the design owes reads objects too. A
+    * of the object database with `fileAt`, and the ancestry check the design owes reads objects too. A
     * working tree would be a second copy of every source file per package, checked out at one version at
     * a time, for no question anybody asks.
-    *
-    * Runs in `from` because `target` is a path in the caller's frame — a clone launched from inside the
-    * cache root would resolve a relative root a second time and bury the mirror beneath itself.
     */
-   def mirrorClone(source: String, target: String, from: Path): {Throw[GitError]} Unit
+   def cloneMirror(remote: Remote, target: Path): {Throw[GitError]} Mirror
 
    /**
-    * Bring the mirror at `mirror` up to date with what its remote publishes now, forgetting the tags it
-    * has withdrawn.
+    * Bring `mirror` up to date with what its remote publishes now, forgetting the tags it has withdrawn.
     *
     * Pruning matters more here than it looks: a tag that stopped existing is a tag the resolver must stop
     * selecting, and a mirror that only ever accumulates would answer with releases the package has
     * withdrawn.
     */
-   def fetchTags(mirror: Path): {Throw[GitError]} Unit
+   def fetch(mirror: Mirror): {Throw[GitError]} Unit
 
    /**
-    * One file's content at one point in `mirror`'s history, straight from the object database — absent
-    * where the revision or the file is not there.
+    * The versions `mirror` holds — what its remote had published as of the last fetch.
+    */
+   def tags(mirror: Mirror): {Throw[GitError]} List[TagRef]
+
+   /**
+    * The content of the file at `path` inside `mirror` at `revision`, straight from the object database
+    * — absent where the revision or the file is not there.
     *
     * The one operation that *reads* a refusal rather than raising it, and the signature says so by
     * carrying no `Throw[GitError]`. A version nobody tagged and a tag carrying no such file are equally
     * "there is nothing to read", and a caller that reached either has a dependency line to blame that
     * this module cannot see.
     */
-   def showFile(revision: String, file: String, mirror: Path): Option[String]
+   def fileAt(revision: Revision, path: String, mirror: Mirror): Option[String]
 }
 
 /**
- * The `Git` that talks to a repository: it spawns the `git` the user already has, once per operation, in
- * the directory the operation names.
+ * The `Git` that talks to a repository: it spawns the `git` the user already has, once per operation,
+ * in the directory the operation's subject decides — where this program stands for a command that
+ * names a remote or a mirror, inside the mirror for a command that operates on the one it is in.
  *
  * **Named, and deliberately not the default.** An implementation's clause rows are bound where the *name*
- * is bound, and the binding comes from the scope of that `with` — so `lsRemoteTags(…) with shellGit`
+ * is bound, and the binding comes from the scope of that `with` — so `tags(mirror) with shellGit`
  * inside a mocked test reaches the framework's process double, which is how this implementation is
  * tested at all. An anonymous default is bound at a slot or at `main` with nothing written, and its
  * clauses then bind the platform's own `Process`: nothing short of a real subprocess could ever check it.
@@ -140,33 +178,39 @@ effect Git {
  * this implementation's failure, and no caller declaring `{Git}` ever names it.
  */
 implement shellGit: Git {
-   def lsRemoteTags(target: String, from: Path): {Process, Throw[IoError], Throw[GitError]} List[TagRef] = {
-      val listed = checked(command("git").withArgument("ls-remote").withArgument("--tags").withArgument(target), from)
+   def remoteTags(remote: Remote): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
+      parseTagRefs(checked(lsRemoteTags(remote.remoteUrl), here))
 
-      parseTagRefs(listed)
+   def cloneMirror(remote: Remote, target: Path): {Process, Throw[IoError], Throw[GitError]} Mirror = {
+      val cloned = checked(
+         command("git").withArgument("clone").withArgument("--mirror").withArgument(remote.remoteUrl).withArgument(show(target)),
+         here
+      )
+
+      Mirror(target)
    }
 
-   def mirrorClone(source: String, target: String, from: Path): {Process, Throw[IoError], Throw[GitError]} Unit = {
-      val cloned = checked(
-         command("git").withArgument("clone").withArgument("--mirror").withArgument(source).withArgument(target),
-         from
+   def fetch(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Unit = {
+      val fetched = checked(
+         command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune"),
+         mirror.mirrorDirectory
       )
 
       unit
    }
 
-   def fetchTags(mirror: Path): {Process, Throw[IoError], Throw[GitError]} Unit = {
-      val fetched = checked(command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune"), mirror)
-
-      unit
-   }
+   def tags(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
+      parseTagRefs(checked(lsRemoteTags(show(mirror.mirrorDirectory)), here))
 
    /**
     * `Throw[IoError]` is a different statement from the refusal this reads, and stays: git refusing to
     * answer is what this reads, git failing to *start* is not.
     */
-   def showFile(revision: String, file: String, mirror: Path): {Process, Throw[IoError]} Option[String] = {
-      val shown = run(command("git").withArgument("show").withArgument(revision ++ ":" ++ file), mirror)
+   def fileAt(revision: Revision, path: String, mirror: Mirror): {Process, Throw[IoError]} Option[String] = {
+      val shown = run(
+         command("git").withArgument("show").withArgument(revisionName(revision) ++ ":" ++ path),
+         mirror.mirrorDirectory
+      )
 
       fold(shown.exitCode == 0, Some(shown.standardOutput), None)
    }
@@ -191,8 +235,8 @@ def parseTagRefs(output: String): List[TagRef] =
  * requirement written `v1.0` — the two spell one point on one line, and only the spelling the author
  * used was ever a tag.
  */
-def commitOf(version: Version, tags: List[TagRef]): Option[String] =
-   foldOption(None, ref -> Some(ref.taggedCommit), tags.find(ref -> ref.taggedVersion == version))
+def commitOf(version: Version, refs: List[TagRef]): Option[Commit] =
+   foldOption(None, ref -> Some(ref.taggedCommit), refs.find(ref -> ref.taggedVersion == version))
 
 /**
  * The lineage anchor of the `majorLine` compatibility line: the commit its *first* release names.
@@ -203,11 +247,11 @@ def commitOf(version: Version, tags: List[TagRef]): Option[String] =
  * the identity question is about. Absent is a legitimate answer and unifies nothing: a line whose
  * history was migrated may start at `v1.3` and have no first release at all.
  */
-def anchorCommit(majorLine: Int, tags: List[TagRef]): Option[String] =
-   commitOf(Version(majorLine, Some(0)), tags)
+def anchorCommit(majorLine: Int, refs: List[TagRef]): Option[Commit] =
+   commitOf(Version(majorLine, Some(0)), refs)
 
 /**
- * How to actually reach `url`, which a descriptor deliberately does not say.
+ * How to actually reach the repository at `canonicalUrl`, which a descriptor deliberately does not say.
  *
  * Dependency URLs are scheme-less by invariant — that is what keeps `//` unambiguously the module
  * selector and what stops two spellings of one transport becoming two identities. So the scheme is
@@ -215,7 +259,32 @@ def anchorCommit(majorLine: Int, tags: List[TagRef]): Option[String] =
  * where a package is fetched from is consumer configuration, and this is the function that will grow
  * a mirror table when there is one to grow.
  */
-def transportUrl(url: String): String = "https://" ++ url
+def remoteOf(canonicalUrl: String): Remote = Remote("https://" ++ canonicalUrl)
+
+/**
+ * `revision` as git is asked for it: a version by the tag it was published as, a commit by its hash.
+ */
+def revisionName(revision: Revision): String = revision match {
+   case AtVersion(version) -> show(version)
+   case AtCommit(commit)   -> show(commit)
+}
+
+/**
+ * The directory this program was started in — the frame every relative path it is given is expressed
+ * in, and therefore the directory every command that *names* a repository must run in. A cache root
+ * may be relative (`target/cache` is the obvious thing for a caller to pass), and a command launched
+ * from inside it would resolve that same relative path a second time, burying a mirror at
+ * `target/cache/target/cache/…`. An absolute directory is indifferent to the frame, so one rule serves
+ * both.
+ */
+private def here: Path = path(".")
+
+/**
+ * `git ls-remote --tags <target>`, for a remote and for a mirror directory alike: both are things git
+ * is *told about*, so both run in `here`.
+ */
+private def lsRemoteTags(target: String): List[String] =
+   command("git").withArgument("ls-remote").withArgument("--tags").withArgument(target)
 
 /**
  * Run `arguments` in `workingDirectory` and answer what it wrote, raising when it exited non-zero —
@@ -224,7 +293,7 @@ def transportUrl(url: String): String = "https://" ++ url
  * The standard library is right that a non-zero exit is data rather than a failure — it is how a
  * program reports a decision — but the decisions reported by the operations above are all the same
  * one: git was asked about a repository and could not answer. The single operation that genuinely
- * wants to *read* a refusal is `showFile`, and it calls `run` itself.
+ * wants to *read* a refusal is `fileAt`, and it calls `run` itself.
  */
 private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[IoError], Throw[GitError]} String = {
    val result = run(arguments, workingDirectory)
@@ -241,7 +310,7 @@ private def failureOf(arguments: List[String], result: ProcessResult): Option[Gi
    )
 
 private def withTagLine(line: String, refs: List[TagRef]): List[TagRef] =
-   foldOption(refs, name -> withTagName(name, before("\t", line), refs), tagNameOf(line))
+   foldOption(refs, name -> withTagName(name, Commit(before("\t", line)), refs), tagNameOf(line))
 
 /**
  * The tag a listing line is about, absent for anything that is not one. A line reads
@@ -254,7 +323,7 @@ private def tagNameOf(line: String): Option[String] = {
    fold(startsWith(tagPrefix, reference), Some(drop(length(tagPrefix), reference)), None)
 }
 
-private def withTagName(name: String, commit: String, refs: List[TagRef]): List[TagRef] =
+private def withTagName(name: String, commit: Commit, refs: List[TagRef]): List[TagRef] =
    foldOption(refs, version -> withTag(version, commit, isPeeled(name), refs), versionOfTag(bareTagName(name)))
 
 /**
@@ -266,7 +335,7 @@ private def withTagName(name: String, commit: String, refs: List[TagRef]): List[
  * is degenerate, and the first spelling seen is kept. There is no right answer to give it, and it is
  * not worth an error path of its own.
  */
-private def withTag(version: Version, commit: String, peeled: Bool, refs: List[TagRef]): List[TagRef] =
+private def withTag(version: Version, commit: Commit, peeled: Bool, refs: List[TagRef]): List[TagRef] =
    fold(peeled, replacedTag(TagRef(version, commit), refs), addedTag(TagRef(version, commit), refs))
 
 private def replacedTag(ref: TagRef, refs: List[TagRef]): List[TagRef] =

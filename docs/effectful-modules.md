@@ -548,13 +548,15 @@ a real subprocess could check `shellGit`.
   `target/probe-cache`; deleting those files fixed it. `IncrementalFactGenerator.currentErrors` is meant to
   drop exactly this diagnostic, so its reachability filter has a hole for a def that became a member. When
   a build fails at `1:1` about a name that plainly exists, clear the cache before reading the code.
-- **`provide` at `Option[Descriptor]` is emitted without its native.** `provide$Mirrors$Option$Descriptor`
-  is in the jar; `withCellInternal$Mirrors$Option$Descriptor$Option$Descriptor` is not, and the run dies
-  with `NoSuchMethodError` at that call. Every other instantiation in the program — `Option[String]`,
-  `List[TagRef]`, `Path`, `Unit`, `Either[ResolutionError, Resolution]` — has both halves. Reached with or
-  without an effect member in between (measured both ways). `PackageSourceTests` renders the descriptor
-  *inside* the `provide` so its result is a `String`; the comment on `rendered` says to undo that when the
-  instance is generated.
+- **Two `provide[Mirrors, Option[_]]` instantiations get one native between them.** With `Option[String]`
+  and `Option[Descriptor]` both reached, `provide$Mirrors$Option$Descriptor` was in the jar and
+  `withCellInternal$Mirrors$Option$Descriptor$Option$Descriptor` was not; with `Option[String]` and
+  `Option[Commit]` both reached (§11.5), it was the `Option[String]` native that went missing instead. Every
+  instantiation whose JVM descriptor is unique — `List[TagRef]`, `Mirror`, `Unit`, `String`,
+  `Either[ResolutionError, Resolution]` — has both halves, so the likely key is the erased signature: two
+  natives that both take and return `Option$Option` are treated as one. Reached with or without an effect
+  member in between (measured both ways). The suites render *inside* every `provide` so its result is a
+  `String`; the comments on `renderedCommit`/`rendered` say to undo that when both are emitted.
 
 ### 11.4 Where the standing gap stands now
 
@@ -563,3 +565,28 @@ exercised over the table double. Its second bullet stands unchanged and is now t
 platform instance of `Process` or `FileSystem` is ever resolved**, `shellGit` is only ever bound under
 `mocked`, and the program with a `main` that writes `with gitPackages with shellGit` against a real
 repository is still unwritten. `packageCacheRoot` is unchanged and still waiting on that launcher.
+
+### 11.5 The subjects are domain values, and the working directory left the effect
+
+Same day, 155 cases green. The OO decomposition — `Git.clone` returns a `Repository`, `repository.tags`
+— translates as *data for identity, effect for behaviour, subject last*: a `Mirror` names a bare mirror
+clone by its directory, and `mirror.tags`, `mirror.fetch`, `mirror.fileAt(AtVersion(v), "eliot.pkg")`
+read like the method calls while the behaviour stays in `Git` and the double stays one `with`.
+
+- **`Git` now speaks in `Remote`, `Mirror`, `Commit` and `Revision`**, git's own vocabulary (a mirror is a
+  `git clone --mirror`: bare, refs an exact copy; nothing is ever checked out; `fetch`, never `pull`).
+  The five members are `remoteTags(remote)`, `cloneMirror(remote, target): Mirror`, `fetch(mirror)`,
+  `tags(mirror)`, `fileAt(revision, path, mirror)`. `remoteOf(canonicalUrl)` is the one place the scheme is
+  decided; `revisionName` spells a `Revision` — a version's tag or a commit — for git.
+- **`Commit` reaches the resolver.** `TagRef`, `commitOf`, `anchorCommit`, `PackageSource.anchorAt` and
+  `Selection.lineageAnchor` carry `Commit` rather than `String`; `Eq[Commit]` is what `sameAnchor` compares.
+  `Resolution` imports `Git` for the type.
+- **The `from: Path` parameter is gone from the effect.** It said which directory git must stand in — a
+  fact about how a subprocess resolves relative paths, not about what "the tags of this mirror" means.
+  `shellGit` decides it from the subject's type: a command that names a remote or a mirror directory runs
+  in `.`, one that operates on the repository it is in runs inside the mirror. `Cache` no longer knows the
+  question exists. A parameter that vanishes when the subject is typed is the usual sign the split is
+  right.
+- What is *not* abstracted, on purpose: the in-repository `path: String` of `fileAt` (one constant,
+  `descriptorFileName`), the `majorLine: Int` of the anchor questions (it is `Version.major`), and
+  `GitError`'s command text, which is a report.

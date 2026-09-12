@@ -22,47 +22,53 @@ import eliot.build.Git
  *
  * Two things make it at home inside `mocked`. It **reports every operation through `Log`**, which the
  * framework's own double records into the one journal every verification reads — so `calls` shows a
- * cache's `isDirectory` and its `mirrorClone` in the order they happened, one line apiece, prefixed with
+ * cache's `isDirectory` and its `cloneMirror` in the order they happened, one line apiece, prefixed with
  * `log`. And a clone **leaves the directory behind** by arranging it with `withDirectory`, which is what
  * lets a test observe "clone on the first visit, not on the second" rather than seed it.
  */
 
 /**
- * What every repository answers: the tags a listing announces, the files `showFile` can read keyed
- * `<revision>:<file>`, and the refusal — if any — every operation that can refuse raises.
+ * What every repository answers: the tags a listing announces, the files `fileAt` can read keyed
+ * `<revision>:<path>`, and the refusal — if any — every operation that can refuse raises.
  */
 data Mirrors(announcedTags: List[TagRef], heldFiles: List[Pair[String, String]], refusal: Option[GitError])
 
 implement tableGit: Git {
-   def lsRemoteTags(target: String, from: Path): {Dep[Mirrors], Log, Throw[GitError]} List[TagRef] = {
-      log("lsRemoteTags " ++ target ++ " in " ++ show(from))
+   def remoteTags(remote: Remote): {Dep[Mirrors], Log, Throw[GitError]} List[TagRef] = {
+      log("remoteTags " ++ remote.remoteUrl)
 
       unlessRefused(dependency.announcedTags)
    }
 
-   def mirrorClone(source: String, target: String, from: Path): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Unit = {
-      log("mirrorClone " ++ source ++ " " ++ target ++ " in " ++ show(from))
-      withDirectory(path(target))
+   def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Mirror = {
+      log("cloneMirror " ++ remote.remoteUrl ++ " " ++ show(target))
+      withDirectory(target)
+
+      unlessRefused(Mirror(target))
+   }
+
+   def fetch(mirror: Mirror): {Dep[Mirrors], Log, Throw[GitError]} Unit = {
+      log("fetch " ++ show(mirror.mirrorDirectory))
 
       unlessRefused(unit)
    }
 
-   def fetchTags(mirror: Path): {Dep[Mirrors], Log, Throw[GitError]} Unit = {
-      log("fetchTags in " ++ show(mirror))
+   def tags(mirror: Mirror): {Dep[Mirrors], Log, Throw[GitError]} List[TagRef] = {
+      log("tags " ++ show(mirror.mirrorDirectory))
 
-      unlessRefused(unit)
+      unlessRefused(dependency.announcedTags)
    }
 
-   def showFile(revision: String, file: String, mirror: Path): {Dep[Mirrors], Log} Option[String] = {
-      log("showFile " ++ revision ++ ":" ++ file ++ " in " ++ show(mirror))
+   def fileAt(revision: Revision, path: String, mirror: Mirror): {Dep[Mirrors], Log} Option[String] = {
+      log("fileAt " ++ revisionName(revision) ++ ":" ++ path ++ " " ++ show(mirror.mirrorDirectory))
 
-      dependency.heldFiles.lookupOption(revision ++ ":" ++ file)
+      dependency.heldFiles.lookupOption(revisionName(revision) ++ ":" ++ path)
    }
 }
 
 /**
  * Repositories publishing what `listing` says — spelled as `git ls-remote --tags` would print it, and read
- * by the same function the shell implementation reads with — and holding `files`, keyed `<revision>:<file>`.
+ * by the same function the shell implementation reads with — and holding `files`, keyed `<revision>:<path>`.
  */
 def mirrorsOf(listing: String, files: List[Pair[String, String]]): Mirrors =
    Mirrors(parseTagRefs(listing), files, None)

@@ -30,8 +30,8 @@ type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
  * version" is kept, because MVS's answer depends on the whole closure rather than on any one package,
  * and a stale memo of a wrong shape is worse than a second `ls-remote` against a local directory.
  *
- * This module owns *cache policy* — where a mirror lives, whether it has to be made, which directory
- * a command must stand in — and `eliot.build.Git` owns git. The row is `{Git, FileSystem}` plus both
+ * This module owns *cache policy* — where a mirror lives, whether it has to be made, when it is
+ * brought up to date — and `eliot.build.Git` owns git. The row is `{Git, FileSystem}` plus both
  * failure channels: `GitError` when git said no to a repository, `IoError` when a directory cannot be
  * made. Keeping them apart is what lets a caller report "that repository does not exist" differently
  * from "the cache directory cannot be created".
@@ -62,11 +62,7 @@ def cacheDirectory(root: Path, id: PackageId): Path =
  * a separate act: MVS never needs to know that a newer release exists, and a resolver that refetched
  * on every question would make an offline build impossible for no gain.
  */
-def publishedTags(root: Path, id: PackageId): Cached[List[TagRef]] = {
-   val mirror = ensuredMirror(root, id)
-
-   lsRemoteTags(show(mirror), here)
-}
+def publishedTags(root: Path, id: PackageId): Cached[List[TagRef]] = ensuredMirror(root, id).tags
 
 /**
  * The lineage anchor of `id`'s `majorLine` — the commit its first release names, or nothing where the
@@ -75,7 +71,7 @@ def publishedTags(root: Path, id: PackageId): Cached[List[TagRef]] = {
  * This is the resolver's `anchorAt`: the question it asks when a requirement names a URL it has not
  * seen, to decide whether that URL is a package already selected under a different spelling.
  */
-def anchorOf(root: Path, majorLine: Int, id: PackageId): Cached[Option[String]] =
+def anchorOf(root: Path, majorLine: Int, id: PackageId): Cached[Option[Commit]] =
    anchorCommit(majorLine, publishedTags(root, id))
 
 /**
@@ -84,13 +80,10 @@ def anchorOf(root: Path, majorLine: Int, id: PackageId): Cached[Option[String]] 
  * Absence is an ordinary answer here rather than a failure, and both ways of being absent give it: a
  * version nobody tagged and a tag carrying no `eliot.pkg` are equally "there is no descriptor to
  * read", and a resolver that reached either has a dependency line to blame that this module cannot
- * see. `showFile` reports both the same way, by answering nothing.
+ * see. `fileAt` reports both the same way, by answering nothing.
  */
-def descriptorTextAt(root: Path, version: Version, id: PackageId): Cached[Option[String]] = {
-   val mirror = ensuredMirror(root, id)
-
-   showFile(show(version), descriptorFileName, mirror)
-}
+def descriptorTextAt(root: Path, version: Version, id: PackageId): Cached[Option[String]] =
+   ensuredMirror(root, id).fileAt(AtVersion(version), descriptorFileName)
 
 /**
  * Bring `id`'s mirror up to date with what its remote publishes now, cloning it first if this build
@@ -101,10 +94,10 @@ def descriptorTextAt(root: Path, version: Version, id: PackageId): Cached[Option
  * which is what lets the project-model query stay offline and lets fetching be something a user
  * invokes rather than something opening an editor does.
  */
-def refreshed(root: Path, id: PackageId): Cached[Path] = {
+def refreshed(root: Path, id: PackageId): Cached[Mirror] = {
    val mirror = ensuredMirror(root, id)
 
-   fetchTags(mirror)
+   fetch(mirror)
    mirror
 }
 
@@ -129,32 +122,21 @@ def descriptorFileName: String = "eliot.pkg"
  * `{Abort}` slot supplies `Abort` alone and the arms ride the caller's `Throw` — and this now reads
  * the way it does by preference rather than by necessity.
  */
-private def ensuredMirror(root: Path, id: PackageId): Cached[Path] = {
-   val mirror = cacheDirectory(root, id)
-   val absent = missingMirror(isDirectory(mirror), mirror)
+private def ensuredMirror(root: Path, id: PackageId): Cached[Mirror] = {
+   val directory = cacheDirectory(root, id)
+   val absent = missingMirror(isDirectory(directory), directory)
 
-   foldOption(mirror, missing -> cloned(root, missing, id), absent)
+   foldOption(Mirror(directory), missing -> cloned(root, missing, id), absent)
 }
 
-private def missingMirror(present: Bool, mirror: Path): Option[Path] = fold(present, None, Some(mirror))
+private def missingMirror(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
 
 /**
  * Only the root is created up front. Git makes the leading directories of a clone target itself, so
  * the per-package chain needs no help; the root is made anyway to state that the cache is a directory
  * this tool owns rather than one that appears as a side effect of the first fetch.
  */
-private def cloned(root: Path, mirror: Path, id: PackageId): Cached[Path] = {
+private def cloned(root: Path, directory: Path, id: PackageId): Cached[Mirror] = {
    createDirectories(root)
-   mirrorClone(transportUrl(repository(id).url), show(mirror), here)
-   mirror
+   cloneMirror(remoteOf(repository(id).url), directory)
 }
-
-/**
- * The directory this program was started in — the frame every relative path it is given is expressed
- * in, and therefore the directory every command that *names* a cache path must run in. `root` may be
- * relative (`target/cache` is the obvious thing for a caller to pass), and a command launched from
- * inside `root` would resolve that same relative path a second time, burying the mirror at
- * `target/cache/target/cache/…`. An absolute root is indifferent to the working directory, so one
- * rule serves both.
- */
-private def here: Path = path(".")

@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.build.PackageId
 import eliot.build.Version
 import eliot.build.Descriptor
+import eliot.build.Git
 import eliot.build.PackageSource
 
 /**
@@ -29,7 +30,7 @@ import eliot.build.PackageSource
  * Notably absent from the algebra is version listing: MVS never enumerates what a package offers, so
  * discovering that a newer release exists belongs to `eliot get` rather than here.
  */
-data Selection(selectedPackage: PackageId, selectedVersion: Version, lineageAnchor: Option[String])
+data Selection(selectedPackage: PackageId, selectedVersion: Version, lineageAnchor: Option[Commit])
 
 /**
  * What one configuration resolved to, in canonical package order — the order is the resolution's,
@@ -135,7 +136,7 @@ data ResolutionState(selected: List[Selection], pending: List[Selection])
  * The selection this requirement is about, if the closure already has one, together with the anchor
  * that was looked up on the way — kept so a new selection records its lineage without asking twice.
  */
-data Identified(matched: Option[Selection], anchorFound: Option[String])
+data Identified(matched: Option[Selection], anchorFound: Option[Commit])
 
 private def resolveRequirements(requirements: List[Dependency]): {PackageSource, Throw[ResolutionError]} Resolution = {
    val seeded = withRequirements(requirements, emptyState)
@@ -238,14 +239,14 @@ private def byLineage(target: PackageId, minimum: Version, state: ResolutionStat
    Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
 }
 
-private def sameLineage(anchor: Option[String], minimum: Version, selection: Selection): Bool =
+private def sameLineage(anchor: Option[Commit], minimum: Version, selection: Selection): Bool =
    sameLine(minimum, selection.selectedVersion) && sameAnchor(anchor, selection.lineageAnchor)
 
 /**
  * Two anchors match only when both are present and equal. A missing anchor is not evidence of
  * anything — a line whose history was migrated may have no `vM.0` at all — so absence never unifies.
  */
-private def sameAnchor(anchor: Option[String], other: Option[String]): Bool =
+private def sameAnchor(anchor: Option[Commit], other: Option[Commit]): Bool =
    foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)
 
 /**

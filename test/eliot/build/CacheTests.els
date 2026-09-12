@@ -37,15 +37,15 @@ def testCases: Test = {
          publishedTags(cacheRoot, cached)
       } with tableGit)
 
-      wasCalledOnce("mirrorClone")
-      wasCalledTimes(2, "lsRemoteTags")
+      wasCalledOnce("cloneMirror")
+      wasCalledTimes(2, "log tags")
    }
    "publishedTags" should "not clone a mirror that was already on disk" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
       provide(listed, publishedTags(cacheRoot, cached) with tableGit)
 
-      wasNeverCalled("mirrorClone")
+      wasNeverCalled("cloneMirror")
       calls shouldBe (expectedPresenceCheck ++ "; " ++ expectedListing)
    }
    "publishedTags" should "read the versions the mirror announces" in mocked {
@@ -58,17 +58,13 @@ def testCases: Test = {
       } with tableGit))
    }
    "anchorOf" should "answer the commit the line's first release names" in mocked {
-      val anchor = provide(anchoredAt, anchorOf(cacheRoot, 1, cached) with tableGit)
-
-      (anchor orElse "<none>") shouldBe "aaa1"
+      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, 1, cached)) with tableGit) shouldBe "aaa1"
    }
    "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked {
-      val anchor = provide(anchoredAt, anchorOf(cacheRoot, 3, cached) with tableGit)
-
-      (anchor orElse "<none>") shouldBe "<none>"
+      provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, 3, cached)) with tableGit) shouldBe "<none>"
    }
-   "refreshed" should "fetch in the mirror, which is the repository that operation stands in" in mocked {
-      withDirectory(mirrorDirectory)
+   "refreshed" should "fetch the mirror it found" in mocked {
+      withDirectory(mirrorPath)
 
       provide(listed, refreshed(cacheRoot, cached) with tableGit)
 
@@ -77,21 +73,19 @@ def testCases: Test = {
    "refreshed" should "clone first when the build has never seen the package" in mocked {
       provide(listed, refreshed(cacheRoot, cached) with tableGit)
 
-      wereCalledInOrder(append(singleton("mirrorClone"), "fetchTags"))
+      wereCalledInOrder(append(singleton("cloneMirror"), "fetch "))
    }
    "descriptorTextAt" should "read a descriptor out of the object database" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
-      val text = provide(listed, descriptorTextAt(cacheRoot, Version(1, Some(2)), cached) with tableGit)
-
-      (text orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)) with tableGit)
+         shouldBe "dep github.com/x/bar v1.1"
    }
    "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked {
-      withDirectory(mirrorDirectory)
+      withDirectory(mirrorPath)
 
-      val text = provide(listed, descriptorTextAt(cacheRoot, Version(1, Some(9)), cached) with tableGit)
-
-      (text orElse "<none>") shouldBe "<none>"
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(1, Some(9)), cached)) with tableGit)
+         shouldBe "<none>"
    }
    "the cache" should "clone once and read the mirror it made for every later question" in mocked {
       provide(listed, {
@@ -99,7 +93,7 @@ def testCases: Test = {
          descriptorTextAt(cacheRoot, Version(1, Some(2)), cached)
       } with tableGit)
 
-      wasCalledOnce("mirrorClone")
+      wasCalledOnce("cloneMirror")
       lastCall shouldBe expectedShow
    }
 }
@@ -115,13 +109,13 @@ private def listed: Mirrors = mirrorsOf(listing, singleton(Pair("v1.2:eliot.pkg"
 private def anchoredAt: Mirrors = mirrorsOf(anchored, empty)
 
 /**
- * A clone is told to stand in `.` and *names* its target, so a relative cache root is resolved in this
- * program's frame exactly once. Standing inside the root would resolve the same relative path a second time
- * and bury the mirror at `target/cache/target/cache/…` — the bug this line pins.
+ * The first visit: look, make the root, clone, list. Which directory each git command stands in is
+ * `shellGit`'s decision now and `GitTests`' subject; what this line pins is that the cache asks for the
+ * clone at the directory it will later look for.
  */
 private def expectedFirstVisit: String =
    expectedPresenceCheck ++ "; createDirectories target/cache; " ++
-      "log mirrorClone https://github.com/x/foo target/cache/github.com/x/foo in .; " ++
+      "log cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
       expectedListing
 
 /**
@@ -130,11 +124,11 @@ private def expectedFirstVisit: String =
  */
 private def expectedPresenceCheck: String = "isDirectory target/cache/github.com/x/foo"
 
-private def expectedListing: String = "log lsRemoteTags target/cache/github.com/x/foo in ."
+private def expectedListing: String = "log tags target/cache/github.com/x/foo"
 
-private def expectedFetch: String = "log fetchTags in target/cache/github.com/x/foo"
+private def expectedFetch: String = "log fetch target/cache/github.com/x/foo"
 
-private def expectedShow: String = "log showFile v1.2:eliot.pkg in target/cache/github.com/x/foo"
+private def expectedShow: String = "log fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
 
 private def refused: GitError = GitError("git ls-remote --tags target/cache/github.com/x/foo", 128, "no such repository")
 
@@ -145,7 +139,7 @@ private def cacheRoot: Path = path("target/cache")
 
 private def cached: PackageId = packageId("github.com/x/foo")
 
-private def mirrorDirectory: Path = path("target/cache/github.com/x/foo")
+private def mirrorPath: Path = path("target/cache/github.com/x/foo")
 
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
@@ -155,5 +149,15 @@ private def anchored: String = "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4"
  * The tags of an answer, rendered `<tag> <commit>` apiece — both halves, so a test says which commit a version
  * resolved to rather than merely that it appeared.
  */
-private def renderedTags(tags: List[TagRef]): String =
-   tags.map(ref -> show(ref.taggedVersion) ++ " " ++ ref.taggedCommit).joined(", ")
+private def renderedTags(refs: List[TagRef]): String =
+   refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
+
+/**
+ * Rendered *inside* the `provide` wherever an answer is an `Option`, and not by preference: as of compiler
+ * `ea3e27ed` two `provide[Mirrors, Option[_]]` instantiations at different element types get one
+ * `withCellInternal` native between them — their JVM descriptors are identical — and the other fails at
+ * run time with `NoSuchMethodError`. A `String` result sidesteps it. Undo once the compiler emits both.
+ */
+private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
+
+private def renderedText(text: Option[String]): String = foldOption("<none>", found -> found, text)

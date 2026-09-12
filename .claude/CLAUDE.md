@@ -15,9 +15,11 @@ meta-information.
 ## Architecture
 
 Two source roots. `src/` is the tool: `Clause`/`Descriptor` (the `eliot.pkg` format), `Version` and
-`PackageId` (identity and ordering), `Git` (`effect Git` — the four repository operations — plus the
-pure reading of git's output, plus `shellGit`, the *named* implementation that spawns), `Cache`
-(mirroring repositories, on `{Git, FileSystem}`), `PackageSource` (the resolver's two questions plus
+`PackageId` (identity and ordering), `Git` (`effect Git` — five operations over `Remote`, `Mirror`,
+`Commit` and `Revision`, git's own vocabulary; a mirror is a bare `--mirror` clone and nothing is ever
+checked out — plus the pure reading of git's output, plus `shellGit`, the *named* implementation that
+spawns and alone decides which directory each command stands in), `Cache` (mirroring repositories, on
+`{Git, FileSystem}`), `PackageSource` (the resolver's two questions plus
 `gitPackages`, the named git-backed answer), `Resolution` (MVS). Neither `Git` nor `PackageSource` has
 a default: a run boundary writes `with gitPackages with shellGit` once. `test/` mirrors it, plus
 `TablePackages` and `TableGit` — named implementations of this project's own two effects, which the
@@ -86,12 +88,13 @@ naming the jvm run boundary `runMain` to fix the carrier to `IO`, and v6 has no 
 value. A case that performs `Process` now simply propagates it to `eliot.test.Runner`, which caps at
 `{Console}` by design — so a platform check has to be a program with a `main` of its own rather than a
 test case. **Nobody has written that program.** `docs/effectful-modules.md` §11.4 records exactly what
-it leaves unchecked; do not read a green 149 as evidence the tool runs.
+it leaves unchecked; do not read a green 155 as evidence the tool runs.
 
 Two build gotchas recorded in §11.3: a rename that fails at `Git.els:1:1: Could not find '…'` with
 correct sources is the stale incremental cache — delete `target/.eliot-index-*` and
-`target/.eliot-objects-*`; and a `provide` whose result is `Option[Descriptor]` dies at run time with
-`NoSuchMethodError` (its native instance is not generated), so render inside the `provide`.
+`target/.eliot-objects-*`; and two `provide`s over one `Dep` type whose results are both `Option[_]`
+get one native between them and the other dies at run time with `NoSuchMethodError`, so the suites
+render inside every `provide`.
 
 ### `eliot.paths` — LSP only
 

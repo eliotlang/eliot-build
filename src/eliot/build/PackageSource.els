@@ -36,7 +36,7 @@ effect PackageSource {
    /**
     * The commit `target`'s `majorLine` line starts at, absent where that line has no first release.
     */
-   def anchorAt(majorLine: Int, target: PackageId): Option[String]
+   def anchorAt(majorLine: Int, target: PackageId): Option[Commit]
 }
 
 /**
@@ -79,6 +79,6 @@ implement gitPackages: PackageSource {
    def anchorAt(
          majorLine: Int,
          target: PackageId
-      ): {Git, FileSystem, Throw[IoError], Throw[GitError]} Option[String] =
+      ): {Git, FileSystem, Throw[IoError], Throw[GitError]} Option[Commit] =
       anchorOf(packageCacheRoot, majorLine, target)
 }
