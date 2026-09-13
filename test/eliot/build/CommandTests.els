@@ -1,0 +1,86 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+import eliot.build.Command
+
+/**
+ * The half of the tool that is about text rather than about running: what a command line asks for,
+ * and what a resolution reads as.
+ *
+ * These cases declare nothing and arrange nothing — there is no platform under any of them, which is
+ * the reason the module exists apart from `eliot.build.Launcher`. What the launcher does instead is
+ * checked by running it.
+ */
+def testCases: Test = {
+   "requested" should "read the configuration the resolve verb names" in {
+      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "artifact controller-jvm"
+   }
+   "requested" should "read the test scope by the word that spells it" in {
+      described(requested(commandLine("resolve", "test"))) shouldBe "test scope"
+   }
+   "requested" should "ask for nothing where the verb is not one the tool offers" in {
+      described(requested(commandLine("fetch", "test"))) shouldBe "<none>"
+   }
+   "requested" should "ask for nothing where no configuration was named" in {
+      described(requested(append(empty, "resolve"))) shouldBe "<none>"
+   }
+   "requested" should "ask for nothing rather than read past an argument it does not understand" in {
+      described(requested(append(commandLine("resolve", "test"), "--offline"))) shouldBe "<none>"
+   }
+   "requested" should "ask for nothing on an empty command line" in {
+      described(requested(empty)) shouldBe "<none>"
+   }
+
+   "report" should "name the configuration and then one line per package" in {
+      joined("/", report(TestScope, resolutionOf(selected("github.com/x/foo", 1, 2))))
+         shouldBe "test:/   github.com/x/foo v1.2"
+   }
+   "report" should "keep the canonical order the resolution holds" in {
+      joined(
+         "/",
+         report(
+            ArtifactNamed("app"),
+            resolutionOf(selected("github.com/x/bar", 2, 0)).addSelection(selected("github.com/x/foo", 1, 2))
+         )
+      ) shouldBe "app:/   github.com/x/bar v2.0/   github.com/x/foo v1.2"
+   }
+   "report" should "name a configuration that resolved to nothing at all" in {
+      joined("/", report(TestScope, Resolution(empty))) shouldBe "test:"
+   }
+
+   "failed" should "attribute the failure to what could not be done" in {
+      joined("/", failed("git refused", "no such repository")) shouldBe "eliot: git refused: no such repository"
+   }
+
+   "usage" should "name the verb and what it takes" in {
+      joined("/", usage) shouldBe
+         "usage: eliot resolve <configuration>/   <configuration>   'test', or the name of an artifact declared in eliot.pkg"
+   }
+}
+
+/**
+ * `Show[Configuration]` renders `TestScope` and an artifact named "test" identically — they are one
+ * word on a command line — so a case about which of them was read has to look at the constructor.
+ */
+private def described(configuration: Option[Configuration]): String =
+   foldOption("<none>", found -> describe(found), configuration)
+
+private def describe(configuration: Configuration): String = configuration match {
+   case TestScope           -> "test scope"
+   case ArtifactNamed(name) -> "artifact " ++ name
+}
+
+private def commandLine(verb: String, argument: String): List[String] = append(singleton(verb), argument)
+
+private def resolutionOf(selection: Selection): Resolution = Resolution(singleton(selection))
+
+private def addSelection(selection: Selection, resolution: Resolution): Resolution =
+   Resolution(append(resolution.selections, selection))
+
+private def selected(url: String, major: Int, minor: Int): Selection =
+   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None)

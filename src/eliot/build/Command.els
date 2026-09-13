@@ -1,0 +1,72 @@
+import eliot.collection.List
+import eliot.build.format.PackageFile
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+
+/**
+ * What the tool was asked for, and what it says back.
+ *
+ * A module of its own because none of it is the tool *running*: reading a verb and rendering a
+ * resolution are decisions about text, true of a command line and a resolution whether or not
+ * anything is cloned, so they are testable without a platform beneath them while
+ * `eliot.build.Launcher` — which is the boundary, and is where the implementations are bound — can
+ * never be. That is the same cut `eliot.build.format.DescriptorWriter` makes against the parser, for
+ * the same reason, and the import list is the argument here too: this knows what a configuration and
+ * a selection are and nothing about git, the filesystem or a subprocess.
+ *
+ * **One verb so far.** A fixed verb set is the design's first decision, but a sum of the verbs is
+ * worth exactly nothing while there is one — `resolve` is read here as the word it is, and the sum
+ * arrives with the second verb rather than in anticipation of it.
+ */
+
+/**
+ * The configuration `commandLine` asks to resolve, absent where it asks for anything else.
+ *
+ * Absent covers every unknown verb, a missing configuration and a spare argument alike, because a
+ * tool that read past an argument it did not understand would resolve something the user did not
+ * name. What is *not* refused here is a configuration no descriptor declares: that is a fact about a
+ * descriptor this module has never seen, and the resolver already reports it against the one it has.
+ *
+ * ```eliot
+ * val configuration = requested(command("resolve").withArgument("controller-jvm"))
+ * ```
+ */
+def requested(commandLine: List[String]): Option[Configuration] = {
+   val verb = at(0, commandLine) orElse ""
+   val named = at(1, commandLine) orElse ""
+
+   fold(verb == resolveVerb && size(commandLine) == 2, Some(configurationNamed(named)), None)
+}
+
+/**
+ * What a resolution looks like on a terminal: the configuration it is of, then one indented line per
+ * package.
+ *
+ * The order is the resolution's own, which is canonical per repository rather than the order the
+ * closure happened to discover things in — so two runs of one graph print the same text, and a
+ * future lockfile records the same lines it shows.
+ */
+def report(configuration: Configuration, resolution: Resolution): List[String] =
+   prepend(resolution.selections.map(selectionLine), show(configuration) ++ ":")
+
+/**
+ * One line for one failure, attributed to what could not be done.
+ *
+ * Nothing here abbreviates the problem: each error type renders itself and each names the package or
+ * the command it is about, because a failure a user cannot attribute to something they wrote is a
+ * failure they cannot fix.
+ */
+def failed(doing: String, problem: String): List[String] = singleton("eliot: " ++ doing ++ ": " ++ problem)
+
+/**
+ * How to invoke the tool, for a command line that named nothing it offers.
+ */
+def usage: List[String] =
+   append(
+      singleton("usage: eliot " ++ resolveVerb ++ " <configuration>"),
+      "   <configuration>   'test', or the name of an artifact declared in " ++ descriptorFileName
+   )
+
+private def resolveVerb: String = "resolve"
+
+private def selectionLine(selection: Selection): String = "   " ++ show(selection)

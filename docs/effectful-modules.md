@@ -566,6 +566,8 @@ platform instance of `Process` or `FileSystem` is ever resolved**, `shellGit` is
 `mocked`, and the program with a `main` that writes `with gitPackages with shellGit` against a real
 repository is still unwritten. `packageCacheRoot` is unchanged and still waiting on that launcher.
 
+*(Both were done the next day — §14.)*
+
 ### 11.5 The subjects are domain values, and the working directory left the effect
 
 Same day, 155 cases green. The OO decomposition — `Git.clone` returns a `Repository`, `repository.tags`
@@ -763,3 +765,55 @@ No source file is now over 250 lines, and the largest — `resolve.Resolution` a
 doc. The direction is unchanged and still acyclic: `resolve → format → model` and `resolve → git →
 format → model`, with `model` importing nothing of the tool and `git.Tags`, `format.DescriptorWriter` and
 `model.Lineage` importing nothing but the vocabulary.
+
+## 14. Revisited, 2026-09-13 — the program with a `main`, and the end of the standing gap
+
+Same compiler and framework. 170 cases green, eleven of them new, and for the first time that is not the
+only thing that was run.
+
+**§11.4's remaining bullet is closed.** `src/eliot/build/Launcher.els` is the program the last four
+revisits kept naming and nobody had written: a `main` declaring `{Console, Environment, FileSystem,
+Process}`, one verb, and the one line that composes the tool. Compiling it is most of the check by
+itself — the platform's `Process` and `FileSystem` are resolved from *this* `main` or from nothing, so a
+missing interpretation is a compile error here rather than a green suite everywhere else. Running it is
+the rest, and it was run: against a seeded mirror cache it resolves a real graph (a root asking for
+`bar v1.0`, `foo v1.0`'s own descriptor read out of the object database asking for `v1.1`, MVS selecting
+the maximum, printed in the canonical order a lockfile will want), and against a real remote it clones a
+bare mirror, lists its tags and reports the version nobody published, naming the repository.
+
+**The four channels are real, and so is the cost the design predicted.** "Failure wants more than one
+channel" said the launcher would carry four or five; it carries four, and each was provoked separately:
+a `NoSuchFileException` on a missing descriptor, an unclosed brace, a mirror directory that is not a
+repository, and a version no remote publishes. Each reports as itself and each names what a user can
+act on. Every `catch` spells its type arguments, because the row names `Throw` four times and only the
+call can say which one it means — the same rule `mocked` hits with two, met here at its full width. The
+nesting is four deep and reads as such; it is the honest shape of four independent frames and nothing
+is gained by pretending otherwise.
+
+**Two modules, because the boundary cannot be tested and half of it is not the boundary.**
+`eliot.build.Command` holds what a command line asks for and what a resolution reads as — pure, no
+effects, eleven cases — and `eliot.build.Launcher` holds `main`, the composition and the four frames.
+That is §13's `DescriptorWriter` cut made against a run boundary instead of a parser, and the import
+list argues it the same way: `Command` names a configuration and a selection and nothing about git, the
+filesystem or a subprocess. It also answers §13's complaint about the writer having no cases of its own
+before that could happen twice.
+
+**`packageCacheRoot` is gone, and the shape its doc comment predicted is what replaced it.** The
+constant is now `{Dep[Path]}` on `gitPackages`' clauses, answered by a `provide` at the run boundary —
+a named implementation takes no parameters and closes over nothing, so what it needs at runtime it asks
+an effect for, which is what `TablePackages` has always done with its table. `Cache` was indifferent and
+is untouched. Behaviour is deliberately unchanged (`target/cache` under the project, now absolute rather
+than relative to whatever directory git stood in), because *where* the cache lives is a decision worth
+making rather than inheriting: a mirror is content-addressed and shareable, and a per-user cache is what
+Go and Cargo settled on. It is one line in `Launcher` now, which is the whole point of moving it.
+
+**What is still unchecked**, stated as plainly as §10.3 stated its version: nothing runs the launcher
+automatically. The suite and the launcher check different things, and a change under `git/` or
+`resolve/` is only verified when both have been run — the suite cannot resolve a platform instance and
+the launcher has no assertions. A `main` that asserts would be a third thing again; this is a note for
+whoever writes the wrapper, which is where a `--self-check` could honestly live.
+
+**Where the open questions stand.** `packageCacheRoot`'s home is answered. What the design calls the
+deferred problem — how resolved sources reach the compiler, `git worktree` against a checkout against
+`git archive` — is untouched and is now the next thing in the way, because it is what the assembly step
+needs and the assembly step is what a second verb is made of.

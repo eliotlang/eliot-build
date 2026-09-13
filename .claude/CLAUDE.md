@@ -39,12 +39,23 @@ to know — `resolve` → `git` → `format` → `model`, and `model` imports no
   stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories, on
   `{Git, FileSystem}`).
 - **`resolve/`** — `PackageSource` (the resolver's two questions), `GitPackages` (`gitPackages`, the
-  named git-backed answer), `Configuration` (`TestScope` or `ArtifactNamed`, and which of a descriptor's
-  scopes each opens), `Selection` (a version chosen per repository, the canonical order, `sameLineage`),
+  named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
+  `Configuration` (`TestScope` or `ArtifactNamed`, which of a descriptor's scopes each opens, and
+  `configurationNamed` — `Show`'s inverse, since the word a command line carries is the word that
+  instance writes), `Selection` (a version chosen per repository, the canonical order, `sameLineage`),
   `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling).
 
-Neither `Git` nor `PackageSource` has a default: a run boundary writes `with gitPackages with shellGit`
-once, and `ShellGit`/`GitPackages` are the two modules nothing but that boundary imports. `test/` mirrors
+Above the four, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
+the run boundary, the one place writing `with gitPackages with shellGit` and the `provide` that tells
+the source where mirrors live, and where the four failure channels are discharged separately and
+each reports as itself — and **`Command`**, the half that is about text rather than about running
+(what a command line asks for, what a resolution reads as), split out because it is testable with no
+platform beneath it and the boundary never can be. `eliot resolve <configuration>` is the one verb so
+far; the lockfile, source assembly and the rest of the verb set are the steps after it.
+
+Neither `Git` nor `PackageSource` has a default: the run boundary in `Launcher` writes
+`with gitPackages with shellGit` once, and `ShellGit`/`GitPackages` are the two modules nothing but
+that boundary imports. `test/` mirrors
 the tree package for package, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
 this project's own two effects, which the framework cannot double. **Bind a named implementation with an
 expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `with` binds the
@@ -105,21 +116,36 @@ is **fully qualified** — `eliot.test.Runner`, not `Runner`.
 Every source root that should contribute tests must be passed: the framework's `src`, this project's
 `src`, and this project's `test`.
 
-### The real-carrier check — there isn't one, and that is the standing gap
+### Running the tool
 
-A green suite says nothing about whether the effectful modules have an interpretation **on the
-platform**: `mocked` binds the doubles by name, `shellGit` is only ever bound under it, so the
-platform's own `Process` and `FileSystem` implementations are never resolved and a green run never
-touches them. (The git-backed `PackageSource` *is* typechecked and tested now, over `tableGit` —
-that half of the gap closed on 2026-09-12.)
+The tool has a `main`, and it is built the same way with its own module:
 
-Two things used to check that and both are gone. `probe/` was deleted on 2026-09-04; its replacement,
-`test/eliot/build/RealWorldTests.els`, was deleted by the v6 port (`76e50fb`) because it worked by
-naming the jvm run boundary `runMain` to fix the carrier to `IO`, and v6 has no carrier and no such
-value. A case that performs `Process` now simply propagates it to `eliot.test.Runner`, which caps at
-`{Console}` by design — so a platform check has to be a program with a `main` of its own rather than a
-test case. **Nobody has written that program.** `docs/effectful-modules.md` §11.4 records exactly what
-it leaves unchecked; do not read a green 159 as evidence the tool runs.
+```bash
+cd /home/robert/personal/eliot
+./mill examples.run jvm exe-jar -m eliot.build.Launcher \
+   /home/robert/personal/eliot-build/src \
+   -o /home/robert/personal/eliot-build/target
+cd <any project with an eliot.pkg>
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar resolve test
+```
+
+Note the source roots: the launcher needs `src` alone (no framework, no `test`).
+
+### The platform check — it exists now, and it is the launcher
+
+A green suite still says nothing about whether the effectful modules have an interpretation **on the
+platform**: `mocked` binds the doubles by name and `shellGit` is only ever bound under it, so a suite
+never resolves the platform's own `Process` and `FileSystem`. `eliot.test.Runner` cannot close that —
+it caps at `{Console}` by design, so a case that performs `Process` does not typecheck — which is why
+the check has to be a program with a `main` of its own. `probe/` was that program until 2026-09-04 and
+`RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
+`docs/effectful-modules.md` §14).
+
+What that means for a change: **do not read a green 170 as evidence the tool runs** — the suite and the
+launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages` or the
+boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
+instances are resolved from its `main` or not at all); running it against a real repository is the
+rest.
 
 Two build gotchas recorded in §11.3: a rename that fails at `Git.els:1:1: Could not find '…'` with
 correct sources is the stale incremental cache — delete `target/.eliot-index-*` and

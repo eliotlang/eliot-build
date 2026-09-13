@@ -5,9 +5,11 @@ semantics, the descriptor contents, and the descriptor syntax (`eliot.pkg`). Ame
 identity is decided by the URL *or* by a shared lineage anchor (see below). Amended 2026-08-06: the
 `replace` clause is cut, and the implementation's own lessons are recorded (both below). Amended
 2026-08-12: the modules that touch the outside carry their own logic and are tested
-(`docs/effectful-modules.md`), which retires one lesson below and rewrites another.
+(`docs/effectful-modules.md`), which retires one lesson below and rewrites another. Amended
+2026-09-13: the launcher has a `main` and one verb, which settles the second lesson below the way it
+said it would be settled.
 
-**Where the implementation stands** (2026-08-12, 141 tests):
+**Where the implementation stands** (2026-09-13, 170 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -19,12 +21,22 @@ identity is decided by the URL *or* by a shared lineage anchor (see below). Amen
 | `Git` | the git operations, and the reading of what git says back | done |
 | `Cache` | bare mirrors per package; tags, anchors, descriptors out of them | done |
 | `PackageSource` | the resolver's two questions, and the git-backed answer to them | done |
-| — | lockfile, source assembly, verb dispatch, wrapper, launcher `main` | not started |
+| `Launcher` | the `main`, the composition, the failure channels | one verb: `eliot resolve` |
+| `Command` | what a command line asks for, what a resolution reads as | done for that verb |
+| — | lockfile, source assembly, the rest of the verb set, wrapper | not started |
 
-Resolution now runs against real repositories: `PackageSource` binds it to the cache, and every
-module including that binding is exercised at the real carrier by `probe/`. What is still missing is a
-tool — nothing yet fetches on behalf of a *build*, because there is no verb to invoke and no lockfile
-to record. The compat-check verb, the plugin-jar closure and the project-model query are unstarted.
+**There is a tool now.** `eliot resolve <configuration>` reads the descriptor where the user is
+standing, closes that configuration over the graph and prints what was selected, cloning and reading
+mirrors on the way. That is one verb of a fixed set, and it is the boring one — but it is what makes
+everything above it real: the launcher's `main` is the only place the platform's `Process` and
+`FileSystem` are resolved at all, so until it existed the modules beneath it compiled green without
+anybody knowing whether they ran (`docs/effectful-modules.md` §14).
+
+What is still missing is the rest of a *build*. Nothing records what it resolved, so there is no
+lockfile; nothing materialises the selected versions, so no source root reaches the compiler — and that
+is the deferred problem below (`git worktree` against a checkout against `git archive`), now the next
+thing in the way rather than a question for later. The compat-check verb, the plugin-jar closure and
+the project-model query are unstarted.
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -582,7 +594,9 @@ what is left to write rather than only what is written.
   never `Process[IO]`, so a green suite is evidence about the logic and no evidence that the logic has
   an interpretation on the platform. Until the launcher has its own `main`, a `probe/` source root
   carries one and must reach every effectful module deliberately; when the launcher exists, that *is*
-  the verification mechanism.
+  the verification mechanism. **It exists** (2026-09-13), and it is: the platform's `Process` and
+  `FileSystem` are resolved from `eliot.build.Launcher`'s `main` or from nowhere, so a change under
+  `git/` or `resolve/` is verified by compiling and running the launcher, never by a green suite.
 - **An effect crosses a module boundary as an ability once something can interpret it.** This also
   used to read the other way — a swappable package source had to be a callback with a row in the
   arrow codomain (`PackageId => Version => {Effect} Option[Descriptor]`), because an ability method
