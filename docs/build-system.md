@@ -10,7 +10,10 @@ identity is decided by the URL *or* by a shared lineage anchor (see below). Amen
 said it would be settled. Amended 2026-09-13: a module may say **where** it is (`at`), because the
 convention cannot hold in the one repository that has to dogfood it (below). Amended 2026-09-13:
 compiler plugins are release assets of the package that ships them rather than Maven coordinates, and
-the four questions that decision leaves open are recorded with it.
+the four questions that decision leaves open are recorded with it. Amended 2026-09-13: **the toolchain
+is reached through dependency-only modules** — a platform package is already a bill of materials, the
+test side gets one, and a user's descriptor is two lines that `eliot init` writes ("What a user
+writes", below); Q1 is decided by it.
 
 **Where the implementation stands** (2026-09-13, 177 tests):
 
@@ -45,6 +48,49 @@ lockfile; nothing materialises the selected versions, so no source root reaches 
 is the deferred problem below (`git worktree` against a checkout against `git archive`), now the next
 thing in the way rather than a question for later. The compat-check verb, the plugin-jar closure and
 the project-model query are unstarted.
+
+## What a user writes
+
+Everything below this section is mechanism. This is the contract, and it is deliberately short: a user
+should not have to learn the build tool, and there should be few ways to hold it wrong. The complexity
+the rest of this document records is real, and it stays under the hood.
+
+A library:
+
+```
+dep github.com/eliot-lang/eliot//stdlib v1
+test { dep github.com/eliot-lang/eliot//jvm-test v1 }
+```
+
+An application:
+
+```
+artifact hello {
+  dep github.com/eliot-lang/eliot//jvm v1
+  backend { kind exe-jar, main Hello }
+}
+test { dep github.com/eliot-lang/eliot//jvm-test v1 }
+```
+
+`eliot init` writes those lines; nobody types them. Each toolchain line is a **dependency-only module**
+of the eliot repository that carries the rest transitively: `//jvm` depends on `//stdlib` on `//lang`,
+so an artifact naming the platform has the whole closure, and `//jvm-test` is nothing but `dep //test`
+and `dep //jvm`. Visible defaults, not hidden ones — the descriptor stays complete, a tool reading it
+needs no table of what the launcher would have assumed, and a third party shipping a platform ships a
+bill of materials by the same act, since `dep github.com/vendor/eliot-avr v1` inside an artifact is the
+same shape. A prelude baked into the launcher was the alternative and was rejected for exactly that:
+it would have made the launcher and the toolchain release in lockstep and put the one fact every
+build depends on somewhere no reader of the file can see.
+
+What the user adds to that: `dep` lines for what their code imports, which `eliot get <url>` appends at
+the current tag so a version is never typed; a second `artifact` when there is a second target or a
+second `main`. What the user cannot get wrong: a platform in base scope is refused with a message
+naming where it belongs (below, "Platforms"), and an unknown clause is fatal with an upgrade hint.
+
+Files in a repository: `eliot.pkg`, `eliot.lock` (tool-written, always committed, never edited), the
+wrapper and its pin file, and `.gitignore` for `target/`; directories `src/` and `test/`, and
+`compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
+once rather than committed, and the cache leaves the project directory is recorded as open, below.
 
 ## The core decision: a descriptor, not build-as-code
 
@@ -222,7 +268,9 @@ What remains:
 - **Modules**: the repo's build modules (the eliot repo itself: `lang`, `stdlib`, `jvm`). Per
   module: name, export flag (dependents mount every exported module's sources; examples/apps/test
   fixtures are internal), its own dependency list, and where it is. Directories by convention — the
-  module's own name — with one clause to say otherwise (`at`, below).
+  module's own name — with one clause to say otherwise (`at`, below). **A module may have no sources
+  at all**: a module that is only `dep` lines is a bill of materials, and is how the toolchain is
+  handed out (`//jvm-test`).
   **One root descriptor** — per-module descriptor files reintroduce Maven's parent-POM web and
   Go's nested-modules mess, and break the one-parse LSP story.
 - **Build configurations** (see below): name, additional dependencies, backend-plugin invocation
@@ -272,7 +320,7 @@ the `eliot.paths` precedent this system retires.
 ### Clause reference
 
 ```
-dep github.com/x/foo v1.3                    -- base dep: all exported modules of that repo
+dep github.com/x/foo v1.3                    -- base dep: the repo's root module
 dep github.com/eliot-lang/eliot//stdlib v1.2 -- module-selected dep
 
 module lang {                                -- multi-module repos only
@@ -302,11 +350,22 @@ artifact hello {                             -- a build configuration
   is the compiler base are open questions — see "Compiler plugins" below. The parser implements neither
   yet; it still reads the Maven-era `plugin <coord> { jar <coord> sha256 <hex> }`.
 - `backend` names no platform: the backend is located among the artifact's deps (the packages
-  declaring `plugin`). With exactly one candidate no URL is needed; with several, disambiguate:
-  `backend github.com/…//jvm { … }`. Its parameters are free-form keys validated against the
+  declaring a `plugin` with a `backend` sub-clause — Q1, decided). With exactly one candidate no URL
+  is needed; with several, disambiguate: `backend github.com/…//jvm { … }`. Its parameters are free-form keys validated against the
   plugin's declared schema — the typed-plugin-config promise, enforced at parse time.
 - **No `module` clause** = the repo is one anonymous exported module with `src/`, `test/`,
   `compiler/` at the root — the zero-config common case.
+- **A bare repository dep names that root module and nothing else.** It used to mean "every exported
+  module of that repo", which is a second, uncurated bill of materials — and on the toolchain it would
+  have dragged `//jvm` into a library's base scope, the one mistake the format now refuses. A repository
+  with `module` clauses and no root sources has no root module, so a bare dep on it is an error listing
+  the modules to choose from. A module a dependent should get as one unit is spelled as a
+  dependency-only module, curated by the author.
+- **A module need not have `src/`.** One that has none is a bill of materials: what it contributes is
+  its `dep` lines, into whichever scope the consumer wrote it in. It is *not* a parent: it contributes
+  dependencies only, never configuration, never a scope the consumer did not open — that one rule is
+  what keeps it from being Maven's parent POM, which this design rejects above. It cannot span scopes
+  either (a dependency's `test` block never propagates), which is why the user's two lines are two.
 - `at` is the module's directory, relative to the repo root, and defaults to the module's **name** —
   so a package laid out flat writes none, and the tool never invents a second way to spell the common
   case (a directory equal to the name is written back out as nothing). It buys one thing: the module's
@@ -331,6 +390,8 @@ lint literally (nothing ambient, including the language itself):
 ```
 dep github.com/eliot-lang/eliot//stdlib v1
 dep github.com/somelib/collections v1.3
+
+test { dep github.com/eliot-lang/eliot//jvm-test v1 }
 ```
 
 An application targeting two platforms:
@@ -352,7 +413,9 @@ artifact controller-attiny {
 ```
 
 The dogfood — the eliot repo itself: `module lang { plugin … }`, `module stdlib { dep //lang }`,
-`module jvm { dep //stdlib, plugin … }`, `module examples { internal, dep //jvm }`.
+`module jvm { dep //stdlib, plugin … }`, `module test { dep //stdlib }` (the test framework, a module
+here rather than a repository of its own, so the toolchain is one repository at one tag),
+`module jvm-test { dep //test, dep //jvm }` (no sources), `module examples { internal, dep //jvm }`.
 
 The lockfile uses the same clause style, machine-written: `lock <url> <tag> <commit>
 <tree-hash>` per resolved dependency per artifact, `lock-jar <url> <tag> <asset> <sha256>` for
@@ -362,7 +425,8 @@ it (see "Compiler plugins"). Its exact format is tool-owned output, not hand-pol
 ## Standard layout: one base plus conditional overlays
 
 Per module, three conventional directories — under the module's own directory, which is its name
-unless its `at` clause says otherwise. Only `src/` is mandatory. Libraries and layers are
+unless its `at` clause says otherwise. None is mandatory: a module with no `src/` is a dependency-only
+module (above), and one with sources has `src/` at least. Libraries and layers are
 **not differentiated** — layer-ness is not declared anywhere; it is just what your sources do
 (even a pure-`src` package can concretely re-declare foreign abstract names).
 
@@ -412,7 +476,11 @@ already the URL — no platform-name namespace exists to govern.
   `eliot-jvm` and `eliot-avr` together would mount both layers into one resolution and the merge
   would correctly explode with "has multiple implementations" on every stdlib name. The
   configuration is the unit of resolution (and of the lockfile). Multi-platform = multiple
-  configurations sharing the base, built independently.
+  configurations sharing the base, built independently. **And it is enforced**: a package that ships a
+  backend (a `plugin` with a `backend` sub-clause, Q1 below) is a platform, and a platform in a base
+  or module scope — anything a dependent would inherit — is refused at the author's build with a
+  message naming the artifact or test block it belongs in. The same fact that selects the backend is
+  the fact that catches the one placement a user could get wrong.
 - **No discovery, by design.** "Find the platform components" would need the registry we
   rejected. The user names their platform dependencies per configuration (the Cargo
   `[target.'cfg'.dependencies]` shape); the resolver follows declarations. What replaces search
@@ -483,9 +551,10 @@ does. Sources and binary cannot skew because they are the same tag.
 
 ### Open questions
 
-Four things the release-asset decision does not settle. Each is written as the question, the options,
-and the current leaning; none is implemented, and the model still carries the Maven-era
-`Plugin(pluginCoordinate, pluginJars)` with its `jar` sub-clauses until one is chosen.
+Four things the release-asset decision did not settle. Each is written as the question, the options,
+and the current leaning — Q1 is decided since, by the bill-of-materials amendment; none is implemented,
+and the model still carries the Maven-era `Plugin(pluginCoordinate, pluginJars)` with its `jar`
+sub-clauses until the rest are chosen.
 
 **Q1. Which plugin is the backend, and what word selects it.** The rule above ("Platforms") says an
 artifact need not name its backend when its dependencies offer exactly one candidate. That never holds:
@@ -504,8 +573,10 @@ plugin by a *command word* (`jvm exe-jar …`, `apidoc …`), and nothing in the
   fail — two platform layers collide on every name they implement — but that diagnoses a conflict the
   tool created and still leaves the command line unconstructible.
 
-*Leaning: (b).* Identity is the consumer's to state, mechanism the provider's — the split used
-everywhere else here.
+*Decided: (b)* (2026-09-13). Identity is the consumer's to state, mechanism the provider's — the split
+used everywhere else here. The bill-of-materials decision rests on it twice: `//jvm` is the one backend
+candidate in an artifact that names it, and a backend-shipping package in an inherited scope is the
+error "Platforms" describes.
 
 **Q2. One classpath or one classloader per plugin.** Plugin closures can disagree on third-party
 versions. A flat union needs a conflict check by jar name and version (fragile, and silent when it
@@ -547,7 +618,9 @@ framework declare it (a `runner` clause, or an artifact consumers inherit); or m
 which puts a dependency's internals in every consumer's descriptor.
 
 *Leaning: hard-code it now, as one named constant with the reason attached, and move it to a framework
-declaration when a second framework exists to justify the clause.*
+declaration when a second framework exists to justify the clause.* The framework is a module of the
+toolchain repository now (`//test`, reached through `//jvm-test`), so the constant names something
+that releases with the launcher's own toolchain minimum rather than a foreign package's internals.
 
 ## The toolchain is a dependency
 
@@ -744,6 +817,17 @@ what is left to write rather than only what is written.
 
 ## Deferred / open problems
 
+- **The closure follows the selected module, not every exported one.** `Resolution.mountedDependencies`
+  feeds the base dependencies and those of *every* exported module of a dependency repository into the
+  closure, whatever the selector asked for — harmless while a selector only narrowed sources, wrong now
+  that a bare dep means the root module and `//stdlib` must not carry `//jvm`'s edges. The selector
+  narrows the closure as well as the mount.
+- **Three file-count reductions, proposed and undecided**: the pin as the first clause of `eliot.pkg`
+  (`eliot v0.6`, read by the wrapper and the resolver alike, so the toolchain minimum is spelled once);
+  a wrapper installed once per machine rather than committed per repository (Go's toolchain
+  auto-download, rustup), honouring the same mirror override; and the mirror cache under the user's
+  cache directory rather than `target/cache`, which `Launcher.els` already argues for. Together they
+  leave `eliot.pkg` and `eliot.lock`, one of them human-written.
 - **How resolved sources reach the compiler.** The cache deliberately has no working tree, and the
   compiler wants directories to mount as source roots — so something must materialise the selected
   version of each package. `git worktree add` per resolution is cheap and stays tied to the mirror;
