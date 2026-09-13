@@ -43,6 +43,22 @@ def configuredDependencies(configuration: Configuration, descriptor: Descriptor)
       case ArtifactNamed(name) -> artifactDependenciesOf(name, descriptor)
    }
 
+/**
+ * The configuration `text` names — `show`'s inverse, and the one place a configuration is read back
+ * from the word that spells it.
+ *
+ * A caller with a word rather than a `Configuration` is a caller reading a command line, and the word
+ * it reads is exactly the one `Show` writes: the spelling lives in this module or it drifts between
+ * the two halves of it. Nothing is refused, for the reason nothing else here refuses — a name no
+ * artifact declares is a resolution failure naming it, and that answer belongs to the resolver.
+ *
+ * ```eliot
+ * val configuration = configurationNamed("controller-jvm")
+ * ```
+ */
+def configurationNamed(text: String): Configuration =
+   fold(text == show(TestScope), TestScope, ArtifactNamed(text))
+
 private def artifactDependenciesOf(name: String, descriptor: Descriptor): Option[List[Dependency]] =
    foldOption(
       None,

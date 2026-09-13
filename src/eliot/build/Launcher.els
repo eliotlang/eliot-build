@@ -1,0 +1,97 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.system.Environment
+import eliot.build.format.PackageFile
+import eliot.build.git.Git
+import eliot.build.git.ShellGit
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.GitPackages
+import eliot.build.Command
+
+/**
+ * The tool: the one program in this project with a `main`, and the one place that decides how the
+ * effects everything else declares are actually run.
+ *
+ * **This is the run boundary, and that is its whole job.** Every module beneath it says `{Git}` or
+ * `{PackageSource}` and names no implementation, so until something writes
+ * `with gitPackages with shellGit` there is no answer to "what runs this?" — and a `{Git}` reaching
+ * `main` unbound is a compile error naming the effect, which is the honest state of an effect a
+ * program has not yet decided how to run. That one line is the composition of the tool, it is written
+ * here and nowhere else, and `eliot.build.git.ShellGit` and `eliot.build.resolve.GitPackages` are the
+ * two modules nothing but this file imports.
+ *
+ * **It is also the only thing that checks the tool runs at all.** Checking is whole-program from
+ * `main` and an implementation is resolved at the use site, so a module no `main` reaches compiles
+ * green while the platform's `Process` and `FileSystem` are never resolved for it: a suite binds
+ * doubles by name, and a green suite is evidence about the logic and none at all that the logic has
+ * an interpretation on the platform (`docs/effectful-modules.md` §11.4). `eliot.test.Runner` cannot
+ * close that — it caps at `{Console}` by design, so a case that performs `Process` does not typecheck
+ * — which is why a platform check has to be a program with a `main` of its own. This is that program,
+ * and what it costs to keep is running it.
+ *
+ * **One verb so far.** `eliot resolve <configuration>` reads the descriptor in the working directory,
+ * closes that configuration over the dependency graph and prints what was selected. The lockfile the
+ * resolution deserves, the assembly of sources for the compiler and the rest of the verb set are the
+ * steps after this one; what this establishes is that the stack under them runs.
+ */
+def main: {Console, Environment, FileSystem, Process} Unit =
+   answer(arguments, workingDirectory).foreach(printLine)
+
+/**
+ * What the tool prints for one invocation.
+ *
+ * The command line and the directory arrive as values rather than being read here, so everything
+ * below `main` states what it performs and nothing below `main` states `Environment`.
+ */
+private def answer(commandLine: List[String], here: Path): {FileSystem, Process} List[String] =
+   foldOption(usage, configuration -> resolved(configuration, here), requested(commandLine))
+
+/**
+ * The selections of `configuration`, or the single line naming what refused.
+ *
+ * **Four channels meet here, and keeping them apart is the point.** A repository git said no to, a
+ * cache directory that cannot be made, a descriptor that will not parse and a graph that will not
+ * close are four different things for a user to do something about, so each is discharged separately
+ * and reports as itself. This is the boundary the design said would carry four or five of them.
+ *
+ * Every one is spelled out, and has to be: the row names `Throw` four times, so nothing but the call
+ * can say which of them a given `catch` is for.
+ */
+private def resolved(configuration: Configuration, here: Path): {FileSystem, Process} List[String] =
+   catch[IoError, List[String]](
+      catch[GitError, List[String]](
+         catch[DescriptorError, List[String]](
+            catch[ResolutionError, List[String]](
+               closure(configuration, here),
+               problem -> failed("cannot resolve '" ++ show(configuration) ++ "'", show(problem))
+            ),
+            problem -> failed("malformed " ++ descriptorFileName, show(problem))
+         ),
+         problem -> failed("git refused", show(problem))
+      ),
+      problem -> failed("cannot reach the filesystem", show(problem))
+   )
+
+/**
+ * The whole of the tool, composed: read the descriptor where the user is standing, close
+ * `configuration` over the dependency graph, and render what came out.
+ *
+ * `with gitPackages with shellGit` is that composition. The inner binding answers the resolver's two
+ * questions out of the mirror cache; the outer one gives that cache a git to run. Both
+ * implementations' clause rows — the filesystem, the subprocess, and the ways either refuses — are
+ * charged right here, which is why this signature says what it says while
+ * `eliot.build.resolve.Resolution` says only `{PackageSource, Throw[ResolutionError]}` and
+ * `eliot.build.git.Cache` says nothing about subprocesses at all.
+ */
+private def closure(
+      configuration: Configuration,
+      here: Path
+   ): {FileSystem, Process, Throw[IoError], Throw[GitError], Throw[DescriptorError], Throw[ResolutionError]} List[String] = {
+   val descriptor = parseDescriptor(readLines(here / descriptorFileName))
+   val resolution = resolve(configuration, descriptor) with gitPackages with shellGit
+
+   report(configuration, resolution)
+}
