@@ -1,4 +1,5 @@
 import eliot.collection.List
+import eliot.file.Path
 import eliot.build.format.PackageFile
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
@@ -14,28 +15,49 @@ import eliot.build.resolve.Selection
  * the same reason, and the import list is the argument here too: this knows what a configuration and
  * a selection are and nothing about git, the filesystem or a subprocess.
  *
- * **One verb so far.** A fixed verb set is the design's first decision, but a sum of the verbs is
- * worth exactly nothing while there is one — `resolve` is read here as the word it is, and the sum
- * arrives with the second verb rather than in anticipation of it.
+ * **Two verbs, so there is a sum.** A fixed verb set is the design's first decision, and it was worth
+ * exactly nothing while there was one verb; `Request` arrives now, with the second, rather than in
+ * anticipation of it. Both verbs take a configuration and both resolve one, which is the shape the
+ * rest of the set has too: a verb names what to do *with* a resolution, and the resolution is the
+ * argument's business.
+ *
+ * `resolve` reports to a person — a header and an indented line per package. `roots` reports to
+ * whatever runs next: one directory per line, unadorned, because the list is the compiler's `--path`
+ * arguments and a shell is the only reader that matters. That the two verbs render differently is the
+ * decision, not an oversight.
  */
 
 /**
- * The configuration `commandLine` asks to resolve, absent where it asks for anything else.
+ * What a command line asks the tool to do: name the versions of one configuration, or name the
+ * directories it compiles from.
+ */
+data Request = Resolve(resolvedConfiguration: Configuration) | Roots(rootsConfiguration: Configuration)
+
+/**
+ * What `commandLine` asks for, absent where it asks for anything the tool does not offer.
  *
  * Absent covers every unknown verb, a missing configuration and a spare argument alike, because a
- * tool that read past an argument it did not understand would resolve something the user did not
+ * tool that read past an argument it did not understand would act on something the user did not
  * name. What is *not* refused here is a configuration no descriptor declares: that is a fact about a
  * descriptor this module has never seen, and the resolver already reports it against the one it has.
  *
  * ```eliot
- * val configuration = requested(command("resolve").withArgument("controller-jvm"))
+ * val request = requested(command("resolve").withArgument("controller-jvm"))
  * ```
  */
-def requested(commandLine: List[String]): Option[Configuration] = {
+def requested(commandLine: List[String]): Option[Request] = {
    val verb = at(0, commandLine) orElse ""
    val named = at(1, commandLine) orElse ""
 
-   fold(verb == resolveVerb && size(commandLine) == 2, Some(configurationNamed(named)), None)
+   fold(size(commandLine) == 2, verbRequest(verb, configurationNamed(named)), None)
+}
+
+/**
+ * The configuration `request` is about — every verb takes one, and a failure has to name it.
+ */
+def requestedConfiguration(request: Request): Configuration = request match {
+   case Resolve(configuration) -> configuration
+   case Roots(configuration)   -> configuration
 }
 
 /**
@@ -50,6 +72,16 @@ def report(configuration: Configuration, resolution: Resolution): List[String] =
    prepend(resolution.selections.map(selectionLine), show(configuration) ++ ":")
 
 /**
+ * What an assembly looks like on a terminal: one source root per line and nothing else.
+ *
+ * Deliberately not `report`'s shape. These lines are arguments — `eliot roots test` exists to be read
+ * by whatever compiles, so a header to strip and an indent to trim would be two things every caller
+ * has to undo. The order is the assembly's: the project's own roots first, then the dependencies in
+ * the resolution's canonical order.
+ */
+def reportRoots(roots: List[Path]): List[String] = roots.map(show)
+
+/**
  * One line for one failure, attributed to what could not be done.
  *
  * Nothing here abbreviates the problem: each error type renders itself and each names the package or
@@ -59,14 +91,22 @@ def report(configuration: Configuration, resolution: Resolution): List[String] =
 def failed(doing: String, problem: String): List[String] = singleton("eliot: " ++ doing ++ ": " ++ problem)
 
 /**
- * How to invoke the tool, for a command line that named nothing it offers.
+ * How to invoke the tool, for a command line that named nothing it offers — one line per verb, and
+ * one saying what the argument they share is.
  */
 def usage: List[String] =
-   append(
-      singleton("usage: eliot " ++ resolveVerb ++ " <configuration>"),
-      "   <configuration>   'test', or the name of an artifact declared in " ++ descriptorFileName
-   )
+   singleton("usage: eliot <verb> <configuration>") ++
+      singleton("   " ++ resolveVerb ++ "   the version selected for each package of the configuration") ++
+      singleton("   " ++ rootsVerb ++ "     the source directories the configuration compiles from") ++
+      singleton("   <configuration>   'test', or the name of an artifact declared in " ++ descriptorFileName)
+
+private def verbRequest(verb: String, configuration: Configuration): Option[Request] =
+   if(verb == resolveVerb) Some(Resolve(configuration))
+      else if(verb == rootsVerb) Some(Roots(configuration))
+      else None
 
 private def resolveVerb: String = "resolve"
+
+private def rootsVerb: String = "roots"
 
 private def selectionLine(selection: Selection): String = "   " ++ show(selection)

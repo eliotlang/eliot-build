@@ -1,4 +1,5 @@
 import eliot.collection.List
+import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
@@ -18,10 +19,13 @@ import eliot.build.Command
  */
 def testCases: Test = {
    "requested" should "read the configuration the resolve verb names" in {
-      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "artifact controller-jvm"
+      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "resolve artifact controller-jvm"
    }
    "requested" should "read the test scope by the word that spells it" in {
-      described(requested(commandLine("resolve", "test"))) shouldBe "test scope"
+      described(requested(commandLine("resolve", "test"))) shouldBe "resolve test scope"
+   }
+   "requested" should "tell the two verbs apart, and the configuration is the same argument" in {
+      described(requested(commandLine("roots", "test"))) shouldBe "roots test scope"
    }
    "requested" should "ask for nothing where the verb is not one the tool offers" in {
       described(requested(commandLine("fetch", "test"))) shouldBe "<none>"
@@ -53,24 +57,43 @@ def testCases: Test = {
       joined("/", report(TestScope, Resolution(empty))) shouldBe "test:"
    }
 
+   "reportRoots" should "print one root per line, unadorned, because the lines are arguments" in {
+      joined("/", reportRoots(append(singleton(path("/project/src")), path("/cache/x/foo@v1.2/src"))))
+         shouldBe "/project/src//cache/x/foo@v1.2/src"
+   }
+   "reportRoots" should "print nothing at all for a configuration that mounts nothing" in {
+      joined("/", reportRoots(empty)) shouldBe ""
+   }
+
    "failed" should "attribute the failure to what could not be done" in {
       joined("/", failed("git refused", "no such repository")) shouldBe "eliot: git refused: no such repository"
    }
 
-   "usage" should "name the verb and what it takes" in {
-      joined("/", usage) shouldBe
-         "usage: eliot resolve <configuration>/   <configuration>   'test', or the name of an artifact declared in eliot.pkg"
+   "usage" should "name every verb and the argument they share" in {
+      joined("/", usage) shouldBe expectedUsage
    }
 }
+
+private def expectedUsage: String =
+   "usage: eliot <verb> <configuration>/" ++
+      "   resolve   the version selected for each package of the configuration/" ++
+      "   roots     the source directories the configuration compiles from/" ++
+      "   <configuration>   'test', or the name of an artifact declared in eliot.pkg"
 
 /**
  * `Show[Configuration]` renders `TestScope` and an artifact named "test" identically — they are one
  * word on a command line — so a case about which of them was read has to look at the constructor.
+ * Same for the verbs, which is why the request is described rather than shown.
  */
-private def described(configuration: Option[Configuration]): String =
-   foldOption("<none>", found -> describe(found), configuration)
+private def described(request: Option[Request]): String =
+   foldOption("<none>", found -> describe(found), request)
 
-private def describe(configuration: Configuration): String = configuration match {
+private def describe(request: Request): String = request match {
+   case Resolve(configuration) -> "resolve " ++ describeConfiguration(configuration)
+   case Roots(configuration)   -> "roots " ++ describeConfiguration(configuration)
+}
+
+private def describeConfiguration(configuration: Configuration): String = configuration match {
    case TestScope           -> "test scope"
    case ArtifactNamed(name) -> "artifact " ++ name
 }
