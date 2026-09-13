@@ -12,8 +12,11 @@ import eliot.build.model.Lineage
  * writer, an assembly step, `eliot get`) reads these types and drags no closure behind it.
  *
  * **Selection is per repository, not per module.** Tags are repository-wide, so `//stdlib v1.2` and
- * `//jvm v1.4` into one repository are two minimums on one package rather than two packages; the
- * selector decides what gets mounted afterwards, which is the assembly step's business.
+ * `//jvm v1.4` into one repository are two minimums on one package rather than two packages. The
+ * selectors are *kept* rather than dropped, as the set of modules the closure reached — which is what
+ * decides both what a build mounts and, before that, whose dependencies the closure follows. A
+ * repository reached only as `//stdlib` must not carry `//jvm`'s edges, so the set is part of what a
+ * resolution answers rather than something an assembler could re-derive.
  *
  * A selection carries the anchor it was identified by, because identity is the one thing about a
  * package a URL does not settle: a URL is exactly what does not survive a rename, an org transfer or
@@ -21,7 +24,12 @@ import eliot.build.model.Lineage
  * release — and it is a statement about two selections rather than a step of the closure, which is
  * why it lives with them.
  */
-data Selection(selectedRepository: Repository, selectedVersion: Version, lineageAnchor: Option[Commit])
+data Selection(
+   selectedRepository: Repository,
+   selectedVersion: Version,
+   lineageAnchor: Option[Commit],
+   selectedModules: List[ModuleSelector]
+)
 
 /**
  * What one configuration resolved to, in canonical package order — the order is the resolution's,
@@ -40,6 +48,13 @@ implement Show[Selection] {
 implement Compare[Selection] {
    def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedRepository <= b.selectedRepository
 }
+
+/**
+ * `true` when `selection` wants `name` — the module's own name against the selectors the closure
+ * collected, which is what narrows a multi-module repository to the part of it a build actually uses.
+ */
+def mounts(name: ModuleName, selection: Selection): Bool =
+   selection.selectedModules.any(selector -> selector == ModuleSelected(name))
 
 /**
  * The version `resolution` selected for `repository`, absent when the closure never reached it.

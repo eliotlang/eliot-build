@@ -39,12 +39,39 @@ def testCases: Test = {
             .published("github.com/x/bar@v1.5", "")
       ) shouldBe "github.com/x/bar v1.5, github.com/x/foo v1.2"
    }
-   "resolve" should "mount what a dependency's exported modules require" in {
+   "resolve" should "follow the edges of the module a dependency line selected" in {
+      resolved(
+         "dep github.com/x/foo//jvm v1.2",
+         publishing("github.com/x/foo@v1.2", "module jvm {\n  dep github.com/x/bar v1.1\n}")
+            .published("github.com/x/bar@v1.1", "")
+      ) shouldBe "github.com/x/bar v1.1, github.com/x/foo v1.2"
+   }
+   "resolve" should "leave the edges of a module nobody selected out of the closure" in {
       resolved(
          "dep github.com/x/foo v1.2",
          publishing("github.com/x/foo@v1.2", "module jvm {\n  dep github.com/x/bar v1.1\n}")
             .published("github.com/x/bar@v1.1", "")
-      ) shouldBe "github.com/x/bar v1.1, github.com/x/foo v1.2"
+      ) shouldBe "github.com/x/foo v1.2"
+   }
+   "resolve" should "follow a selected module's siblings, which is how a layer carries its base" in {
+      resolved(
+         "dep github.com/e/eliot//jvm v1.2",
+         publishing(
+            "github.com/e/eliot@v1.2",
+            "module jvm {\n  dep //stdlib\n}\nmodule stdlib {\n  dep github.com/x/bar v1.1\n}"
+         ).published("github.com/x/bar@v1.1", "")
+      ) shouldBe "github.com/e/eliot v1.2, github.com/x/bar v1.1"
+   }
+   "resolve" should "record every module of a repository the closure reached" in {
+      mounted(
+         "github.com/e/eliot",
+         "dep github.com/e/eliot//jvm v1.2",
+         publishing("github.com/e/eliot@v1.2", "module jvm {\n  dep //stdlib\n}\nmodule stdlib {\n}")
+      ) shouldBe "//jvm, //stdlib"
+   }
+   "resolve" should "record the root module for a dependency line carrying no selector" in {
+      mounted("github.com/x/foo", "dep github.com/x/foo v1.2", publishing("github.com/x/foo@v1.2", ""))
+         shouldBe "<root>"
    }
    "resolve" should "leave a dependency's own test and artifact scopes out of the closure" in {
       resolved(
@@ -173,6 +200,31 @@ private def resolvedFor(configurationName: String, rootText: String, universe: L
    reported(
       against(universeOf(universe, empty), resolve(ArtifactNamed(configurationName), descriptorOf(rootText)))
    )
+
+/**
+ * The modules of `url` the test configuration of `rootText` reached, in the order it reached them —
+ * the half of a selection that decides what a build mounts and whose edges the closure follows.
+ */
+private def mounted(url: String, rootText: String, universe: List[Pair[String, String]]): String =
+   foldEither(
+      error -> show(error),
+      resolution -> renderedModules(repositoryAt(url), resolution),
+      against(universeOf(universe, empty), resolve(TestScope, descriptorOf(rootText)))
+   )
+
+private def renderedModules(repository: Repository, resolution: Resolution): String =
+   foldOption(
+      "<unselected>",
+      selection -> selection.selectedModules.map(namedSelector).joined(", "),
+      resolution.selections.find(selection -> selection.selectedRepository == repository)
+   )
+
+/**
+ * The root module spells itself as nothing — that is what a `dep` line with no selector carries — so
+ * it is named here rather than asserted as the empty string it renders as.
+ */
+private def namedSelector(selector: ModuleSelector): String =
+   fold(show(selector) == "", "<root>", show(selector))
 
 /**
  * The version `url` was selected at in the test configuration of `rootText`, so the reading side of a

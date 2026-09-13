@@ -18,10 +18,10 @@
  * A `//name` selector narrows a multi-module repository to one of its modules. It is part of the
  * identity — `…/eliot//stdlib` and `…/eliot//jvm` are different dependencies — but not of the
  * *repository*, which is what git fetches and what tags version: modules of one repository version
- * together, since a tag is repository-wide. That is why there are three types here rather than one:
- * a `Repository` is what is cloned, tagged, cached and selected; a `Package` is a repository plus the
- * module a dependency wants of it; a `PackageId` is what a `dep` line spells, which may also be a
- * *sibling* — a module of the repository being read, with no URL and no version of its own.
+ * together, since a tag is repository-wide. That is why there are four types here rather than one:
+ * a `Repository` is what is cloned, tagged, cached and selected; a `ModuleSelector` is which module of
+ * one is wanted; a `Package` is the two together; a `PackageId` is what a `dep` line spells, which may
+ * also be a *sibling* — a module of the repository being read, with no URL and no version of its own.
  */
 /**
  * A repository, by its canonical URL: the unit git works in — what is cloned, what a version tag
@@ -36,9 +36,19 @@ data Repository(repositoryUrl: String)
 data ModuleName(moduleNameText: String)
 
 /**
- * A foreign package a dependency refers to: a repository and, optionally, the one module of it wanted.
+ * Which module of a repository is wanted: the one a `//name` selector names, or the repository's root
+ * module, which is what a `dep` line carrying no selector means.
+ *
+ * A sum rather than an `Option[ModuleName]` because the root module is a module — the whole of a
+ * repository that declares no `module` clause — rather than the absence of one, and because what is
+ * mounted is a *set* of these, which an `Option` would make unreadable at every use.
  */
-data Package(packageRepository: Repository, selectedModule: Option[ModuleName])
+data ModuleSelector = RootModule | ModuleSelected(selectorName: ModuleName)
+
+/**
+ * A foreign package a dependency refers to: a repository and the one module of it wanted.
+ */
+data Package(packageRepository: Repository, selectedModule: ModuleSelector)
 
 /**
  * What a `dep` line, or a `backend` clause, names: a module of the repository being read (`//stdlib`),
@@ -65,8 +75,8 @@ def packageId(text: String): PackageId = {
    val url = before("//", body)
 
    foldOption(
-      Foreign(Package(Repository(canonicalUrl(url)), None)),
-      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), Some(name)))),
+      Foreign(Package(Repository(canonicalUrl(url)), RootModule)),
+      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), ModuleSelected(name)))),
       selectorOf(body)
    )
 }
@@ -111,11 +121,25 @@ implement Eq[ModuleName] {
 }
 
 /**
+ * A selector spells itself as a `dep` line carries it — which is nothing at all for the root module,
+ * so that appending it to a URL gives the package back.
+ */
+implement Show[ModuleSelector] {
+   def show(value: ModuleSelector): String = value match {
+      case RootModule           -> ""
+      case ModuleSelected(name) -> "//" ++ show(name)
+   }
+}
+
+implement Eq[ModuleSelector] {
+   def equals(a: ModuleSelector, b: ModuleSelector): Bool = show(a) == show(b)
+}
+
+/**
  * The canonical spelling, which is also what a descriptor is written back out as.
  */
 implement Show[Package] {
-   def show(value: Package): String =
-      show(value.packageRepository) ++ value.selectedModule.foldOption("", name -> "//" ++ show(name))
+   def show(value: Package): String = show(value.packageRepository) ++ show(value.selectedModule)
 }
 
 /**

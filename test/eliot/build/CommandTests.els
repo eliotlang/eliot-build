@@ -83,4 +83,4 @@ private def addSelection(selection: Selection, resolution: Resolution): Resoluti
    Resolution(append(resolution.selections, selection))
 
 private def selected(url: String, major: Int, minor: Int): Selection =
-   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None)
+   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(RootModule))
