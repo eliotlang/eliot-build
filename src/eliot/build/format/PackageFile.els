@@ -3,7 +3,6 @@ import eliot.build.format.Clause
 import eliot.build.format.ClauseReader
 import eliot.build.format.DependencyClause
 import eliot.build.model.PackageId
-import eliot.build.model.Version
 import eliot.build.model.Descriptor
 
 /**
