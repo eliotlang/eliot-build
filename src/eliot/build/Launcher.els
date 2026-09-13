@@ -85,13 +85,29 @@ private def resolved(configuration: Configuration, here: Path): {FileSystem, Pro
  * charged right here, which is why this signature says what it says while
  * `eliot.build.resolve.Resolution` says only `{PackageSource, Throw[ResolutionError]}` and
  * `eliot.build.git.Cache` says nothing about subprocesses at all.
+ *
+ * The `provide` is the other half of that composition: the source asks where mirrors live and this is
+ * the one place that answers, because where a build caches what it fetched is a property of the machine
+ * it runs on rather than of anything the resolver knows.
  */
 private def closure(
       configuration: Configuration,
       here: Path
    ): {FileSystem, Process, Throw[IoError], Throw[GitError], Throw[DescriptorError], Throw[ResolutionError]} List[String] = {
    val descriptor = parseDescriptor(readLines(here / descriptorFileName))
-   val resolution = resolve(configuration, descriptor) with gitPackages with shellGit
+   val resolution =
+      provide(cacheRoot(here), resolve(configuration, descriptor) with gitPackages with shellGit)
 
    report(configuration, resolution)
 }
+
+/**
+ * Where this build caches the repositories it has looked at: under the project, beside everything else
+ * the tool writes.
+ *
+ * Per project rather than per user, which is what it has always been and is worth reconsidering rather
+ * than inheriting — a mirror is content-addressed and shareable, so a cache one directory up from every
+ * project is the shape Go and Cargo settled on. Changing it is changing this line, which is the point of
+ * the launcher holding it at all.
+ */
+private def cacheRoot(here: Path): Path = here / "target" / "cache"
