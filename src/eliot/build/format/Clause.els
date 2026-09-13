@@ -45,11 +45,18 @@ def parseClauses(lines: List[String]): {Throw[ClauseError]} List[Clause] =
 def argument(index: Int, clause: Clause): {Abort} String = orAbort(clause.arguments.at(index))
 
 /**
- * The direct children of `clause` whose keyword is `keyword` — how an interpreter reads the `dep`
- * lines of a `module` block without caring what else is in it.
+ * The clauses of `clauses` whose keyword is `name` — how an interpreter reads the `dep` lines of a
+ * file without caring what else is in it.
  */
-def childrenNamed(name: String, clause: Clause): List[Clause] =
-   clause.children.filter(child -> child.keyword == name)
+def clausesNamed(name: String, clauses: List[Clause]): List[Clause] =
+   clauses.filter(clause -> clause.keyword == name)
+
+/**
+ * The direct children of `clause` whose keyword is `name`. The same question asked of a block that
+ * `clausesNamed` asks of a file, which is what lets the root be interpreted exactly as every block
+ * inside it is.
+ */
+def childrenNamed(name: String, clause: Clause): List[Clause] = clausesNamed(name, clause.children)
 
 /**
  * `clause` and its children rendered as an indented block, for diagnostics.

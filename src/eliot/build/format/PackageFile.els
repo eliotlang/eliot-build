@@ -70,76 +70,22 @@ def renderDescriptor(descriptor: Descriptor): String =
    )
 
 /**
- * Which clause a keyword introduces. A `data` sum matched with `match`, rather than a chain of
- * `if..else` over the keyword. The carrier model made that mandatory — an `if`'s arms ran under an
- * `Abort` carrier that `Throw` had no lift through, so they could not raise — and effects v6 removed
- * the constraint. It stays because naming the alternatives is clearer than testing a string four
- * times, and because an unknown keyword is then a case rather than a fallthrough.
+ * The descriptor `clauses` spell: every top-level clause read into the field its keyword feeds.
+ *
+ * The root is read exactly as every block inside it is read — by asking for the clauses of one
+ * keyword and interpreting those — rather than by folding a growing `Descriptor` through a sum over
+ * keywords. The fold was forced once: under the carrier model an `if`'s arms could not raise, so
+ * naming the alternatives was the only way to refuse an unknown one. It is `knownClauses` that
+ * refuses now, up front and for all of them at once, and what is left is the mapping itself.
  */
-data ClauseKind = DepClause | ModuleClause | TestClause | ArtifactClause | UnknownClause
-
-private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
-   clauses.foldLeft(emptyDescriptor, clause -> acc -> withClause(clause, acc))
-
-private def kindOf(keyword: String): ClauseKind =
-   fold(keyword == "dep", DepClause,
-      fold(keyword == "module", ModuleClause,
-         fold(keyword == "test", TestClause,
-            fold(keyword == "artifact", ArtifactClause, UnknownClause))))
-
-private def withClause(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val kind = kindOf(clause.keyword)
-
-   kind match {
-      case DepClause      -> withBaseDependency(clause, descriptor)
-      case ModuleClause   -> withModule(clause, descriptor)
-      case TestClause     -> withTestBlock(clause, descriptor)
-      case ArtifactClause -> withArtifact(clause, descriptor)
-      case UnknownClause  -> raise(unknown(clause))
-   }
-}
-
-private def withBaseDependency(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val dependency = dependencyOf(clause)
+private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor = {
+   knownClauses(descriptorKeywords, clauses)
 
    Descriptor(
-      append(descriptor.baseDependencies, dependency),
-      descriptor.modules,
-      descriptor.testDependencies,
-      descriptor.artifacts
-   )
-}
-
-private def withModule(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val built = moduleOf(clause)
-
-   Descriptor(
-      descriptor.baseDependencies,
-      append(descriptor.modules, built),
-      descriptor.testDependencies,
-      descriptor.artifacts
-   )
-}
-
-private def withTestBlock(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val dependencies = dependenciesOf(clause)
-
-   Descriptor(
-      descriptor.baseDependencies,
-      descriptor.modules,
-      descriptor.testDependencies ++ dependencies,
-      descriptor.artifacts
-   )
-}
-
-private def withArtifact(clause: Clause, descriptor: Descriptor): {Throw[DescriptorError]} Descriptor = {
-   val built = artifactOf(clause)
-
-   Descriptor(
-      descriptor.baseDependencies,
-      descriptor.modules,
-      descriptor.testDependencies,
-      append(descriptor.artifacts, built)
+      clausesNamed("dep", clauses).map(dependencyOf),
+      clausesNamed("module", clauses).map(moduleOf),
+      clausesNamed("test", clauses).flatMap(dependenciesOf),
+      clausesNamed("artifact", clauses).map(artifactOf)
    )
 }
 
@@ -303,7 +249,10 @@ private def checkSchemeless(target: String, clause: Clause): {Throw[DescriptorEr
    requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)
 
 private def knownChildren(keywords: List[String], clause: Clause): {Throw[DescriptorError]} Unit =
-   clause.children.foreach(child -> requireKnown(keywords, child))
+   knownClauses(keywords, clause.children)
+
+private def knownClauses(keywords: List[String], clauses: List[Clause]): {Throw[DescriptorError]} Unit =
+   clauses.foreach(clause -> requireKnown(keywords, clause))
 
 private def requireKnown(keywords: List[String], clause: Clause): {Throw[DescriptorError]} Unit = {
    val name = clause.keyword
@@ -326,8 +275,6 @@ private def requireThat(condition: Bool, problem: String, clause: Clause): {Thro
 private def problemUnless(condition: Bool, problem: String): Option[String] =
    fold(condition, None, Some(problem))
 
-private def unknown(clause: Clause): DescriptorError = Unreadable(render(clause), unknownReason(clause))
-
 /**
  * The message an unrecognised keyword gets. It names the upgrade rather than the mistake, because
  * the likeliest cause of an unknown clause is a descriptor written for a newer launcher — which is
@@ -335,6 +282,9 @@ private def unknown(clause: Clause): DescriptorError = Unreadable(render(clause)
  */
 private def unknownReason(clause: Clause): String =
    "unknown clause '" ++ clause.keyword ++ "'; this descriptor may need a newer eliot"
+
+private def descriptorKeywords: List[String] =
+   append(append(append(append(empty, "dep"), "module"), "test"), "artifact")
 
 private def moduleKeywords: List[String] =
    append(append(append(append(empty, "internal"), "dep"), "test"), "plugin")
