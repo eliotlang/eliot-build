@@ -1,0 +1,23 @@
+-- The build tool as a package — the one whose descriptor the tool itself has to be able to read.
+-- One anonymous module: `src/` is the tool, `test/` is its suite, both at the repository root, which
+-- is what no `module` clause means.
+--
+-- `//stdlib` alone in the base scope, because that is what `src` names: `eliot.collection.List`,
+-- `eliot.file` and `eliot.system`. The `lang` layer arrives underneath it anyway — the eliot
+-- repository's own descriptor says `module stdlib { dep //lang }` — and a dependency this package
+-- does not import is not this package's to declare.
+--
+-- Test scope is the framework plus a platform to run on, which is the shape every Eliot suite has:
+-- `eliot.test.Runner` needs a jvm to be an executable, and nothing in `src` does.
+--
+-- Not here yet: an `artifact` for the launcher jar. It would name a backend, and a backend is located
+-- among the artifact's dependencies by the `plugin` clause each one ships — which the eliot repository
+-- cannot write until its compiler plugins are published jars with coordinates to pin. Until then this
+-- package is built the way `.claude/CLAUDE.md` describes, by the compiler's own Mill task.
+
+dep github.com/robertbraeutigam/eliot//stdlib v0.0
+
+test {
+  dep github.com/eliotlang/eliot-test v0.0
+  dep github.com/robertbraeutigam/eliot//jvm v0.0
+}
