@@ -39,28 +39,6 @@ def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
    }
 }
 
-private def siblingDependencyOf(
-   name: ModuleName,
-   version: Option[Version],
-   clause: Clause
-): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      SiblingDependency(name),
-      _ -> raise(problemIn("a sibling module versions with its repository and carries no version", clause)),
-      version
-   )
-
-private def requirementOf(
-   package: Package,
-   version: Option[Version],
-   clause: Clause
-): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      raise(problemIn("a foreign dependency needs a minimum version", clause)),
-      minimum -> Requirement(package, minimum),
-      version
-   )
-
 /**
  * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less is an invariant of the
  * format, not merely of the canonical form `packageId` answers with: a written scheme is a spelling
@@ -96,6 +74,28 @@ def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] = de
  */
 def testDependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
    testDependenciesIn(clause.children)
+
+private def siblingDependencyOf(
+   name: ModuleName,
+   version: Option[Version],
+   clause: Clause
+): {Throw[ClauseProblem]} Dependency =
+   foldOption(
+      SiblingDependency(name),
+      _ -> raise(problemIn("a sibling module versions with its repository and carries no version", clause)),
+      version
+   )
+
+private def requirementOf(
+   package: Package,
+   version: Option[Version],
+   clause: Clause
+): {Throw[ClauseProblem]} Dependency =
+   foldOption(
+      raise(problemIn("a foreign dependency needs a minimum version", clause)),
+      minimum -> Requirement(package, minimum),
+      version
+   )
 
 /**
  * Every version token is a git tag, spelled as the tag is: there is no `>=` to write and no range to
