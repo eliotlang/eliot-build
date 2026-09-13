@@ -3,6 +3,7 @@ import eliot.file.Path
 import eliot.file.File
 import eliot.test.Mock
 import eliot.build.git.Git
+import eliot.build.git.Tags
 
 /**
  * A git that is a table: what a test of anything *using* git binds in place of the one that spawns.

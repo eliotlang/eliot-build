@@ -2,8 +2,10 @@ import eliot.collection.List
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
-import eliot.build.git.Git
+import eliot.build.model.Lineage
 import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
 
 /**
  * Minimal version selection: the closure of what a build configuration depends on, and the version
@@ -14,14 +16,15 @@ import eliot.build.resolve.PackageSource
  * algorithm: no solver, no backtracking, and the same answer on every machine without consulting a
  * lockfile. Publishing a new version changes nobody's build; only raising a minimum does.
  *
- * **The configuration is the unit of resolution.** Platform layers are declared per artifact
- * precisely so two of them never meet: flat-listing a jvm layer and an avr layer would mount both
- * into one resolution and collide on every name a layer implements. So there is no such thing as
- * "the" resolution of a repository — there is one per artifact, plus one for the test scope.
+ * What is resolved is a `Configuration` and what comes out is a `Resolution` of `Selection`s, both of
+ * them next door: `eliot.build.resolve.Configuration` says which of a descriptor's scopes a
+ * configuration opens, and `eliot.build.resolve.Selection` says what a chosen version is and when two
+ * spellings are one package. What is left here is the part that is genuinely an algorithm — the
+ * closure, the merging of two minimums, and the ceiling it gives up at.
  *
- * **Selection is per repository, not per module.** Tags are repository-wide, so `//stdlib v1.2` and
- * `//jvm v1.4` into one repository are two minimums on one package, not two packages; the selector
- * decides what gets mounted afterwards, which is the assembly step's business rather than this one's.
+ * **The closure is a fold over rounds.** User code cannot recurse and cannot loop, so a fixpoint is a
+ * fixed list of expansions with a frontier carried through it, and a frontier that is still not empty
+ * when the rounds are spent raises rather than answering partially.
  *
  * **The source is an effect, not an argument.** Everything here declares `{PackageSource}` — the two
  * questions the algorithm asks the world, declared as an effect in `eliot.build.resolve.PackageSource` and
@@ -30,13 +33,6 @@ import eliot.build.resolve.PackageSource
  * Notably absent from the algebra is version listing: MVS never enumerates what a package offers, so
  * discovering that a newer release exists belongs to `eliot get` rather than here.
  */
-data Selection(selectedRepository: Repository, selectedVersion: Version, lineageAnchor: Option[Commit])
-
-/**
- * What one configuration resolved to, in canonical package order — the order is the resolution's,
- * not the traversal's, so the same closure always renders and locks the same way.
- */
-data Resolution(selections: List[Selection])
 
 /**
  * Why a configuration could not be resolved. Each constructor is a question the graph could not
@@ -49,19 +45,6 @@ data ResolutionError =
    MajorConflict(conflictedRepository: Repository, oneVersion: Version, otherVersion: Version) |
    TooDeep(reachedDepth: Int)
 
-/**
- * The unit of resolution: which of a descriptor's dependency scopes are closed over the graph. The
- * test scope is a configuration like any other — it just needs no `artifact` clause to name it.
- */
-data Configuration = TestScope | ArtifactNamed(artifactName: String)
-
-implement Show[Configuration] {
-   def show(value: Configuration): String = value match {
-      case TestScope           -> "test"
-      case ArtifactNamed(name) -> name
-   }
-}
-
 implement Show[ResolutionError] {
    def show(value: ResolutionError): String = value match {
       case NoSuchConfiguration(configuration) -> "no configuration named '" ++ show(configuration) ++ "'"
@@ -71,18 +54,6 @@ implement Show[ResolutionError] {
             ", which are different compatibility lines"
       case TooDeep(depth) -> "dependency graph deeper than " ++ show(depth)
    }
-}
-
-implement Show[Selection] {
-   def show(value: Selection): String = show(value.selectedRepository) ++ " " ++ show(value.selectedVersion)
-}
-
-/**
- * Packages order by identity, which is what gives a resolution one canonical line order regardless
- * of the order the closure happened to discover them in.
- */
-implement Compare[Selection] {
-   def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedRepository <= b.selectedRepository
 }
 
 /**
@@ -97,24 +68,11 @@ implement Compare[Selection] {
 def resolve(
    configuration: Configuration,
    descriptor: Descriptor
-): {PackageSource, Throw[ResolutionError]} Resolution = configuration match {
-   case TestScope           -> resolveRequirements(descriptor.baseDependencies ++ descriptor.testDependencies)
-   case ArtifactNamed(name) ->
-      foldOption(
-         raise(NoSuchConfiguration(configuration)),
-         found -> resolveRequirements(descriptor.baseDependencies ++ found.artifactDependencies),
-         artifactNamed(name, descriptor)
-      )
-}
-
-/**
- * The version `resolution` selected for `repositoryId`, absent when the closure never reached it.
- */
-def selectedVersionOf(repository: Repository, resolution: Resolution): Option[Version] =
+): {PackageSource, Throw[ResolutionError]} Resolution =
    foldOption(
-      None,
-      selection -> Some(selection.selectedVersion),
-      resolution.selections.find(selection -> selection.selectedRepository == repository)
+      raise(NoSuchConfiguration(configuration)),
+      resolveRequirements,
+      configuredDependencies(configuration, descriptor)
    )
 
 /**
@@ -233,16 +191,6 @@ private def byLineage(target: Repository, minimum: Version, state: ResolutionSta
    Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
 }
 
-private def sameLineage(anchor: Option[Commit], minimum: Version, selection: Selection): Bool =
-   sameLine(minimum, selection.selectedVersion) && sameAnchor(anchor, selection.lineageAnchor)
-
-/**
- * Two anchors match only when both are present and equal. A missing anchor is not evidence of
- * anything — a line whose history was migrated may have no `vM.0` at all — so absence never unifies.
- */
-private def sameAnchor(anchor: Option[Commit], other: Option[Commit]): Bool =
-   foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)
-
 /**
  * Two minimums on one package: the higher wins, unless they are not the same compatibility line at
  * all, in which case nothing wins — two majors of one package would collide at the merge of fully
@@ -288,9 +236,6 @@ private def replaced(selection: Selection, state: ResolutionState): ResolutionSt
  */
 private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution =
    foldOption(Resolution(state.selected.sorted), _ -> raise(TooDeep(resolutionDepthLimit)), state.pending.head)
-
-private def artifactNamed(name: String, descriptor: Descriptor): Option[Artifact] =
-   descriptor.artifacts.find(artifact -> artifact.artifactName == name)
 
 /**
  * The rounds a closure may take, as data: user code cannot loop, so depth is a list to fold over

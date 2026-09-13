@@ -664,3 +664,102 @@ nothing about the runner cares which directory a suite sits in.
 Two things were deliberately not split. `Dependency` stays inside `model.Descriptor` — as its own module
 it would be twenty lines, and every consumer of it holds a `Descriptor` anyway. `Configuration` stays
 inside `resolve.Resolution`: it is the unit *resolution* resolves, not something the descriptor says.
+
+## 13. Revisited, 2026-09-13 — four more cuts, and one type that left git
+
+§12 split eight modules into four packages by what a file is allowed to know, and four files came out of
+it still holding more than one idea. This changed no behaviour either: the same cases assert the same
+things, and every module reference in §1–§12 above is left as written. The mapping is below.
+
+```
+model/    Version, PackageId, Lineage, Descriptor              + Lineage
+format/   Clause, ClauseReader, DependencyClause,              + ClauseReader, DependencyClause,
+          PackageFile, DescriptorWriter                          DescriptorWriter
+git/      Git, Tags, ShellGit, Cache                           + Tags
+resolve/  PackageSource, GitPackages,                          + Configuration, Selection
+          Configuration, Selection, Resolution
+```
+
+**`Commit` moved to `model.Lineage`, and an edge in the layering went with it.** A content hash has no
+syntax, no I/O and no effect — it is what a tag names and what two spellings of one package are compared
+by — so it is vocabulary, and it sat in `git.Git` only because git is where it was first needed. It was
+also the *only* thing `resolve.PackageSource` and `resolve.Resolution` took from `git.Git`: the whole
+`resolve → git` edge existed to name a hash. The resolver now imports `model` and nothing else, which is
+the same kind of fact as "`git.Git` does not name `eliot.system.Process`" — stated by the import list
+rather than promised by the signatures. `sameAnchor` went with the type, since "both present and equal"
+is what an anchor *means* rather than something the closure decides.
+
+**`git.Git` → `git.Git` + `git.Tags`.** The module's own first sentence named two jobs: the operations,
+as an effect, and the reading of what git says back, as plain functions. `Tags` is `TagRef`,
+`parseTagRefs`, `commitOf`, `anchorCommit` and the peeling rules; it knows nothing of mirrors, remotes or
+subprocesses, and `Git` imports *it* because the effect's members answer in `TagRef`. That direction only
+works once `Commit` has left for the model — otherwise each module needs a type from the other — which is
+why the two changes are one commit. The suites had already made the cut: 17 of `GitTests`' 20 cases were
+about the listing and are now `TagsTests`, leaving the three that are about the vocabulary.
+
+**`format.PackageFile` → four modules**, the largest file in the tree at 396 lines:
+
+- **`format.ClauseReader`** — the checked access: the argument that has to be there (`required`), the
+  arguments that may not be (`atMostArguments`), the children whose keywords are recognised
+  (`knownClauses`/`knownChildren`), and `requireThat`. None of it is about the build vocabulary, and none
+  of it belongs in `format.Clause` either, which decides what shape a file has and can only ever answer
+  with shapes while every function here can refuse. It raises a `ClauseProblem` of its own, so
+  `DescriptorError` became the union of exactly the two channels beneath it — `Malformed(ClauseError)`
+  from the parser, `Unreadable(ClauseProblem)` from the reader — folded together in `parseDescriptor`,
+  which was already folding the first. A module reading clauses never has to know what a descriptor is.
+- **`format.DependencyClause`** — what a `dep` line names. Every other clause is read at one place in
+  the file; `dep` is read at four (the root, a `module`, a module's `test` block, an `artifact`) and a
+  `backend` names a package the same way for a fifth. The rules that are only about a dep sit with it:
+  a version token is a git tag and is *parsed*, a URL carries no scheme, a minimum is required of a
+  foreign package and refused of a sibling.
+- **`format.DescriptorWriter`** — `renderDescriptor` and the eleven renderers under it. The import list
+  is the argument: writing needs `model` and nothing else — no clause tree, no parser, no error channel
+  — because a model in hand is already everything the file says. It also made visible what proximity had
+  hidden: the writer has no cases of its own, being the *assertion vocabulary* of `PackageFileTests`'
+  parse cases and never the subject of one. Still true, and still worth fixing.
+- **`format.PackageFile`** keeps what is genuinely about keywords — `module`, `artifact`, `plugin`,
+  `jar`, `backend`, which field each feeds, and the two error channels meeting.
+
+One simplification rode along. The top level was the one place not read the way every block is read: a
+`ClauseKind` sum, a `kindOf`, and four `with*` functions each rebuilding all four fields of `Descriptor`
+to add one thing to one of them. `Clause` gained `clausesNamed` — `childrenNamed`'s question asked of a
+file rather than of a block — and `interpret` became the mapping itself, with `knownClauses` refusing an
+unrecognised keyword up front. That deleted 65 lines and four places the four-field constructor could
+have its arguments quietly transposed. `ClauseKind`'s own doc had said it survived from the carrier era,
+when an `if`'s arms could not raise and naming the alternatives was the only way to refuse one.
+
+**`resolve.Resolution` → `Configuration` + `Selection` + `Resolution`.** Three decisions were folded
+together and only the third is minimal version selection. `Configuration` is which of a descriptor's
+scopes a configuration opens — a fact about descriptors, true whether or not anybody resolves anything —
+and it raises nothing, because *which* error a missing artifact is belongs to the caller asking.
+`Selection` is what comes out: a version chosen per repository, the canonical order a lockfile wants, and
+`sameLineage`, which is a statement about two selections rather than a step of the closure. What is left
+is the algorithm: the closure as a fold over rounds, the merging of two minimums, the ceiling it gives up
+at.
+
+§12 said `Configuration` stays inside `resolve.Resolution` because it is the unit *resolution* resolves
+rather than something the descriptor says. That argument was about not moving it to `model`, and it still
+holds — it is in `resolve/`, next to the algorithm that resolves it, rather than with the vocabulary.
+
+Four things were deliberately not split:
+
+- **The closure engine** (`ResolutionState`, `expanded`, `rounds`, `completed`) stays with the rules that
+  drive it. A selection re-enters `pending` exactly when it is new or its version went up; a "generic"
+  closure module would either take that rule as a parameter or stay intimate with MVS while pretending
+  not to be. Separating them would split one idea rather than two.
+- **`model.PackageId` (165)** and **`model.Version` (132)** are each one idea plus their instances.
+- **`format.Clause` (206)** — the grammar is one rule and the parser is one fold over it; the stack-based
+  step functions are not separable from the state they step.
+- **Indented-block rendering is still written twice** — `Clause.render` threads a depth through its three
+  unrolled levels, `DescriptorWriter` indents whole nested renderings instead. The second is the general
+  one, and rewriting the first in its style would be a ~25-line shared module or a rewrite of a renderer
+  whose output several cases assert. Worth doing the next time `Clause` is opened for another reason, not
+  on its own.
+
+The two `selectedVersionOf` cases stayed in `ResolutionTests`: they resolve a descriptor and then read
+the answer, so they are resolver cases that end in a lookup rather than cases about a `Selection`.
+
+No source file is now over 250 lines, and the largest — `resolve.Resolution` at 248 — is a third module
+doc. The direction is unchanged and still acyclic: `resolve → format → model` and `resolve → git →
+format → model`, with `model` importing nothing of the tool and `git.Tags`, `format.DescriptorWriter` and
+`model.Lineage` importing nothing but the vocabulary.

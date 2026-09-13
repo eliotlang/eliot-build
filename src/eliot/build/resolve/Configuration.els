@@ -1,0 +1,54 @@
+import eliot.collection.List
+import eliot.build.model.Descriptor
+
+/**
+ * The unit of resolution: which of a descriptor's dependency scopes are closed over the graph.
+ *
+ * **Two configurations never meet.** Platform layers are declared per artifact precisely so that
+ * flat-listing a jvm layer and an avr layer would not mount both into one resolution and collide on
+ * every name a layer implements. So there is no such thing as "the" resolution of a repository —
+ * there is one per artifact, plus one for the test scope, and the test scope is a configuration like
+ * any other that just needs no `artifact` clause to name it.
+ *
+ * What a configuration *opens* is a fact about descriptors, true whether or not anybody resolves
+ * anything: the repository's base dependencies, plus an artifact's own — the platform layers among
+ * them — or plus the test block's, the framework and a platform the build host can run. An artifact's
+ * dependencies never reach a consumer and neither do a test block's, which is exactly why platform
+ * layers are declared there.
+ *
+ * Nothing here fails. A configuration nobody declared is absent rather than refused, because *which*
+ * error that is belongs to the caller asking — `eliot.build.resolve.Resolution` raises
+ * `NoSuchConfiguration`, and a future `eliot get` may want to answer differently.
+ */
+data Configuration = TestScope | ArtifactNamed(artifactName: String)
+
+implement Show[Configuration] {
+   def show(value: Configuration): String = value match {
+      case TestScope           -> "test"
+      case ArtifactNamed(name) -> name
+   }
+}
+
+/**
+ * The dependencies `configuration` opens of `descriptor`, absent where the descriptor declares no
+ * such artifact.
+ *
+ * ```eliot
+ * val requirements = configuredDependencies(ArtifactNamed("controller-jvm"), descriptor)
+ * ```
+ */
+def configuredDependencies(configuration: Configuration, descriptor: Descriptor): Option[List[Dependency]] =
+   configuration match {
+      case TestScope           -> Some(descriptor.baseDependencies ++ descriptor.testDependencies)
+      case ArtifactNamed(name) -> artifactDependenciesOf(name, descriptor)
+   }
+
+private def artifactDependenciesOf(name: String, descriptor: Descriptor): Option[List[Dependency]] =
+   foldOption(
+      None,
+      found -> Some(descriptor.baseDependencies ++ found.artifactDependencies),
+      artifactNamed(name, descriptor)
+   )
+
+private def artifactNamed(name: String, descriptor: Descriptor): Option[Artifact] =
+   descriptor.artifacts.find(artifact -> artifact.artifactName == name)

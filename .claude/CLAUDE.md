@@ -16,24 +16,32 @@ meta-information.
 
 Two source roots, four packages each. `src/eliot/build/` is the tool, split by what a file is allowed
 to know — `resolve` → `git` → `format` → `model`, and `model` imports nothing of the tool
-(`docs/effectful-modules.md` §12):
+(`docs/effectful-modules.md` §12, §13):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
   line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; `Package`
   adds the module wanted; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`, never
-  an empty-URL sentinel), and `Descriptor` — the typed `eliot.pkg` model as data alone, where a
-  `Dependency` is a `SiblingDependency` or a `Requirement` with a mandatory minimum.
-- **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser; `PackageFile`
-  interprets one into a `Descriptor`, writes one back out, owns `DescriptorError` and
-  `descriptorFileName`, and is the only place that knows the vocabulary. The minimum on a requirement is
-  checked here, at parse time.
-- **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror`, `Commit` and `Revision`,
-  git's own vocabulary; a mirror is a bare `--mirror` clone and nothing is ever checked out — plus the
-  pure reading of git's output), `ShellGit` (`shellGit`, the *named* implementation that spawns and alone
-  decides which directory each command stands in; the only module naming `eliot.system.Process`), and
-  `Cache` (mirroring repositories, on `{Git, FileSystem}`).
+  an empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary before it
+  is git's, which is why the resolver imports no git at all), and `Descriptor` — the typed `eliot.pkg`
+  model as data alone, where a `Dependency` is a `SiblingDependency` or a `Requirement` with a
+  mandatory minimum.
+- **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser
+  (`clausesNamed` asks of a file what `childrenNamed` asks of a block, which is why the root is
+  interpreted exactly as every block in it is); `ClauseReader` is the checked access to one clause and
+  the `ClauseProblem` it complains with; `DependencyClause` is the `dep` line, the one clause every
+  block reads; `PackageFile` owns the keywords, `DescriptorError` and `descriptorFileName`, and is where
+  the parser's and the reader's error channels meet; `DescriptorWriter` writes a descriptor back out and
+  imports `model` alone.
+- **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror` and `Revision`, git's own
+  vocabulary; a mirror is a bare `--mirror` clone and nothing is ever checked out), `Tags` (`TagRef` and
+  the pure reading of a `ls-remote` listing — `Git` imports it, never the other way round), `ShellGit`
+  (`shellGit`, the *named* implementation that spawns and alone decides which directory each command
+  stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories, on
+  `{Git, FileSystem}`).
 - **`resolve/`** — `PackageSource` (the resolver's two questions), `GitPackages` (`gitPackages`, the
-  named git-backed answer), `Resolution` (MVS over a `Configuration`: `TestScope` or `ArtifactNamed`).
+  named git-backed answer), `Configuration` (`TestScope` or `ArtifactNamed`, and which of a descriptor's
+  scopes each opens), `Selection` (a version chosen per repository, the canonical order, `sameLineage`),
+  `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling).
 
 Neither `Git` nor `PackageSource` has a default: a run boundary writes `with gitPackages with shellGit`
 once, and `ShellGit`/`GitPackages` are the two modules nothing but that boundary imports. `test/` mirrors
@@ -48,11 +56,12 @@ landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 s
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11 and §12 of it first**, and read them before touching `Git`,
+`docs/effectful-modules.md` — **read §10, §11, §12 and §13 of it first**, and read them before touching `Git`,
 `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
-implementation actually does and what is now genuinely unchecked.
+implementation actually does and what is now genuinely unchecked. §12 and §13 are where the modules
+came from and what was deliberately left whole.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name

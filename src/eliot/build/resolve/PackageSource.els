@@ -2,7 +2,7 @@ import eliot.collection.List
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
-import eliot.build.git.Git
+import eliot.build.model.Lineage
 
 
 /**

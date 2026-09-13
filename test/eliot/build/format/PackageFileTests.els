@@ -5,6 +5,7 @@ import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
+import eliot.build.format.DescriptorWriter
 
 def testCases: Test = {
    "parseDescriptor" should "read the minimal library descriptor of the design" in {

@@ -1,0 +1,113 @@
+import eliot.collection.List
+import eliot.build.format.Clause
+
+/**
+ * Reading one clause carefully: the argument that has to be there, the arguments that may not be,
+ * the children whose keywords are recognised — and the complaint each of those makes when the clause
+ * does not say what was expected.
+ *
+ * Nothing here knows the build vocabulary. `eliot.build.format.PackageFile` decides that a `dep` needs
+ * a URL and that a `jar` needs a hash; this module decides what "needs" costs when it is not there,
+ * which is a complaint naming the clause it is about. Nothing here knows the *grammar* either, so it
+ * is not `eliot.build.format.Clause`'s either: that module decides what shape a file has and only ever
+ * answers with shapes, while every function here can refuse.
+ *
+ * The complaint is a type of its own rather than the descriptor's error, and that is what keeps the
+ * reading chain one-directional. A reader raises `ClauseProblem`, the parser beneath it raises
+ * `ClauseError`, and the one module above both — which owns `DescriptorError` — is where the two
+ * channels become the single error a caller catches. A module reading clauses never has to know what
+ * a descriptor is.
+ */
+
+/**
+ * Something a clause was expected to say and does not, together with the clause as it was written.
+ *
+ * The clause is carried rendered rather than as a tree: a diagnostic is read by whoever wrote the
+ * file, and what they wrote is the only thing they can look for.
+ */
+data ClauseProblem(clauseText: String, problem: String)
+
+implement Show[ClauseProblem] {
+   def show(value: ClauseProblem): String = value.problem ++ " in '" ++ value.clauseText ++ "'"
+}
+
+/**
+ * `reason`, as a complaint about `clause`.
+ *
+ * The one place a clause is rendered into a diagnostic, so a reader states the reason and never the
+ * formatting — and every complaint from every reader points at its clause the same way.
+ */
+def problemIn(reason: String, clause: Clause): ClauseProblem = ClauseProblem(render(clause), reason)
+
+/**
+ * The `index`-th argument, raising `problem` when there is none. The `{Abort}` is discharged to an
+ * `Option` *first* and the raise happens outside it. That was forced under the carrier model, where
+ * `Throw` had no lift through an `Abort` carrier; under effects v6 `argument(…) else raise(…)` would
+ * compile, and this keeps its shape only because the `Option` is what the caller reads.
+ */
+def required(index: Int, problem: String, clause: Clause): {Throw[ClauseProblem]} String = {
+   val found: Option[String] = optional(index, clause)
+
+   foldOption(raise(problemIn(problem, clause)), text -> text, found)
+}
+
+/**
+ * The `index`-th argument, absent where the clause carries no such argument — the shape a reader
+ * wants for an argument it can do without.
+ */
+def optional(index: Int, clause: Clause): Option[String] = runAbort(argument(index, clause))
+
+/**
+ * Refuse a clause carrying more than `count` arguments.
+ *
+ * Extra arguments are refused rather than ignored for the reason unknown clauses are: a word the
+ * reader does not use is a word the author expected to matter, and quietly dropping it changes the
+ * build without saying so.
+ */
+def atMostArguments(count: Int, clause: Clause): {Throw[ClauseProblem]} Unit =
+   requireThat(clause.arguments.size <= count, "too many arguments", clause)
+
+/**
+ * Refuse any of `clauses` whose keyword is not one of `keywords`.
+ *
+ * Unknown keywords are fatal by design — that is how the format evolves without a version field: a
+ * descriptor using a clause this launcher does not know refuses to build rather than silently
+ * ignoring the line that would have changed the outcome.
+ */
+def knownClauses(keywords: List[String], clauses: List[Clause]): {Throw[ClauseProblem]} Unit =
+   clauses.foreach(clause -> requireKnown(keywords, clause))
+
+/**
+ * The same, asked of a block: every direct child of `clause` must carry a keyword the block knows.
+ */
+def knownChildren(keywords: List[String], clause: Clause): {Throw[ClauseProblem]} Unit =
+   knownClauses(keywords, clause.children)
+
+/**
+ * Raise `problem` against `clause` unless `condition` holds. Written as an `Option` eliminator rather
+ * than as `if(condition) unit else raise(...)`, which the carrier model could not express — an `if`
+ * stacked its `Abort` under the `Throw` and that pair had no cross-lift. Effects v6 removed the
+ * constraint; the shape stays so that the `require*` helpers read alike.
+ */
+def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[ClauseProblem]} Unit = {
+   val trouble: Option[String] = problemUnless(condition, problem)
+
+   foldOption(unit, message -> raise(problemIn(message, clause)), trouble)
+}
+
+private def requireKnown(keywords: List[String], clause: Clause): {Throw[ClauseProblem]} Unit = {
+   val name = clause.keyword
+
+   requireThat(keywords.any(candidate -> candidate == name), unknownReason(clause), clause)
+}
+
+private def problemUnless(condition: Bool, problem: String): Option[String] =
+   fold(condition, None, Some(problem))
+
+/**
+ * The message an unrecognised keyword gets. It names the upgrade rather than the mistake, because
+ * the likeliest cause of an unknown clause is a descriptor written for a newer launcher — which is
+ * exactly how the format is allowed to grow without a version field.
+ */
+private def unknownReason(clause: Clause): String =
+   "unknown clause '" ++ clause.keyword ++ "'; this descriptor may need a newer eliot"
