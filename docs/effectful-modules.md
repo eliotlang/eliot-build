@@ -817,3 +817,67 @@ whoever writes the wrapper, which is where a `--self-check` could honestly live.
 deferred problem — how resolved sources reach the compiler, `git worktree` against a checkout against
 `git archive` — is untouched and is now the next thing in the way, because it is what the assembly step
 needs and the assembly step is what a second verb is made of.
+
+## 15. Revisited, 2026-09-13 — the second verb, and a fifth package
+
+Same compiler and framework as §14. 202 cases green, twenty-five of them new, and the launcher was run
+against a real repository for something other than resolution.
+
+**§14's closing question is answered.** What the design called the deferred problem — how resolved
+sources reach the compiler, `git worktree` against a checkout against `git archive` — is `git worktree
+add --detach --force` into `<cache>/<url>@<tag>`, beside the mirror the objects are already in. `Git`
+gained a sixth operation and a `Worktree` to answer with, `Cache` gained the policy over it
+(`sourceTreeAt`: checked out once, reused, the directory's existence taken as proof, exactly as a
+mirror is), and `ShellGit` alone knows it stands *inside* the mirror to run it. `--force` is not
+carelessness: a tree deleted behind the cache's back leaves the mirror still holding its registration,
+and a cache that cannot heal from that is one a user has to know how to repair.
+
+**`PackageSource` stopped being about resolution.** It was "the resolver's two questions"; it is now
+what the tool asks of somebody else's repository, and the third question is *where are this version's
+sources*. `sourcesAt` is the one member that may **make** its answer — the other two read what a
+repository published and say nothing where it published nothing, while this one is asked about a
+version whose descriptor has already been read, so there is no honest absence left. That is what keeps
+the assembler free of git: it declares `{PackageSource}` and cannot tell a clone from a table, exactly
+as the resolver cannot tell how a descriptor was read.
+
+**`assemble/` is the fifth package, and the first one above `resolve/`.** One module, `Assembly`: a
+resolution, the descriptors it selected and the trees they were checked out into become the source
+roots one configuration compiles from. The layout is three rules — a module's sources are `<module
+directory>/src`; its `test/` joins them only for the test configuration and only for the package being
+built; and `compiler/` is not listed at all, because the compile-time overlay is each root's own
+sibling by the *compiler's* rule, and a second listing here would be a place for the two to disagree.
+The direction stays acyclic: `assemble → resolve → git → format → model`.
+
+**A selection carries the modules the closure reached, which is one fact answering two questions.**
+`Package.selectedModule` had been parsed and never read — the closure fed every *exported* module's
+edges into the graph whatever the selector asked for. That is the design's first deferred problem, and
+it had to be settled before assembly because the same fact decides both which edges are followed and
+which directories are mounted. `ModuleSelector` (`RootModule | ModuleSelected`) is it as vocabulary: a
+sum rather than an `Option[ModuleName]`, because the root module is a module rather than the absence of
+one, and because what gets mounted is a *set* of them. A sibling line now adds a module to its owner's
+selection — which is how `//jvm` carries the `//stdlib` it is written against — and a selection
+re-enters the frontier when it grew, where growing means a higher version *or* one more module. Both
+only go one way, so the closure stays finite for the reason it always did.
+
+**Two verbs, so `Command` finally has a sum.** `Request` is `Resolve | Roots`, and it arrived with the
+second verb rather than in anticipation of it, as that module's doc had promised. The two render
+differently on purpose: `resolve` reports to a person, `roots` reports to whatever runs next — one
+directory per line, unadorned, because the lines *are* the compiler's arguments. In the launcher the
+difference is four lines inside one `provide`, which is the shape a fixed verb set should have.
+
+**§11.3's second finding was met again, and cost more this time.** `AssemblyTests` added a second
+`provide[Universe, _]` instantiation — `Either[ResolutionError, List[Path]]` beside the resolver's
+`Either[ResolutionError, Resolution]` — and the run died with `NoSuchMethodError` on
+`withCellInternal`, the same erased-descriptor collision. The workaround is the one already recorded:
+both suites now render *inside* the `against`, so there is one instantiation between them, answering a
+`String`. The launcher sidesteps it by construction — one `provide`, both verbs rendered in it. It is
+worth saying plainly that this is now shaping code rather than only tests.
+
+**What the launcher checks now.** Compiling it still resolves the platform's `Process` and
+`FileSystem` or nothing does. Running it does something new: against a cache deleted first,
+`eliot roots test` in `../eliot-test` clones the eliot mirror from GitHub, checks `v0.0` out, reads the
+layout off the tagged descriptor and prints five roots — the project's `src` and `test`, then `lang`,
+`stdlib` and `jvm` at the directories that repository's `at` clauses declare, and not `examples`, which
+is `internal`. Handed to the compiler verbatim, those five lines build the project and its 96 cases
+pass. §14's note stands unchanged: nothing runs the launcher automatically, and a change under `git/`,
+`resolve/` or `assemble/` is verified only when both the suite and the launcher have been run.

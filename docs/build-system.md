@@ -15,7 +15,7 @@ is reached through dependency-only modules** — a platform package is already a
 test side gets one, and a user's descriptor is two lines that `eliot init` writes ("What a user
 writes", below); Q1 is decided by it.
 
-**Where the implementation stands** (2026-09-13, 177 tests):
+**Where the implementation stands** (2026-09-13, 202 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -27,9 +27,10 @@ writes", below); Q1 is decided by it.
 | `Git` | the git operations, and the reading of what git says back | done |
 | `Cache` | bare mirrors per package; tags, anchors, descriptors out of them | done |
 | `PackageSource` | the resolver's two questions, and the git-backed answer to them | done |
-| `Launcher` | the `main`, the composition, the failure channels | one verb: `eliot resolve` |
-| `Command` | what a command line asks for, what a resolution reads as | done for that verb |
-| — | lockfile, source assembly, the rest of the verb set, wrapper | not started |
+| `Assembly` | a resolution and the standard layout become source roots | done |
+| `Launcher` | the `main`, the composition, the failure channels | two verbs: `resolve`, `roots` |
+| `Command` | what a command line asks for, what a resolution reads as | done for those verbs |
+| — | lockfile, spawning the compiler, the rest of the verb set, wrapper | not started |
 
 **There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
 the descriptor where the user is standing, closes that configuration over the graph and prints what was
@@ -43,11 +44,20 @@ everything above it real: the launcher's `main` is the only place the platform's
 `FileSystem` are resolved at all, so until it existed the modules beneath it compiled green without
 anybody knowing whether they ran (`docs/effectful-modules.md` §14).
 
-What is still missing is the rest of a *build*. Nothing records what it resolved, so there is no
-lockfile; nothing materialises the selected versions, so no source root reaches the compiler — and that
-is the deferred problem below (`git worktree` against a checkout against `git archive`), now the next
-thing in the way rather than a question for later. The compat-check verb, the plugin-jar closure and
-the project-model query are unstarted.
+**And it builds something.** As of 2026-09-13 `eliot roots <configuration>` checks each selected
+version out and prints the source directories that configuration compiles from — the project's own
+`src/` (and `test/`, for the test scope), then each dependency's selected modules at the directories
+their `at` clauses declare. Run in `../eliot-test` against a deleted cache, it clones the eliot mirror
+from GitHub, checks `v0.0` out as a worktree beside it, and prints five roots; handed to the compiler
+verbatim they build that project and its 96 cases pass. Nobody typed a path. That is the deferred
+materialisation problem decided (`git worktree`) and the project-model query in everything but its
+JSON.
+
+What is still missing is the rest of a build. Nothing records what it resolved, so there is no
+lockfile. Nothing *spawns* the compiler — the roots are printed for a caller to pass on, because the
+plugin jars an artifact's `backend` would name are still unpublished (see "Compiler plugins"), so the
+verb that compiles has nothing to fetch yet. The compat-check verb and the plugin-jar closure are
+unstarted.
 
 ## What a user writes
 
@@ -817,22 +827,17 @@ what is left to write rather than only what is written.
 
 ## Deferred / open problems
 
-- **The closure follows the selected module, not every exported one.** `Resolution.mountedDependencies`
-  feeds the base dependencies and those of *every* exported module of a dependency repository into the
-  closure, whatever the selector asked for — harmless while a selector only narrowed sources, wrong now
-  that a bare dep means the root module and `//stdlib` must not carry `//jvm`'s edges. The selector
-  narrows the closure as well as the mount.
+*(Two were decided on 2026-09-13 and have moved into the body: the selector narrows the closure as well
+as the mount, and resolved sources reach the compiler as `git worktree add --detach --force` into
+`<cache>/<url>@<tag>` — beside the mirror, checked out once and reused, the objects never copied
+twice.)*
+
 - **Three file-count reductions, proposed and undecided**: the pin as the first clause of `eliot.pkg`
   (`eliot v0.6`, read by the wrapper and the resolver alike, so the toolchain minimum is spelled once);
   a wrapper installed once per machine rather than committed per repository (Go's toolchain
   auto-download, rustup), honouring the same mirror override; and the mirror cache under the user's
   cache directory rather than `target/cache`, which `Launcher.els` already argues for. Together they
   leave `eliot.pkg` and `eliot.lock`, one of them human-written.
-- **How resolved sources reach the compiler.** The cache deliberately has no working tree, and the
-  compiler wants directories to mount as source roots — so something must materialise the selected
-  version of each package. `git worktree add` per resolution is cheap and stays tied to the mirror;
-  a plain checkout per (package, version) is simpler and duplicates; `git archive` into the cache
-  sits between. Undecided, and it belongs with the assembly step rather than with the cache.
 - **Major-version coexistence** in one program (resolver error today; Go-style identity split if
   ecosystem migrations ever demand it).
 - **Availability endgame** — immutable proxy + checksum transparency log, only if the ecosystem

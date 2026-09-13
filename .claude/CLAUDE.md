@@ -14,14 +14,15 @@ meta-information.
 
 ## Architecture
 
-Two source roots, four packages each. `src/eliot/build/` is the tool, split by what a file is allowed
-to know — `resolve` → `git` → `format` → `model`, and `model` imports nothing of the tool
-(`docs/effectful-modules.md` §12, §13):
+Two source roots, five packages each. `src/eliot/build/` is the tool, split by what a file is allowed
+to know — `assemble` → `resolve` → `git` → `format` → `model`, and `model` imports nothing of the tool
+(`docs/effectful-modules.md` §12, §13, §15):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
-  line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; `Package`
-  adds the module wanted; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`, never
-  an empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary before it
+  line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; a
+  `ModuleSelector` is `RootModule` or `ModuleSelected`, never an `Option[ModuleName]`; `Package` is the
+  two together; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`, never an
+  empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary before it
   is git's, which is why the resolver imports no git at all), and `Descriptor` — the typed `eliot.pkg`
   model as data alone, where a `Dependency` is a `SiblingDependency` or a `Requirement` with a
   mandatory minimum.
@@ -32,26 +33,35 @@ to know — `resolve` → `git` → `format` → `model`, and `model` imports no
   block reads; `PackageFile` owns the keywords, `DescriptorError` and `descriptorFileName`, and is where
   the parser's and the reader's error channels meet; `DescriptorWriter` writes a descriptor back out and
   imports `model` alone.
-- **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror` and `Revision`, git's own
-  vocabulary; a mirror is a bare `--mirror` clone and nothing is ever checked out), `Tags` (`TagRef` and
+- **`git/`** — `Git` (`effect Git` — six operations over `Remote`, `Mirror`, `Worktree` and `Revision`,
+  git's own vocabulary; a mirror is a bare `--mirror` clone, every *question* is answered from its object
+  database, and the one thing ever checked out is a worktree, because a compiler mounts
+  directories), `Tags` (`TagRef` and
   the pure reading of a `ls-remote` listing — `Git` imports it, never the other way round), `ShellGit`
   (`shellGit`, the *named* implementation that spawns and alone decides which directory each command
-  stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories, on
-  `{Git, FileSystem}`).
-- **`resolve/`** — `PackageSource` (the resolver's two questions), `GitPackages` (`gitPackages`, the
+  stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories and
+  checking versions out beside them at `<url>@<tag>`, on `{Git, FileSystem}`).
+- **`resolve/`** — `PackageSource` (what the tool asks of somebody else's repository: a descriptor, a
+  lineage anchor, and — since assembly — a checked-out tree), `GitPackages` (`gitPackages`, the
   named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
   `Configuration` (`TestScope` or `ArtifactNamed`, which of a descriptor's scopes each opens, and
   `configurationNamed` — `Show`'s inverse, since the word a command line carries is the word that
   instance writes), `Selection` (a version chosen per repository, the canonical order, `sameLineage`),
-  `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling).
+  `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling, and
+  the module set a selection carries — the selector narrows the closure as well as the mount).
+- **`assemble/`** — `Assembly` (a resolution plus the standard layout become the source roots one
+  configuration compiles from; pure but for `{PackageSource}`, and it names no git).
 
-Above the four, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
+Above the five, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
 the run boundary, the one place writing `with gitPackages with shellGit` and the `provide` that tells
 the source where mirrors live, and where the four failure channels are discharged separately and
 each reports as itself — and **`Command`**, the half that is about text rather than about running
-(what a command line asks for, what a resolution reads as), split out because it is testable with no
-platform beneath it and the boundary never can be. `eliot resolve <configuration>` is the one verb so
-far; the lockfile, source assembly and the rest of the verb set are the steps after it.
+(the `Request` sum a command line asks for, what a resolution and an assembly read as), split out
+because it is testable with no platform beneath it and the boundary never can be. Two verbs:
+`eliot resolve <configuration>` prints the version selected per package, `eliot roots <configuration>`
+checks each out and prints the source directories that configuration compiles from — handed to the
+compiler verbatim, those lines build the project. The lockfile, spawning the compiler (blocked on
+published plugin jars) and the rest of the verb set are the steps after them.
 
 Neither `Git` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit` once, and `ShellGit`/`GitPackages` are the two modules nothing but
@@ -62,16 +72,18 @@ expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `wi
 implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
 Everything else is mocked by `eliot.test.Mock`: a case declares nothing, arranges with
 `whenSpawning`/`withDirectory`/…, acts, and verifies with `wasCalledOnce`/`calls`/…
-(`eliot-test/docs/mocking.md`). `FakeWorld` — 195 lines of hand-written doubles — was deleted when that
-landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 says what that leaves
+(`eliot-test/docs/mocking.md`). Both suites that resolve render *inside* the `against`, and must: two
+`provide[Universe, _]` instantiations whose erased JVM descriptors agree get one native between them
+(§11.3), which a second resolving suite walks straight into. `FakeWorld` — 195 lines of hand-written
+doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 says what that leaves
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11, §12 and §13 of it first**, and read them before touching `Git`,
+`docs/effectful-modules.md` — **read §10, §11, §12, §13 and §15 of it first**, and read them before touching `Git`,
 `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
-implementation actually does and what is now genuinely unchecked. §12 and §13 are where the modules
+implementation actually does and what is now genuinely unchecked. §12, §13 and §15 are where the modules
 came from and what was deliberately left whole.
 
 A suite declares `def testCases: Test` — the framework's row alias for
@@ -127,6 +139,24 @@ cd /home/robert/personal/eliot
    -o /home/robert/personal/eliot-build/target
 cd <any project with an eliot.pkg>
 java -jar /home/robert/personal/eliot-build/target/Launcher.jar resolve test
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test
+```
+
+`roots` is the one that exercises the whole stack, and its output *is* the compiler's argument list.
+The end-to-end check: run it in `../eliot-test` (delete `target/cache` first, so the clone and the
+checkout are part of what is checked) and pass every line it prints to the compiler as a positional
+source root. It cannot go through `examples.run`, which always appends the checkout's own layer roots
+and would mount each layer twice — drive `Main` directly with that task's classpath instead:
+
+```bash
+cd /home/robert/personal/eliot-test
+rm -rf target/cache
+ROOTS=$(java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test)
+CP=$(cd /home/robert/personal/eliot && ./mill show examples.runClasspath | python3 -c \
+   'import sys,json,re; print(":".join(re.sub(r"^.*?@","",x) for x in json.load(sys.stdin)))')
+java -cp "$CP" com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner \
+   $ROOTS -o /tmp/roots-check
+java -jar /tmp/roots-check/Runner.jar    # must be green
 ```
 
 Note the source roots: the launcher needs `src` alone (no framework, no `test`).
@@ -141,8 +171,8 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
 
-What that means for a change: **do not read a green 177 as evidence the tool runs** — the suite and the
-launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages` or the
+What that means for a change: **do not read a green 202 as evidence the tool runs** — the suite and the
+launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `Assembly` or the
 boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the
 rest.
