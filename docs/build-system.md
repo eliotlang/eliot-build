@@ -8,7 +8,9 @@ identity is decided by the URL *or* by a shared lineage anchor (see below). Amen
 (`docs/effectful-modules.md`), which retires one lesson below and rewrites another. Amended
 2026-09-13: the launcher has a `main` and one verb, which settles the second lesson below the way it
 said it would be settled. Amended 2026-09-13: a module may say **where** it is (`at`), because the
-convention cannot hold in the one repository that has to dogfood it (below).
+convention cannot hold in the one repository that has to dogfood it (below). Amended 2026-09-13:
+compiler plugins are release assets of the package that ships them rather than Maven coordinates, and
+the four questions that decision leaves open are recorded with it.
 
 **Where the implementation stands** (2026-09-13, 177 tests):
 
@@ -225,8 +227,8 @@ What remains:
   Go's nested-modules mess, and break the one-parse LSP story.
 - **Build configurations** (see below): name, additional dependencies, backend-plugin invocation
   + parameters (main module, artifact kind, output).
-- **Plugin binaries** (Maven coordinates — transitional, see below), only in packages that ship
-  compiler plugins.
+- **Plugin binaries** (a release asset of the package itself — transitional, see below), only in
+  packages that ship compiler plugins.
 
 The load-bearing property of the format: **inert data, parseable without the compiler**.
 Types-are-values will tempt an Eliot-expression descriptor; resist — that is build-as-code
@@ -254,9 +256,9 @@ the `eliot.paths` precedent this system retires.
 
 1. **No version operators exist.** Every version token is a minimum (MVS), spelled exactly as
    the git tag (`v1.2`). There is no `>=` to write and no range to express — the syntax cannot
-   state what the resolver doesn't do. The one exact pin in the system (plugin jars) rides
-   inside the Maven coordinate string, which is exact by nature; the invariant holds without
-   exception.
+   state what the resolver doesn't do. The one exact pin in the system (plugin binaries) is not
+   written as a version at all — an asset is named, and the tag it hangs off is the one the package
+   was already selected at; the invariant holds without exception.
 2. **Dependency URLs are scheme-less** (`github.com/x/foo`) — normalization by construction (no
    `https://` vs `ssh://` spellings to unify; transports are resolver config), and it frees `//`
    unambiguously as the **module selector**: `github.com/eliot-lang/eliot//stdlib`. A bare
@@ -278,10 +280,8 @@ module lang {                                -- multi-module repos only
   internal                                   -- not exported (default: exported)
   dep //other-module                         -- intra-repo sibling
   dep github.com/x/bar v2                    -- module-scoped dep
-  plugin com.vanillasource:eliot-lang:0.5.0 { -- ships a compiler plugin (Maven coord, exact)
-    jar org.ow2.asm:asm:9.9 sha256 9f2c…     -- flat transitive closure, author-computed
-  }
-}
+  plugin eliot-lang.zip                      -- ships a compiler plugin: a release asset of this
+}                                            -- repo, at this tag
 
 test {                                       -- test scope (also allowed inside module)
   dep github.com/eliot-lang/eliot-test v1
@@ -297,6 +297,10 @@ artifact hello {                             -- a build configuration
 }
 ```
 
+- The `plugin` clause is **mid-revision**: it names a release asset of the shipping package rather
+  than a Maven coordinate, and the sub-clauses that would say which plugin is a backend and which asset
+  is the compiler base are open questions — see "Compiler plugins" below. The parser implements neither
+  yet; it still reads the Maven-era `plugin <coord> { jar <coord> sha256 <hex> }`.
 - `backend` names no platform: the backend is located among the artifact's deps (the packages
   declaring `plugin`). With exactly one candidate no URL is needed; with several, disambiguate:
   `backend github.com/…//jvm { … }`. Its parameters are free-form keys validated against the
@@ -351,8 +355,9 @@ The dogfood — the eliot repo itself: `module lang { plugin … }`, `module std
 `module jvm { dep //stdlib, plugin … }`, `module examples { internal, dep //jvm }`.
 
 The lockfile uses the same clause style, machine-written: `lock <url> <tag> <commit>
-<tree-hash>` per resolved dependency per artifact, `lock-jar <coord> <sha256>` for plugin
-binaries. Its exact format is tool-owned output, not hand-polished here.
+<tree-hash>` per resolved dependency per artifact, `lock-jar <url> <tag> <asset> <sha256>` for
+plugin binaries — which is where a plugin's hash lives, since it cannot live in the tag that produced
+it (see "Compiler plugins"). Its exact format is tool-owned output, not hand-polished here.
 
 ## Standard layout: one base plus conditional overlays
 
@@ -425,37 +430,124 @@ already the URL — no platform-name namespace exists to govern.
   platform implementations nobody declared. On-target testing later = a platform plugin making an
   MCU configuration "executable" through the same delegated `test`/`run` verbs.
 
-## Compiler plugins: Maven coordinates (transitional)
+## Compiler plugins: release assets of the shipping package (transitional)
 
 Plugins (backends, native contributors) are JVM binaries until the compiler is self-hosted, so a
-plugin-shipping package's descriptor names its plugin as **exact-pinned Maven coordinates**. This
-is a confined pragmatism, not a model change:
+plugin-shipping package's descriptor names the binary it ships. **Amended 2026-09-13: that name is a
+release asset attached to the package's own tag, not a Maven coordinate.** What the descriptor carries
+is an asset *name* — no coordinate, no version, no URL, no transitive closure.
 
-- **Identity/location split, again**: the package's identity stays the git URL; the coordinate is
-  merely the *location of a binary* the descriptor at that tag points to. Ordinary users never
-  write Maven coordinates; plugin loading flows transparently through the dependency graph.
-- **Why not jars-in-git**: no dependency metadata — `JvmPlugin` needs ASM, and bare jars force
-  fat/shaded jars, which this project already knows break plugin loading (`META-INF/services`
-  collapse; `package.sh` exists to enforce per-module jars). Maven's POM metadata is what makes
-  the transitive closure computable at all; separate jars on a classpath are the discipline
-  already required. Building plugins from source collapses into the same thing plus an embedded
-  Scala build.
-- **Resolution happens author-side, at release time — never in the build path.** The
-  plugin-shipping package's descriptor lists the plugin's **full flat jar closure**: exact
-  coordinate + SHA-256 per jar (`jar` sub-clauses of `plugin`), computed once by the author
-  (shelling to coursier is fine transitionally; plugin authors have dev environments). The
-  consumer's launcher never walks a POM: it unions the flat lists across plugin-shipping deps,
-  conflict-checks, fetches deterministic URLs, verifies hashes. Same philosophy as the rest of
-  the design — resolve at author/lock time, fetch at build time — and it keeps the launcher's
-  Maven story as dumb as the wrapper's (load-bearing for the Eliot-written launcher, below).
-- **Exact pins, not minimums** — plugin jars are toolchain components, outside MVS. The lockfile
-  additionally records the jar hashes (`lock-jar`), one integrity record for everything. Maven
-  Central's immutability plus hash-locking covers availability and trust; mirrors are resolver
-  config, same shape as git mirrors.
-- **v1 conflict policy**: union all plugins' flat closures; surface version conflicts as errors.
-  Per-plugin classloader isolation stays in the back pocket, not built speculatively.
-- **Marked transitional**: when the compiler is self-hosted, plugins become Eliot source in
-  ordinary git packages and this clause retires.
+```
+module jvm {
+  at jvm/eliot
+  dep //stdlib
+  plugin eliot-jvm.zip
+}
+```
+
+Why the change. Maven gave a plugin a **second identity** (`group:artifact:version`) beside the
+package's own (URL + tag), which the earlier draft of this section had to keep apologising for: two
+namespaces, two version numbers that can skew, and a descriptor line that changes every release. An
+asset hanging off the same repository at the same tag has neither — the consumer already holds the URL
+and the selected tag, so the location is *derived* and nothing in any descriptor changes when a version
+does. Sources and binary cannot skew because they are the same tag.
+
+- **Not committed to git.** The cache mirrors full history, so a jar in the tree is a jar every
+  consumer downloads forever, for every version ever committed, and git cannot forget it.
+- **Not a CI artifact.** GitHub Actions artifacts are reachable only through the REST API by a queried
+  id, need a token even on public repositories, and expire (90 days by default). CI *builds* the asset
+  and attaches it to the release; the artifact store is never the distribution point.
+- **The URL is one concatenation** on the canonical URL, the same shape `remoteOf` already builds:
+  `"https://" ++ url ++ "/releases/download/" ++ tag ++ "/" ++ name`. That path is correct on GitHub,
+  Gitea, Forgejo and Codeberg — the big host plus essentially every self-hosted forge. GitLab differs
+  (`/-/releases/{tag}/downloads/{name}`, and only for assets registered with a `filepath`), sr.ht differs
+  again, and a bare git server or a local path has no releases at all. **Decided: the forge default now,
+  per-host overrides later** — and when they come they are consumer-side configuration beside transports
+  and mirrors, never package content, so a fork does not inherit someone else's hosting. A package that
+  ships a plugin from an unknown host is an error naming the host, not a guess.
+- **The hash moves to the lockfile.** A jar is built from the tagged tree *after* the tag exists, so its
+  hash cannot be inside the commit the tag names — a chicken-and-egg Maven did not have, since a
+  coordinate is written after the artifact is published. `eliot.lock` is already the home for facts
+  (`lock-jar <url> <tag> <asset> <sha256>`, recorded on first fetch, go.sum's trust-on-first-use). This
+  also deletes the ugliest step of the Maven plan: the author shelling to coursier at release time to
+  compute a flat closure.
+- **The closure ships inside the asset**, which is what made Maven's POM metadata unnecessary. This is
+  not a fat jar: `ide/lsp/package.sh` already assembles exactly the right thing — per-module jars plus
+  cats-effect, parsley, log4j and ASM, kept separate "so the bundle stays honest" — and the asset is
+  that directory, zipped, jars at the top level. Nothing is merged, so the `META-INF/services` collapse
+  that per-module jars exist to avoid cannot happen.
+- **Exact, not minimum** — plugin assets are toolchain components, outside MVS, pinned by the tag their
+  package was selected at.
+- **Marked transitional**: when the compiler is self-hosted, plugins become Eliot source in ordinary git
+  packages and this clause retires.
+
+### Open questions
+
+Four things the release-asset decision does not settle. Each is written as the question, the options,
+and the current leaning; none is implemented, and the model still carries the Maven-era
+`Plugin(pluginCoordinate, pluginJars)` with its `jar` sub-clauses until one is chosen.
+
+**Q1. Which plugin is the backend, and what word selects it.** The rule above ("Platforms") says an
+artifact need not name its backend when its dependencies offer exactly one candidate. That never holds:
+`lang`, `stdlib` and `jvm` all ship plugins, so every closure has three. Worse, the compiler selects a
+plugin by a *command word* (`jvm exe-jar …`, `apidoc …`), and nothing in the descriptor supplies it —
+`backend { kind exe-jar, main X }` carries the subcommand but not the selector.
+
+- (a) **A backend parameter in the consumer** (`backend { command jvm, kind exe-jar }`). No new concept,
+  but every consumer repeats the plugin's internal word, and renaming it breaks them all.
+- (b) **The provider declares it**, in a `plugin` block: `plugin eliot-jvm.zip { backend jvm }`. A plugin
+  with a `backend` sub-clause is a candidate; one without is an always-on contributor. Restores the
+  "exactly one candidate" rule (lang and stdlib stop counting) and mirrors the compiler's own split,
+  where `isSelectedBy` is true only for plugins registering a command. The consumer names the *package*
+  when disambiguating and never the word.
+- (c) **Leave it to the compiler**: pass every plugin and let the merge fail on two backends. It does
+  fail — two platform layers collide on every name they implement — but that diagnoses a conflict the
+  tool created and still leaves the command line unconstructible.
+
+*Leaning: (b).* Identity is the consumer's to state, mechanism the provider's — the split used
+everywhere else here.
+
+**Q2. One classpath or one classloader per plugin.** Plugin closures can disagree on third-party
+versions. A flat union needs a conflict check by jar name and version (fragile, and silent when it
+misses); per-plugin classloaders make skew a non-question. Two facts in the compiler constrain what a
+child loader may hold: the plugin API passes cats-effect types across the boundary
+(`initialize` returns `StateT[IO, CompilerProcessor, Unit]`), and plugins name each other's classes
+(`JvmPlugin.pluginDependencies` returns `classOf[LangPlugin]`, matched by `getClass`). So scala-library,
+cats-effect, `lang` and `stdlib` must all be visible to every plugin — "isolate everything" is not
+available.
+
+- (a) **Flat union with a conflict error** (the v1 policy this section used to carry). Least code, no
+  compiler change; fails loudly on skew, which today cannot happen — there is one leaf plugin and no
+  third-party plugins at all.
+- (b) **Parent + children, split by packaging**: the compiler base asset holds eliotc, lang, stdlib,
+  scala-library and cats; every other asset holds only its own plugin jar and its own dependencies
+  (`eliot-jvm.zip` = the jvm plugin + ASM). Parent loader = base asset, child loader = each other asset.
+  Both constraints are then satisfied by construction rather than by policy, and skew is isolated where
+  it actually occurs — ASM, lsp4j, a vendor's toolchain library. Costs two compiler-side changes:
+  `ServiceLoader.load(classOf[CompilerPlugin], loader)` per child with the results unioned, and a
+  `--plugin <asset>` option, since plugins would no longer be on the app classpath.
+
+*Leaning: (b) as the shape, (a) as the stopgap* — the asset format is the same either way, so starting
+flat costs nothing later.
+
+**Q3. Which asset is the compiler base.** Whatever Q2 decides, the launcher must know which asset holds
+`Main` and (under (b)) becomes the parent loader. Options: a fixed asset name by convention; a
+`compiler` sub-clause in the provider's `plugin` block, the same mechanism as Q1(b); or pin it in
+`.eliot-version` beside the launcher, which costs the self-healing property the toolchain section relies
+on (a package requiring a newer eliot would no longer drag the matching compiler).
+
+*Leaning: the sub-clause, attached to `lang`* — `lang` is in every program's closure, where a dedicated
+`eliotc` module would only be present if something depended on it, and a layer depending on the compiler
+reads backwards. `stdlib` then ships no `plugin` clause at all: its jar is inside that asset.
+
+**Q4. Where `eliot test` gets its main module.** The test configuration is an ordinary artifact —
+backend from test scope, `kind exe-jar` — except that its `main` lives in the *framework*, a dependency,
+not in the project being built. Options: hard-code `eliot.test.Runner` in the test verb; have the
+framework declare it (a `runner` clause, or an artifact consumers inherit); or make the project state it,
+which puts a dependency's internals in every consumer's descriptor.
+
+*Leaning: hard-code it now, as one named constant with the reason attached, and move it to a framework
+declaration when a second framework exists to justify the clause.*
 
 ## The toolchain is a dependency
 
@@ -463,8 +555,8 @@ There is **no toolchain-version directive** (`eliot >= 0.x` was considered and d
 Cargo carry one (`go 1.21`, `rust-version`) because their toolchain is *ambient* — installed
 out-of-band, so the manifest can only document a constraint against something it doesn't
 control. Here the toolchain is a package like any other: the eliot repo's modules ship the base
-layers as sources and the compiler binaries as exact-pinned `plugin` coordinates. The dependency
-line does everything the directive pretended to:
+layers as sources and the compiler binaries as release assets of the same tag. The dependency line
+does everything the directive pretended to:
 
 - `dep github.com/eliot-lang/eliot//stdlib v1.5` states the requirement; MVS unifies it across
   the graph; the lockfile pins the outcome — sources *and* compiler jars, since the selected
@@ -499,10 +591,10 @@ It is one line:
 v0.6.2
 ```
 
-optionally followed by `sha256 <hex>`. No Maven coordinates: the launcher's group:artifact is
-fixed forever, and Maven repo URLs are deterministic
-(`<repo>/<group-path>/<artifact>/<ver>/<artifact>-<ver>.jar`), so the script constructs the URL
-by string concatenation and fetches — no POM logic in shell. **No repo line either**: where to
+optionally followed by `sha256 <hex>`. No coordinates: the launcher is a release asset of its own
+repository, whose URL the script builds by the same concatenation the resolver uses for plugins
+(`https://<url>/releases/download/<tag>/<name>`), so fetching it is `curl` and nothing else — no POM
+logic in shell, and one URL shape for every binary the system fetches. **No repo line either**: where to
 fetch from is an *environment* property, not a project property (the same repo builds inside
 and outside a firewall) — the wrapper honors an env-var mirror override, per the design's rule
 that mirrors are consumer config, never committed content. The optional hash (Gradle's
@@ -661,5 +753,6 @@ what is left to write rather than only what is written.
   ecosystem migrations ever demand it).
 - **Availability endgame** — immutable proxy + checksum transparency log, only if the ecosystem
   outgrows lockfile-verified mirrors.
-- **Plugin classpath isolation** — if the resolve-together policy bites.
+- **Plugin classpath isolation** — one classpath or one classloader per plugin; see Q2 of
+  "Compiler plugins", which records what the compiler's own API makes possible.
 - **On-target `run`/`test` mechanics** — the delegated-verb contract for MCU backends.
