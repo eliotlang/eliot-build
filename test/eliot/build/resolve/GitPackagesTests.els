@@ -9,6 +9,7 @@ import eliot.build.model.Version
 import eliot.build.model.Descriptor
 import eliot.build.model.Lineage
 import eliot.build.format.PackageFile
+import eliot.build.format.DescriptorWriter
 import eliot.build.git.Git
 import eliot.build.git.TableGit
 import eliot.build.resolve.PackageSource

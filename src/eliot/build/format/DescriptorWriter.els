@@ -1,0 +1,90 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+
+/**
+ * A descriptor written back out as an `eliot.pkg` file.
+ *
+ * The other direction of `eliot.build.format.PackageFile`'s contract, and the half that needs none of
+ * the machinery the reading half is built on: there is no clause tree here, no parser and no way to
+ * fail — a model in hand is already everything the file says, so writing it is a total function from
+ * data to text. That is what makes it a module rather than the bottom of the reader: the import list
+ * is `model` and nothing else.
+ *
+ * Not a byte-for-byte round trip — comments, order within a keyword's group and spelling are the
+ * author's, not the model's — but every clause the model carries reappears, canonically ordered. That
+ * is what makes a descriptor inspectable, what makes the tool's own edits to one reviewable, and what
+ * lets a reader's test assert on a rendering rather than on a shape.
+ *
+ * Nesting is written by indenting a whole rendered block rather than by threading a depth through the
+ * renderers, so a plugin's jars end up two levels in without any renderer knowing how deep it is.
+ */
+
+/**
+ * `descriptor` written back out in `eliot.pkg` syntax: its base dependencies, its modules, its test
+ * block and its artifacts, in that order.
+ *
+ * ```eliot
+ * val text = renderDescriptor(parseDescriptor(lines))
+ * ```
+ */
+def renderDescriptor(descriptor: Descriptor): String =
+   nonEmptyLines(
+      descriptor.baseDependencies.map(renderDependency) ++
+         descriptor.modules.map(renderModule) ++
+         renderTestBlock(descriptor.testDependencies) ++
+         descriptor.artifacts.map(renderArtifact)
+   )
+
+private def renderDependency(dependency: Dependency): String = dependency match {
+   case SiblingDependency(name)         -> "dep //" ++ show(name)
+   case Requirement(package, minimum)   -> "dep " ++ show(package) ++ " " ++ show(minimum)
+}
+
+private def renderModule(built: BuildModule): String =
+   "module " ++ show(built.moduleName) ++ renderBlock(
+      renderInternal(built) ++
+         built.moduleDependencies.map(renderDependency) ++
+         renderTestBlock(built.moduleTestDependencies) ++
+         built.modulePlugins.map(renderPlugin)
+   )
+
+private def renderInternal(built: BuildModule): List[String] =
+   fold(built.exported, empty, singleton("internal"))
+
+private def renderTestBlock(dependencies: List[Dependency]): List[String] =
+   fold(isEmpty(dependencies), empty, singleton("test" ++ renderBlock(dependencies.map(renderDependency))))
+
+private def renderPlugin(plugin: Plugin): String =
+   "plugin " ++ plugin.pluginCoordinate ++ renderBlock(plugin.pluginJars.map(renderJar))
+
+private def renderJar(jar: JarPin): String = "jar " ++ jar.jarCoordinate ++ " sha256 " ++ jar.jarSha256
+
+private def renderArtifact(artifact: Artifact): String =
+   "artifact " ++ artifact.artifactName ++ renderBlock(
+      artifact.artifactDependencies.map(renderDependency) ++ renderBackend(artifact.artifactBackend)
+   )
+
+private def renderBackend(backend: Option[Backend]): List[String] =
+   foldOption(empty, present -> singleton(renderBackendClause(present)), backend)
+
+private def renderBackendClause(backend: Backend): String =
+   "backend" ++ foldOption("", named -> " " ++ show(named), backend.backendPackage) ++
+      renderBlock(backend.backendParameters.map(renderParameter))
+
+private def renderParameter(parameter: Pair[String, String]): String =
+   parameter.first ++ " " ++ parameter.second
+
+/**
+ * A `{ … }` block holding `lines`, each indented one level. Nested blocks are indented by their own
+ * renderer, so a plugin's jars end up two levels in.
+ */
+private def renderBlock(lines: List[String]): String =
+   fold(isEmpty(lines), "", " {\n" ++ lines.map(indented).joined("\n") ++ "\n}")
+
+private def indented(text: String): String = split("\n", text).map(indentLine).joined("\n")
+
+private def indentLine(line: String): String = "  " ++ line
+
+private def nonEmptyLines(lines: List[String]): String = lines.filter(line -> line != "").joined("\n")
