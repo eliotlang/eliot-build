@@ -3,6 +3,8 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.TablePackages
 

@@ -1,0 +1,65 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+
+/**
+ * What a resolution *is*: one version chosen per repository, and the question of when two spellings
+ * are one repository at all.
+ *
+ * This is the vocabulary a caller of the resolver holds. None of it is the algorithm — nothing here
+ * expands a graph, asks a source anything or can fail — so a consumer of a resolution (a lockfile
+ * writer, an assembly step, `eliot get`) reads these types and drags no closure behind it.
+ *
+ * **Selection is per repository, not per module.** Tags are repository-wide, so `//stdlib v1.2` and
+ * `//jvm v1.4` into one repository are two minimums on one package rather than two packages; the
+ * selector decides what gets mounted afterwards, which is the assembly step's business.
+ *
+ * A selection carries the anchor it was identified by, because identity is the one thing about a
+ * package a URL does not settle: a URL is exactly what does not survive a rename, an org transfer or
+ * a host migration. `sameLineage` is that fallback in one line — same compatibility line, same first
+ * release — and it is a statement about two selections rather than a step of the closure, which is
+ * why it lives with them.
+ */
+data Selection(selectedRepository: Repository, selectedVersion: Version, lineageAnchor: Option[Commit])
+
+/**
+ * What one configuration resolved to, in canonical package order — the order is the resolution's,
+ * not the traversal's, so the same closure always renders and locks the same way.
+ */
+data Resolution(selections: List[Selection])
+
+implement Show[Selection] {
+   def show(value: Selection): String = show(value.selectedRepository) ++ " " ++ show(value.selectedVersion)
+}
+
+/**
+ * Packages order by identity, which is what gives a resolution one canonical line order regardless
+ * of the order the closure happened to discover them in.
+ */
+implement Compare[Selection] {
+   def lessThanOrEqual(a: Selection, b: Selection): Bool = a.selectedRepository <= b.selectedRepository
+}
+
+/**
+ * The version `resolution` selected for `repository`, absent when the closure never reached it.
+ */
+def selectedVersionOf(repository: Repository, resolution: Resolution): Option[Version] =
+   foldOption(
+      None,
+      selection -> Some(selection.selectedVersion),
+      resolution.selections.find(selection -> selection.selectedRepository == repository)
+   )
+
+/**
+ * `true` when a requirement for `minimum` at a repository anchored at `anchor` is a requirement on
+ * the package `selection` already stands for — the same compatibility line, starting at the same
+ * commit.
+ *
+ * Both halves are needed and neither is enough. One line of two different packages may start
+ * anywhere, so the anchor decides; and one package's `v1` and `v2` are different lines by
+ * construction, which is what the append-only contract is made per. A missing anchor unifies nothing,
+ * as `sameAnchor` says.
+ */
+def sameLineage(anchor: Option[Commit], minimum: Version, selection: Selection): Bool =
+   sameLine(minimum, selection.selectedVersion) && sameAnchor(anchor, selection.lineageAnchor)
