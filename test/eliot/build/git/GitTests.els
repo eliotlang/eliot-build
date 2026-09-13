@@ -3,69 +3,21 @@ import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.git.Git
 
 /**
- * What the tool reads back out of what git said, and the vocabulary it says it in: which listing lines
- * are versions, which commit a tag ultimately names, how a version orders against another.
+ * The vocabulary the operations are said in: how a repository is reached, and how a revision is
+ * spelled to git.
  *
- * All of it is pure, and the bare `Test` this suite declares is what keeps it so — a case may assert
- * and nothing else. Nothing here spawns anything, because `eliot.build.git.Git` spawns nothing; the
- * implementation that does is tested next door, in `ShellGitTests`.
+ * Three cases, and that is the point of the module they exercise — everything `eliot.build.git.Git`
+ * still decides *outside* the effect is the scheme a descriptor deliberately omits and the tag a
+ * revision names. What a listing says is read by `eliot.build.git.Tags` and asserted in `TagsTests`;
+ * what a subprocess does is `ShellGitTests`.
+ *
+ * The bare `Test` keeps this pure: a case may assert and nothing else.
  */
 def testCases: Test = {
-   "parseTagRefs" should "read a lightweight tag, which is listed once" in {
-      parsed("aaa1\trefs/tags/v1.2") shouldBe "v1.2 aaa1"
-   }
-   "parseTagRefs" should "answer an annotated tag with the commit it was peeled to" in {
-      parsed("bbb1\trefs/tags/v1.2\nccc2\trefs/tags/v1.2^{}") shouldBe "v1.2 ccc2"
-   }
-   "parseTagRefs" should "keep the peeled commit whichever order the listing arrived in" in {
-      parsed("ccc2\trefs/tags/v1.2^{}\nbbb1\trefs/tags/v1.2") shouldBe "v1.2 ccc2"
-   }
-   "parseTagRefs" should "read every version a repository publishes" in {
-      parsed("aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\nccc3\trefs/tags/v2.0")
-         shouldBe "v1.2 aaa1, v1.3 bbb2, v2.0 ccc3"
-   }
-   "parseTagRefs" should "keep a bare major tag, which names the start of its line" in {
-      parsed("aaa1\trefs/tags/v1") shouldBe "v1 aaa1"
-   }
-   "parseTagRefs" should "drop a tag that names no version, which resolution could not select" in {
-      parsed("aaa1\trefs/tags/latest\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v1.0-rc1") shouldBe "v1.2 bbb2"
-   }
-   "parseTagRefs" should "drop a branch, since the resolver selects tags and never heads" in {
-      parsed("aaa1\trefs/heads/v1\nbbb2\trefs/tags/v1.2") shouldBe "v1.2 bbb2"
-   }
-   "parseTagRefs" should "survive the trailing empty line every listing ends with" in {
-      parsed("aaa1\trefs/tags/v1.2\n") shouldBe "v1.2 aaa1"
-   }
-   "parseTagRefs" should "yield nothing for a repository publishing no tags at all" in {
-      parsed("") shouldBe ""
-   }
-   "commitOf" should "find the commit a version names" in {
-      commit("v1.3", "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3") shouldBe "bbb2"
-   }
-   "commitOf" should "answer a v1.0 requirement with the repository's bare v1 tag" in {
-      commit("v1.0", "aaa1\trefs/tags/v1") shouldBe "aaa1"
-   }
-   "commitOf" should "find nothing for a version the repository does not publish" in {
-      commit("v1.9", "aaa1\trefs/tags/v1.2") shouldBe "<none>"
-   }
-   "anchorCommit" should "answer the first release of the line asked about" in {
-      anchor(1, "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4\nccc3\trefs/tags/v2.0") shouldBe "aaa1"
-   }
-   "anchorCommit" should "accept a bare v1 as the first release of the v1 line" in {
-      anchor(1, "aaa1\trefs/tags/v1\nbbb2\trefs/tags/v1.4") shouldBe "aaa1"
-   }
-   "anchorCommit" should "find no anchor for a line whose history starts later" in {
-      anchor(1, "aaa1\trefs/tags/v1.3\nbbb2\trefs/tags/v1.4") shouldBe "<none>"
-   }
-   "anchorCommit" should "find no anchor for a line the repository does not publish" in {
-      anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
-   }
-   "TagRef" should "order by version, so the newest release sorts last" in {
-      newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
-   }
    "remoteOf" should "supply the scheme a descriptor deliberately does not carry" in {
       remoteOf(repositoryAt("github.com/x/foo")).remoteUrl shouldBe "https://github.com/x/foo"
    }
@@ -76,25 +28,5 @@ def testCases: Test = {
       revisionName(AtCommit(Commit("aaa1"))) shouldBe "aaa1"
    }
 }
-
-/**
- * The tags `output` announces, rendered as `<tag> <commit>` per version — both halves asserted at
- * once, so a test says which commit a version resolved to rather than merely that it appeared.
- */
-private def parsed(output: String): String = renderedTags(parseTagRefs(output))
-
-private def renderedTags(refs: List[TagRef]): String =
-   refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
-
-private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
-
-private def newestOf(output: String): String =
-   foldOption("<none>", newest -> renderedTags(singleton(newest)), parseTagRefs(output).sorted.last)
-
-private def commit(tag: String, output: String): String =
-   renderedCommit(commitOf(version(tag), parseTagRefs(output)))
-
-private def anchor(majorLine: Int, output: String): String =
-   renderedCommit(anchorCommit(Line(majorLine), parseTagRefs(output)))
 
 private def version(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

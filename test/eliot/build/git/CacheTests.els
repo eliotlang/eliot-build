@@ -5,7 +5,9 @@ import eliot.test.Test
 import eliot.test.Mock
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.git.Git
+import eliot.build.git.Tags
 import eliot.build.git.Cache
 import eliot.build.git.TableGit
 

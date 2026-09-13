@@ -1,0 +1,44 @@
+/**
+ * A commit, and the identity a compatibility line keeps across every spelling of its URL.
+ *
+ * A commit hash is vocabulary, not machinery: it has no syntax, no I/O and no effect. It is what a
+ * tag ultimately names, what a lockfile pins and what two packages are compared by when their URLs
+ * disagree — the same kind of thing as `Version` and `Repository`, and it belongs where they are.
+ *
+ * That placement is what keeps the resolver from knowing git exists. `eliot.build.resolve.PackageSource`
+ * and `eliot.build.resolve.Resolution` hold a commit — an anchor is what `anchorAt` answers and what a
+ * `Selection` carries — and a commit was the only thing either of them ever took from
+ * `eliot.build.git.Git`. With it here they import `model` and nothing else, the way `git.Git` stopped
+ * naming `eliot.system.Process`: a separation the imports state rather than one the signatures promise.
+ *
+ * **The anchor is per compatibility line.** A line's first release is immutable, carried by every mirror
+ * and every fork, and per major — precisely the granularity of the append-only contract the identity
+ * question is about. Which commit that is takes a repository to answer, so it is asked of
+ * `eliot.build.git.Tags`; what it *means* once answered is here.
+ */
+
+/**
+ * A commit, by its hash. Two commits are one commit when their hashes agree, which is git being
+ * content-addressed.
+ */
+data Commit(hash: String)
+
+implement Eq[Commit] {
+   def equals(a: Commit, b: Commit): Bool = a.hash == b.hash
+}
+
+implement Show[Commit] {
+   def show(value: Commit): String = value.hash
+}
+
+/**
+ * `true` when two anchors are evidence of one lineage — which takes *both* of them to be present and
+ * equal.
+ *
+ * A missing anchor is not evidence of anything: a line whose history was migrated may start at `v1.3`
+ * and have no first release at all, and two such lines would otherwise unify on the strength of what
+ * neither of them says. So absence never unifies, and a resolver that cannot tell keeps the two
+ * spellings apart rather than merging them wrongly.
+ */
+def sameAnchor(anchor: Option[Commit], other: Option[Commit]): Bool =
+   foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)

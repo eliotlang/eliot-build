@@ -3,8 +3,10 @@ import eliot.file.Path
 import eliot.file.File
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.format.PackageFile
 import eliot.build.git.Git
+import eliot.build.git.Tags
 
 /**
  * What every question in this module runs on: git, the mirror on disk, and the two ways either can

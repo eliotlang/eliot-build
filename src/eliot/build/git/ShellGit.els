@@ -3,6 +3,7 @@ import eliot.file.Path
 import eliot.file.File
 import eliot.system.Process
 import eliot.build.git.Git
+import eliot.build.git.Tags
 
 /**
  * The `Git` that talks to a repository: it spawns the `git` the user already has, once per operation,

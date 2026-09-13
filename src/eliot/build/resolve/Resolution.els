@@ -2,7 +2,7 @@ import eliot.collection.List
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
-import eliot.build.git.Git
+import eliot.build.model.Lineage
 import eliot.build.resolve.PackageSource
 
 /**
@@ -235,13 +235,6 @@ private def byLineage(target: Repository, minimum: Version, state: ResolutionSta
 
 private def sameLineage(anchor: Option[Commit], minimum: Version, selection: Selection): Bool =
    sameLine(minimum, selection.selectedVersion) && sameAnchor(anchor, selection.lineageAnchor)
-
-/**
- * Two anchors match only when both are present and equal. A missing anchor is not evidence of
- * anything — a line whose history was migrated may have no `vM.0` at all — so absence never unifies.
- */
-private def sameAnchor(anchor: Option[Commit], other: Option[Commit]): Bool =
-   foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)
 
 /**
  * Two minimums on one package: the higher wins, unless they are not the same compatibility line at
