@@ -141,7 +141,7 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
 
-What that means for a change: **do not read a green 170 as evidence the tool runs** — the suite and the
+What that means for a change: **do not read a green 177 as evidence the tool runs** — the suite and the
 launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages` or the
 boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the
