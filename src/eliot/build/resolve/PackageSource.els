@@ -1,4 +1,5 @@
 import eliot.collection.List
+import eliot.file.Path
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
@@ -6,24 +7,27 @@ import eliot.build.model.Lineage
 
 
 /**
- * Where a resolver's answers come from: the two questions minimal version selection asks of the world,
- * as an algebra rather than as arguments.
+ * Where a build's answers about a package come from: what the tool asks of the world about somebody
+ * else's repository, as an algebra rather than as arguments.
  *
- * Resolution asks a remote exactly two things — *what does this package require at this version*, and
- * *is this URL a package I already have* — and notably not a third: MVS never enumerates what a
- * package offers, so discovering that a newer release exists belongs to `eliot get` rather than here.
+ * Resolution asks exactly two things — *what does this package require at this version*, and *is this
+ * URL a package I already have* — and notably not a third about *versions*: MVS never enumerates what
+ * a package offers, so discovering that a newer release exists belongs to `eliot get` rather than
+ * here. Assembly asks the one question that is not about the graph at all: *where are this version's
+ * sources*, which is what turns a resolution into something a compiler can be pointed at. Three
+ * members, and a caller declares `{PackageSource}` whether it wants the graph or the files.
  *
  * This used to be a pair of callbacks threaded through every private function of
  * `eliot.build.resolve.Resolution`. Declaring it as an effect is what removed the plumbing: the algorithm
  * says `{PackageSource}` and the question of *which* source answers is the caller's, all the way up
  * to whoever runs it.
  *
- * **What a member declares is what the resolver must handle.** Neither question fails in a way MVS
- * can act on, so neither member declares a row: a missing descriptor is `None`, and the ways the
- * *git-backed* source can fail — a process that will not start, a repository that is not there, a
- * descriptor that will not parse — are declared by that implementation's own clauses and charged
- * where it is bound, not at every call in the algorithm. A test binds a source that cannot fail at
- * all and is charged nothing, which is why a resolver test declares no row beyond its own.
+ * **What a member declares is what the caller must handle.** No question fails in a way the caller can
+ * act on, so no member declares a row: a missing descriptor is `None`, and the ways the *git-backed*
+ * source can fail — a process that will not start, a repository that is not there, a descriptor that
+ * will not parse — are declared by that implementation's own clauses and charged where it is bound,
+ * not at every call in the algorithm. A test binds a source that cannot fail at all and is charged
+ * nothing, which is why a resolver test declares no row beyond its own.
  */
 effect PackageSource {
    /**
@@ -35,4 +39,16 @@ effect PackageSource {
     * The commit `target`'s `line` starts at, absent where that line has no first release.
     */
    def anchorAt(line: Line, target: Repository): Option[Commit]
+
+   /**
+    * Where `target`'s sources at `version` are, as a directory that exists: the question assembly
+    * asks once resolution has decided which version that is.
+    *
+    * A `Path` and not an `Option[Path]`, because this is the one member that may *make* its answer.
+    * The two above read what a repository already published and answer nothing where it published
+    * nothing; this one is asked about a version the closure has already read a descriptor out of, so
+    * there is no honest absence left — either the sources are put somewhere or the implementation
+    * refuses through a channel of its own.
+    */
+   def sourcesAt(version: Version, target: Repository): Path
 }

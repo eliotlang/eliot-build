@@ -194,11 +194,16 @@ private def resolvedWithAnchors(
    universe: List[Pair[String, String]],
    lineages: List[Pair[String, String]]
 ): String =
-   reported(against(universeOf(universe, lineages), resolve(TestScope, descriptorOf(rootText))))
+   reported(
+      against(universeOf(universe, lineages), renderedSelections(resolve(TestScope, descriptorOf(rootText))))
+   )
 
 private def resolvedFor(configurationName: String, rootText: String, universe: List[Pair[String, String]]): String =
    reported(
-      against(universeOf(universe, empty), resolve(ArtifactNamed(configurationName), descriptorOf(rootText)))
+      against(
+         universeOf(universe, empty),
+         renderedSelections(resolve(ArtifactNamed(configurationName), descriptorOf(rootText)))
+      )
    )
 
 /**
@@ -206,10 +211,11 @@ private def resolvedFor(configurationName: String, rootText: String, universe: L
  * the half of a selection that decides what a build mounts and whose edges the closure follows.
  */
 private def mounted(url: String, rootText: String, universe: List[Pair[String, String]]): String =
-   foldEither(
-      error -> show(error),
-      resolution -> renderedModules(repositoryAt(url), resolution),
-      against(universeOf(universe, empty), resolve(TestScope, descriptorOf(rootText)))
+   reported(
+      against(
+         universeOf(universe, empty),
+         renderedModules(repositoryAt(url), resolve(TestScope, descriptorOf(rootText)))
+      )
    )
 
 private def renderedModules(repository: Repository, resolution: Resolution): String =
@@ -231,20 +237,30 @@ private def namedSelector(selector: ModuleSelector): String =
  * resolution is exercised rather than only its rendering.
  */
 private def versionSelected(url: String, rootText: String, universe: List[Pair[String, String]]): String =
-   foldEither(
-      error -> show(error),
-      resolution -> renderedVersion(selectedVersionOf(repositoryAt(url), resolution)),
-      against(universeOf(universe, empty), resolve(TestScope, descriptorOf(rootText)))
+   reported(
+      against(
+         universeOf(universe, empty),
+         renderedVersion(selectedVersionOf(repositoryAt(url), resolve(TestScope, descriptorOf(rootText))))
+      )
    )
 
 private def renderedVersion(version: Option[Version]): String =
    foldOption("<unselected>", selected -> show(selected), version)
 
 /**
- * The selections on one line, or the error instead — both outcomes asserted the same way.
+ * The answer on one line, or the error instead — both outcomes asserted the same way.
+ *
+ * Every case renders *inside* the `against`, so the only `provide[Universe, _]` this suite and
+ * `AssemblyTests` between them instantiate is the one answering a `String`. Not by preference: as of
+ * compiler `ea3e27ed` two `provide` instantiations whose JVM descriptors agree get one
+ * `withCellInternal` native between them, and the other fails at run time with `NoSuchMethodError`
+ * (`docs/effectful-modules.md` §11.3). Two suites resolving into two different result types is exactly
+ * that case. Undo once the compiler emits both.
  */
-private def reported(outcome: Either[ResolutionError, Resolution]): String =
-   foldEither(error -> show(error), resolution -> resolution.selections.joined(", "), outcome)
+private def reported(outcome: Either[ResolutionError, String]): String =
+   foldEither(error -> show(error), rendered -> rendered, outcome)
+
+private def renderedSelections(resolution: Resolution): String = resolution.selections.joined(", ")
 
 private def publishing(key: String, text: String): List[Pair[String, String]] = published(key, text, empty)
 

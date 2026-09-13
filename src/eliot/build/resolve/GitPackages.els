@@ -57,4 +57,10 @@ implement gitPackages: PackageSource {
          target: Repository
       ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]} Option[Commit] =
       anchorOf(dependency, line, target)
+
+   def sourcesAt(
+         version: Version,
+         target: Repository
+      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]} Path =
+      sourceTreeAt(dependency, version, target)
 }

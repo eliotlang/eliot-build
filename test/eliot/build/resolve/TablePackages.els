@@ -1,4 +1,5 @@
 import eliot.collection.List
+import eliot.file.Path
 import eliot.build.format.Clause
 import eliot.build.model.PackageId
 import eliot.build.model.Version
@@ -34,6 +35,15 @@ implement tablePackages: PackageSource {
          hash -> Some(Commit(hash)),
          dependency.lineages.lookupOption(show(target) ++ "@" ++ branchName(line))
       )
+
+   /**
+    * A table has no repositories to check anything out of, so it answers where a tree *would* be, in
+    * the shape the git-backed source puts one: one directory per package, named by its version. That
+    * is enough for an assembly test, whose subject is what gets mounted under a tree rather than how
+    * the tree got there.
+    */
+   def sourcesAt(version: Version, target: Repository): Path =
+      path("/trees/" ++ show(target) ++ "@" ++ show(version))
 }
 
 /**

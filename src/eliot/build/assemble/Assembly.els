@@ -1,0 +1,145 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+
+/**
+ * What a resolution becomes: the source roots one configuration is compiled from.
+ *
+ * This is the step between "which versions" and "a build". A resolution is a set of versions and the
+ * modules of each that the closure reached; a compiler mounts *directories*. Turning one into the
+ * other is two facts and nothing else — where a package's sources are (the source answers that, by
+ * checking the version out), and which directories inside it the standard layout puts a module's
+ * sources in. Neither is a decision this module makes up: the first belongs to whoever holds the
+ * cache, and the second is `docs/build-system.md`'s conventional layout, which is the whole reason
+ * `src/`, `compiler/` and `test/` are named rather than configured.
+ *
+ * **The layout, as three rules.** A module's sources are `<module directory>/src`, always. A module's
+ * `test/` joins them only for the test configuration and only for the package *being built* — a
+ * dependency's tests never ship, which is the same fact as a `test` block's dependencies never
+ * travelling. And `compiler/` is not listed at all: the compile-time overlay is each source root's own
+ * sibling, which is the compiler's rule about a root rather than a second root the assembler could
+ * invent, and a second listing of it here would be a place for the two to disagree.
+ *
+ * **It runs on `{PackageSource}` and names no git.** The same effect that answers the resolver's two
+ * questions answers the third, so nothing here knows whether a tree arrived by clone, by checkout or
+ * by a test's table — exactly as `eliot.build.resolve.Resolution` does not know how a descriptor was
+ * read. The failure channel is the resolver's too: a selected version whose descriptor cannot be read
+ * a second time is `Unavailable`, the same fact under a different verb.
+ */
+
+/**
+ * The package being built: where it is, and what its descriptor says.
+ *
+ * It is not a `Selection` and never appears in one — a resolution selects *dependencies*, and the root
+ * has no version to select, no URL that matters and no tree to check out. It is also the one package
+ * whose `test/` is mounted and whose modules are all mounted, because "which modules of myself am I
+ * building" is not a question a dependency line has answered.
+ */
+data Project(projectDirectory: Path, projectDescriptor: Descriptor)
+
+/**
+ * Every source root `configuration` compiles from: the project's own first, then one per module of
+ * each selected package, in the resolution's canonical order.
+ *
+ * The project first because that is the order a reader expects and the order a command line reads
+ * best; within the dependencies, the resolution's own order, so two runs of one graph assemble the
+ * same list in the same order and a diff of it means something changed.
+ *
+ * ```eliot
+ * val roots = sourceRoots(TestScope, Project(here, descriptor))
+ * ```
+ */
+def sourceRoots(
+   configuration: Configuration,
+   project: Project
+): {PackageSource, Throw[ResolutionError]} List[Path] =
+   projectRoots(configuration, project) ++
+      resolve(configuration, project.projectDescriptor).selections.flatMap(mountedRoots)
+
+/**
+ * The roots of the package being built: `src/` of each of its modules, plus `test/` of each when the
+ * test scope is what is being compiled.
+ *
+ * *Each* of its modules, because nothing narrows them. A dependency is mounted at the modules its
+ * dependents named, and a repository builds all of itself — an artifact selects which dependencies are
+ * in scope, never which of your own sources exist.
+ */
+def projectRoots(configuration: Configuration, project: Project): List[Path] =
+   moduleDirectories(project.projectDirectory, project.projectDescriptor)
+      .flatMap(directory -> compiledTracks(configuration, directory))
+
+/**
+ * The roots one selected package contributes, under the tree its version is checked out into: `src/`
+ * of each module the closure reached, and nothing else.
+ */
+def mountedRoots(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Path] = {
+   val tree = sourcesAt(selection.selectedVersion, selection.selectedRepository)
+   val published = descriptorAt(selection.selectedVersion, selection.selectedRepository)
+
+   foldOption(
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      descriptor -> mountedDirectories(tree, selection, descriptor).map(directory -> directory / "src"),
+      published
+   )
+}
+
+/**
+ * The directory of every module `descriptor` declares, under `root` — or `root` itself, which is what
+ * a descriptor declaring no `module` clause means: one anonymous module whose sources are at the
+ * repository root, the shape every zero-configuration package has.
+ */
+private def moduleDirectories(root: Path, descriptor: Descriptor): List[Path] =
+   fold(
+      descriptor.modules.isEmpty,
+      singleton(root),
+      descriptor.modules.map(module -> under(root, module.moduleDirectory))
+   )
+
+/**
+ * The directories `selection` mounts of a dependency laid out by `descriptor`.
+ *
+ * A selector that names a module the descriptor does not declare mounts nothing, and so does a bare
+ * `dep` on a repository that declares modules: the root module of a multi-module repository has no
+ * sources of its own, since a `module` clause is exactly the statement that the sources are inside the
+ * modules. Both are worth a diagnostic at the *author's* build rather than a silent empty mount, and
+ * neither is worth a failure here, where the only honest report would name a dependency line this
+ * module has never seen.
+ */
+private def mountedDirectories(root: Path, selection: Selection, descriptor: Descriptor): List[Path] =
+   fold(
+      descriptor.modules.isEmpty,
+      fold(selection.selectedModules.any(selector -> selector == RootModule), singleton(root), empty),
+      descriptor.modules
+         .filter(module -> module.exported && mounts(module.moduleName, selection))
+         .map(module -> under(root, module.moduleDirectory))
+   )
+
+/**
+ * `src/` always, and `test/` when the test scope is what is being compiled — the two conventional
+ * tracks that carry runtime sources, in the order the compiler should see them.
+ */
+private def compiledTracks(configuration: Configuration, directory: Path): List[Path] =
+   fold(
+      isTestScope(configuration),
+      append(singleton(directory / "src"), directory / "test"),
+      singleton(directory / "src")
+   )
+
+private def isTestScope(configuration: Configuration): Bool = configuration match {
+   case TestScope     -> true
+   case ArtifactNamed(_) -> false
+}
+
+/**
+ * A module directory is written in the *repository's* path syntax — `lang/eliot`, one string with
+ * separators in it — and is resolved a segment at a time, because `/` extends a path by one segment
+ * by contract.
+ */
+private def under(root: Path, directory: String): Path =
+   split("/", directory).foldLeft(root, segment -> at -> at / segment)
