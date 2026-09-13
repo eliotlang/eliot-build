@@ -1,5 +1,6 @@
 import eliot.collection.List
 import eliot.build.format.Clause
+import eliot.build.format.ClauseReader
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
@@ -15,9 +16,13 @@ import eliot.build.model.Descriptor
  * `eliot.build.model.Descriptor`, which holds no syntax at all — so a consumer that only reads a
  * descriptor never imports this module.
  *
- * Unknown clauses are fatal by design — that is how the format evolves without a version field: a
- * descriptor using a clause this launcher does not know refuses to build rather than silently
- * ignoring the line that would have changed the outcome.
+ * Reading a clause *carefully* is `eliot.build.format.ClauseReader`'s: which argument has to be
+ * there, which children are recognised, and what a clause that does not say so is complained about
+ * with. So this module states what a `dep` needs and never how a missing one is reported — and the two
+ * error channels underneath it, the parser's `ClauseError` and the reader's `ClauseProblem`, become
+ * `DescriptorError` here and nowhere else. Unknown clauses are fatal by design, which is how the
+ * format evolves without a version field: a descriptor using a clause this launcher does not know
+ * refuses to build rather than silently ignoring the line that would have changed the outcome.
  */
 
 /**
@@ -25,12 +30,12 @@ import eliot.build.model.Descriptor
  * something this launcher does not understand. One error type rather than two effect rows, because a
  * caller wants one `catch` and the distinction is a constructor, not a channel.
  */
-data DescriptorError = Malformed(syntax: ClauseError) | Unreadable(clauseText: String, problem: String)
+data DescriptorError = Malformed(syntax: ClauseError) | Unreadable(clauseProblem: ClauseProblem)
 
 implement Show[DescriptorError] {
    def show(value: DescriptorError): String = value match {
       case Malformed(syntax) -> show(syntax)
-      case Unreadable(clauseText, problem) -> problem ++ " in '" ++ clauseText ++ "'"
+      case Unreadable(problem) -> show(problem)
    }
 }
 
@@ -52,8 +57,19 @@ def descriptorFileName: String = "eliot.pkg"
 def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
    foldEither(
       error -> raise(Malformed(error)),
-      clauses -> interpret(clauses),
+      clauses -> interpreted(clauses),
       runThrow[ClauseError](parseClauses(lines))
+   )
+
+/**
+ * What `clauses` mean, with the reader's complaints answered as descriptor errors — the second of the
+ * two channels the modules underneath raise on, and the only place either becomes a `DescriptorError`.
+ */
+private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
+   foldEither(
+      problem -> raise(Unreadable(problem)),
+      descriptor -> descriptor,
+      runThrow[ClauseProblem](interpret(clauses))
    )
 
 /**
@@ -78,7 +94,7 @@ def renderDescriptor(descriptor: Descriptor): String =
  * naming the alternatives was the only way to refuse an unknown one. It is `knownClauses` that
  * refuses now, up front and for all of them at once, and what is left is the mapping itself.
  */
-private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor = {
+private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor = {
    knownClauses(descriptorKeywords, clauses)
 
    Descriptor(
@@ -94,7 +110,7 @@ private def interpret(clauses: List[Clause]): {Throw[DescriptorError]} Descripto
  * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling
  * module, which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
  */
-private def dependencyOf(clause: Clause): {Throw[DescriptorError]} Dependency = {
+private def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
    val target = required(0, "a dep needs a package URL", clause)
    val reference = referenceOf(target, clause)
    val version = versionOf(optional(1, clause), clause)
@@ -110,10 +126,10 @@ private def siblingDependencyOf(
    name: ModuleName,
    version: Option[Version],
    clause: Clause
-): {Throw[DescriptorError]} Dependency =
+): {Throw[ClauseProblem]} Dependency =
    foldOption(
       SiblingDependency(name),
-      _ -> raise(Unreadable(render(clause), "a sibling module versions with its repository and carries no version")),
+      _ -> raise(problemIn("a sibling module versions with its repository and carries no version", clause)),
       version
    )
 
@@ -121,9 +137,9 @@ private def requirementOf(
    package: Package,
    version: Option[Version],
    clause: Clause
-): {Throw[DescriptorError]} Dependency =
+): {Throw[ClauseProblem]} Dependency =
    foldOption(
-      raise(Unreadable(render(clause), "a foreign dependency needs a minimum version")),
+      raise(problemIn("a foreign dependency needs a minimum version", clause)),
       minimum -> Requirement(package, minimum),
       version
    )
@@ -134,12 +150,12 @@ private def requirementOf(
  * the author expected to matter, and where the bytes come from is the consumer's configuration.
  * Refusing it here is what keeps `//` unambiguously the module selector.
  */
-private def referenceOf(target: String, clause: Clause): {Throw[DescriptorError]} PackageId = {
+private def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageId = {
    checkSchemeless(target, clause)
    packageId(target)
 }
 
-private def moduleOf(clause: Clause): {Throw[DescriptorError]} BuildModule = {
+private def moduleOf(clause: Clause): {Throw[ClauseProblem]} BuildModule = {
    val name = required(0, "a module needs a name", clause)
 
    atMostArguments(1, clause)
@@ -153,7 +169,7 @@ private def moduleOf(clause: Clause): {Throw[DescriptorError]} BuildModule = {
    )
 }
 
-private def artifactOf(clause: Clause): {Throw[DescriptorError]} Artifact = {
+private def artifactOf(clause: Clause): {Throw[ClauseProblem]} Artifact = {
    val name = required(0, "an artifact needs a name", clause)
 
    atMostArguments(1, clause)
@@ -165,26 +181,26 @@ private def artifactOf(clause: Clause): {Throw[DescriptorError]} Artifact = {
  * `backend [<url>] { <key> <value>… }`. The package is named only to disambiguate: with exactly one
  * plugin-shipping dependency in the artifact's scope there is nothing to choose between.
  */
-private def backendOf(clause: Clause): {Throw[DescriptorError]} Option[Backend] =
+private def backendOf(clause: Clause): {Throw[ClauseProblem]} Option[Backend] =
    clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendClause(child)))
 
-private def backendClause(clause: Clause): {Throw[DescriptorError]} Backend = {
+private def backendClause(clause: Clause): {Throw[ClauseProblem]} Backend = {
    val named = optional(0, clause)
 
    atMostArguments(1, clause)
    Backend(backendPackageOf(named, clause), clause.children.map(parameterOf))
 }
 
-private def backendPackageOf(named: Option[String], clause: Clause): {Throw[DescriptorError]} Option[PackageId] =
+private def backendPackageOf(named: Option[String], clause: Clause): {Throw[ClauseProblem]} Option[PackageId] =
    foldOption(None, target -> Some(referenceOf(target, clause)), named)
 
 private def parameterOf(clause: Clause): Pair[String, String] =
    Pair(clause.keyword, clause.arguments.joined(" "))
 
-private def pluginsOf(clause: Clause): {Throw[DescriptorError]} List[Plugin] =
+private def pluginsOf(clause: Clause): {Throw[ClauseProblem]} List[Plugin] =
    clause.childrenNamed("plugin").map(pluginClause)
 
-private def pluginClause(clause: Clause): {Throw[DescriptorError]} Plugin = {
+private def pluginClause(clause: Clause): {Throw[ClauseProblem]} Plugin = {
    val coordinate = required(0, "a plugin needs a Maven coordinate", clause)
 
    atMostArguments(1, clause)
@@ -196,7 +212,7 @@ private def pluginClause(clause: Clause): {Throw[DescriptorError]} Plugin = {
  * `jar <coordinate> sha256 <hex>` — exact coordinate, exact hash. The one exact pin in the system,
  * and it rides inside a Maven coordinate, which is exact by nature.
  */
-private def jarClause(clause: Clause): {Throw[DescriptorError]} JarPin = {
+private def jarClause(clause: Clause): {Throw[ClauseProblem]} JarPin = {
    val coordinate = required(0, "a jar needs a Maven coordinate", clause)
    val label = required(1, "a jar needs 'sha256 <hex>'", clause)
    val hash = required(2, "a jar needs 'sha256 <hex>'", clause)
@@ -206,29 +222,11 @@ private def jarClause(clause: Clause): {Throw[DescriptorError]} JarPin = {
    JarPin(coordinate, hash)
 }
 
-private def dependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
+private def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
    clause.childrenNamed("dep").map(dependencyOf)
 
-private def testDependenciesOf(clause: Clause): {Throw[DescriptorError]} List[Dependency] =
+private def testDependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
    clause.childrenNamed("test").flatMap(dependenciesOf)
-
-/**
- * The `index`-th argument, raising `problem` when there is none. The `{Abort}` is discharged to an
- * `Option` *first* and the raise happens outside it. That was forced under the carrier model, where
- * `Throw` had no lift through an `Abort` carrier; under effects v6 `argument(…) else raise(…)` would
- * compile, and this keeps its shape only because the `Option` is what the caller reads.
- */
-private def required(index: Int, problem: String, clause: Clause): {Throw[DescriptorError]} String = {
-   val found: Option[String] = optional(index, clause)
-
-   foldOption(raise(Unreadable(render(clause), problem)), text -> text, found)
-}
-
-private def optional(index: Int, clause: Clause): Option[String] =
-   runAbort(argument(index, clause))
-
-private def atMostArguments(count: Int, clause: Clause): {Throw[DescriptorError]} Unit =
-   requireThat(clause.arguments.size <= count, "too many arguments", clause)
 
 /**
  * Every version token is a git tag, spelled as the tag is: there is no `>=` to write and no range to
@@ -236,52 +234,17 @@ private def atMostArguments(count: Int, clause: Clause): {Throw[DescriptorError]
  * rather than merely inspected — the model carries an ordered version from here on, which is what
  * resolution needs and what the string never was.
  */
-private def versionOf(token: Option[String], clause: Clause): {Throw[DescriptorError]} Option[Version] =
+private def versionOf(token: Option[String], clause: Clause): {Throw[ClauseProblem]} Option[Version] =
    foldOption(None, tag -> Some(checkedVersion(tag, clause)), token)
 
-private def checkedVersion(tag: String, clause: Clause): {Throw[DescriptorError]} Version = {
+private def checkedVersion(tag: String, clause: Clause): {Throw[ClauseProblem]} Version = {
    val parsed: Option[Version] = runAbort(parseVersion(tag))
 
-   foldOption(raise(Unreadable(render(clause), "a version must be a tag like 'v1.3'")), version -> version, parsed)
+   foldOption(raise(problemIn("a version must be a tag like 'v1.3'", clause)), version -> version, parsed)
 }
 
-private def checkSchemeless(target: String, clause: Clause): {Throw[DescriptorError]} Unit =
+private def checkSchemeless(target: String, clause: Clause): {Throw[ClauseProblem]} Unit =
    requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)
-
-private def knownChildren(keywords: List[String], clause: Clause): {Throw[DescriptorError]} Unit =
-   knownClauses(keywords, clause.children)
-
-private def knownClauses(keywords: List[String], clauses: List[Clause]): {Throw[DescriptorError]} Unit =
-   clauses.foreach(clause -> requireKnown(keywords, clause))
-
-private def requireKnown(keywords: List[String], clause: Clause): {Throw[DescriptorError]} Unit = {
-   val name = clause.keyword
-
-   requireThat(keywords.any(candidate -> candidate == name), unknownReason(clause), clause)
-}
-
-/**
- * Raise `problem` against `clause` unless `condition` holds. Written as an `Option` eliminator rather
- * than as `if(condition) unit else raise(...)`, which the carrier model could not express — an `if`
- * stacked its `Abort` under the `Throw` and that pair had no cross-lift. Effects v6 removed the
- * constraint; the shape stays so that the three `require*` helpers read alike.
- */
-private def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[DescriptorError]} Unit = {
-   val trouble: Option[String] = problemUnless(condition, problem)
-
-   foldOption(unit, message -> raise(Unreadable(render(clause), message)), trouble)
-}
-
-private def problemUnless(condition: Bool, problem: String): Option[String] =
-   fold(condition, None, Some(problem))
-
-/**
- * The message an unrecognised keyword gets. It names the upgrade rather than the mistake, because
- * the likeliest cause of an unknown clause is a descriptor written for a newer launcher — which is
- * exactly how the format is allowed to grow without a version field.
- */
-private def unknownReason(clause: Clause): String =
-   "unknown clause '" ++ clause.keyword ++ "'; this descriptor may need a newer eliot"
 
 private def descriptorKeywords: List[String] =
    append(append(append(append(empty, "dep"), "module"), "test"), "artifact")
