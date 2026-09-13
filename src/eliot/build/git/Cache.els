@@ -27,7 +27,13 @@ type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
  * named after the canonical URL. Everything else follows from that: discovering what a package
  * publishes is `ls-remote` against the mirror, reading a descriptor at a version is `git show` out of
  * its object database, and the ancestry check the design owes the fetcher is a third question for the
- * same objects to answer later. Nothing is ever checked out.
+ * same objects to answer later.
+ *
+ * **One thing is checked out, and only because the compiler mounts directories.** Every *question*
+ * above is answered from the object database, and `sourceTreeAt` is not a question: it is what a build
+ * does once its versions are decided. The tree it makes lives beside the mirror it came from, under
+ * the same root and keyed by version as well as by URL, so one cache holds the history once and as
+ * many trees of it as the builds on this machine selected.
  *
  * **What is cached is the repository, not an answer.** No memo of "this URL resolved to that
  * version" is kept, because MVS's answer depends on the whole closure rather than on any one package,
@@ -54,8 +60,19 @@ type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
  * case-insensitive filesystem. Go escapes uppercase letters to solve this; doing the same needs
  * per-character iteration the standard library does not offer yet.
  */
-def cacheDirectory(root: Path, repository: Repository): Path =
-   split("/", repository.repositoryUrl).foldLeft(root, segment -> directory -> directory / segment)
+def cacheDirectory(root: Path, repository: Repository): Path = under(root, repository.repositoryUrl)
+
+/**
+ * Where the sources of `repository` at `version` are checked out: beside its mirror, under a name
+ * carrying the version — `github.com/x/foo@v1.2` next to `github.com/x/foo`.
+ *
+ * Beside rather than inside, because inside would be inside the mirror. Keyed by version as well as
+ * by URL because two configurations of one build may select two versions of one repository and both
+ * may be mounted at once; and named so that `ls` says which version a tree is, since a detached
+ * checkout carries no other sign of it.
+ */
+def sourceDirectory(root: Path, version: Version, repository: Repository): Path =
+   under(root, repository.repositoryUrl ++ "@" ++ show(version))
 
 /**
  * Every version `repository` publishes, with the commit each names — the question `eliot get` asks in full
@@ -88,6 +105,25 @@ def anchorOf(root: Path, line: Line, repository: Repository): Cached[Option[Comm
  */
 def descriptorTextAt(root: Path, version: Version, repository: Repository): Cached[Option[String]] =
    ensuredMirror(root, repository).fileAt(AtVersion(version), descriptorFileName)
+
+/**
+ * The sources of `repository` at `version`, on disk: the directory a compiler can be pointed at.
+ *
+ * This is the step between a resolution and a build. Everything above answers out of the object
+ * database because a resolver reads one file at a time; a compiler mounts source roots, so the
+ * selected version has to become a tree. It is a worktree of the mirror rather than a second clone:
+ * the objects are already here, and the tree stays tied to the mirror that says where it came from.
+ *
+ * Checked out once and reused, the same way a mirror is cloned once and reused, and tested the same
+ * way — a directory that is there is taken as proof, and git's own `--force` covers the tree somebody
+ * deleted behind the cache's back.
+ */
+def sourceTreeAt(root: Path, version: Version, repository: Repository): Cached[Path] = {
+   val directory = sourceDirectory(root, version, repository)
+   val absent = missingDirectory(isDirectory(directory), directory)
+
+   foldOption(directory, missing -> checkedOut(root, missing, version, repository), absent)
+}
 
 /**
  * Bring `repository`'s mirror up to date with what its remote publishes now, cloning it first if this build
@@ -123,12 +159,19 @@ def refreshed(root: Path, repository: Repository): Cached[Mirror] = {
  */
 private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = {
    val directory = cacheDirectory(root, repository)
-   val absent = missingMirror(isDirectory(directory), directory)
+   val absent = missingDirectory(isDirectory(directory), directory)
 
    foldOption(Mirror(directory), missing -> cloned(root, missing, repository), absent)
 }
 
-private def missingMirror(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
+/**
+ * `ensuredMirror`'s and `sourceTreeAt`'s shared step: the directory to make, where there is no
+ * directory yet.
+ */
+private def missingDirectory(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
+
+private def under(root: Path, url: String): Path =
+   split("/", url).foldLeft(root, segment -> directory -> directory / segment)
 
 /**
  * Only the root is created up front. Git makes the leading directories of a clone target itself, so
@@ -139,3 +182,11 @@ private def cloned(root: Path, directory: Path, repository: Repository): Cached[
    createDirectories(root)
    cloneMirror(remoteOf(repository), directory)
 }
+
+/**
+ * `sourceTreeAt`'s step, and the reason it takes the root as well as the directory: a tree is checked
+ * out *of* a mirror, so the mirror has to be there first — which for a package the build has only ever
+ * read descriptors of it already is, and for one this verb reached first it is not.
+ */
+private def checkedOut(root: Path, directory: Path, version: Version, repository: Repository): Cached[Path] =
+   addWorktree(AtVersion(version), directory, ensuredMirror(root, repository)).worktreeDirectory

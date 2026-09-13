@@ -85,6 +85,35 @@ def testCases: Test = {
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
          shouldBe "<none>"
    }
+   "sourceDirectory" should "put a tree beside the mirror, named by the version it holds" in {
+      show(sourceDirectory(cacheRoot, Version(Line(1), Some(2)), cached)) shouldBe "target/cache/github.com/x/foo@v1.2"
+   }
+   "sourceTreeAt" should "clone the mirror it has never seen, then check the version out of it" in mocked {
+      provide(listed, sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached) with tableGit)
+
+      calls shouldBe expectedFirstCheckout
+   }
+   "sourceTreeAt" should "answer where the tree is" in mocked {
+      show(provide(listed, sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached) with tableGit))
+         shouldBe "target/cache/github.com/x/foo@v1.2"
+   }
+   "sourceTreeAt" should "not check out again what its own checkout left on disk" in mocked {
+      provide(listed, {
+         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
+         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
+      } with tableGit)
+
+      wasCalledOnce("addWorktree")
+   }
+   "sourceTreeAt" should "check out each selected version into a tree of its own" in mocked {
+      provide(listed, {
+         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
+         sourceTreeAt(cacheRoot, Version(Line(1), Some(3)), cached)
+      } with tableGit)
+
+      wasCalledTimes(2, "addWorktree")
+      wasCalledOnce("cloneMirror")
+   }
    "the cache" should "clone once and read the mirror it made for every later question" in mocked {
       provide(listed, {
          publishedTags(cacheRoot, cached)
@@ -123,6 +152,17 @@ private def expectedFirstVisit: String =
 private def expectedPresenceCheck: String = "isDirectory target/cache/github.com/x/foo"
 
 private def expectedListing: String = "log tags target/cache/github.com/x/foo"
+
+/**
+ * The first checkout: look for the tree, look for the mirror, make the root, clone, check out. The
+ * mirror's own presence check is in the middle because a tree is checked out *of* a mirror, and the
+ * first verb to want a tree may well be the first to want the package at all.
+ */
+private def expectedFirstCheckout: String =
+   "isDirectory target/cache/github.com/x/foo@v1.2; " ++ expectedPresenceCheck ++
+      "; createDirectories target/cache; " ++
+      "log cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
+      "log addWorktree v1.2 target/cache/github.com/x/foo@v1.2 target/cache/github.com/x/foo"
 
 private def expectedFetch: String = "log fetch target/cache/github.com/x/foo"
 

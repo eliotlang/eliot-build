@@ -24,12 +24,16 @@ import eliot.build.git.Tags
  * the effect that fetched it.
  *
  * **The vocabulary is git's own.** A *mirror* is a `git clone --mirror`: a bare repository — object
- * database and refs, no working tree — whose refs are an exact copy of the remote's. Nothing here is
- * ever checked out; every question is answered out of a mirror's object database. A *remote* is the
- * address git is given to reach a repository. A *commit* — `eliot.build.model.Lineage`'s, because a
- * content hash is vocabulary before it is git's — is what a tag names. A *revision* is what a
- * file is read at — a version's tag or a commit. `fetch` brings a mirror up to date and touches no
- * working tree (there is none); `pull` would merge into a branch and has no meaning in a mirror.
+ * database and refs, no working tree — whose refs are an exact copy of the remote's. Every *question*
+ * is answered out of a mirror's object database and nothing is checked out to ask one. A *worktree* is
+ * the exception, and it is not a question: the compiler mounts directories rather than reading files
+ * one at a time, so a build that has resolved its versions must put one tree on disk per selected
+ * version. `git worktree` is what does it — a second working tree of the mirror that already holds the
+ * objects, so a checkout costs a tree and not a second copy of the history. A *remote* is the address
+ * git is given to reach a repository. A *commit* — `eliot.build.model.Lineage`'s, because a content
+ * hash is vocabulary before it is git's — is what a tag names. A *revision* is what a file is read at,
+ * and what a tree is checked out at — a version's tag or a commit. `fetch` brings a mirror up to date
+ * and touches no working tree; `pull` would merge into a branch and has no meaning in a mirror.
  *
  * **Every operation's subject says where it runs.** Git resolves a relative path against *its* working
  * directory, not this program's, and the split is git's own: a command that *names* a repository —
@@ -69,6 +73,16 @@ implement Show[GitError] {
 data Mirror(mirrorDirectory: Path)
 
 /**
+ * A working tree checked out of a mirror at one revision, known by the directory it lives in — what a
+ * source root is, and the only thing in this module that has files in it.
+ *
+ * Its own type rather than a bare `Path` for the reason `Mirror` is: the two are different things git
+ * does different work on, and a signature that took a `Path` could be handed either. Made by
+ * `addWorktree` and by nothing else.
+ */
+data Worktree(worktreeDirectory: Path)
+
+/**
  * The address git is given to reach a repository — a transport URL, scheme included, which is what a
  * canonical package URL deliberately is not. Made by `remoteOf`, the one place the scheme is decided.
  */
@@ -81,7 +95,7 @@ data Remote(remoteUrl: String)
 data Revision = AtVersion(revisionVersion: Version) | AtCommit(revisionCommit: Commit)
 
 /**
- * What the tool asks of git. Five operations, each about a remote or a mirror, and nothing about how
+ * What the tool asks of git. Six operations, each about a remote or a mirror, and nothing about how
  * they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
  * caller declaring `{Git}` cannot tell them apart.
  *
@@ -130,6 +144,21 @@ effect Git {
     * this module cannot see.
     */
    def fileAt(revision: Revision, path: String, mirror: Mirror): Option[String]
+
+   /**
+    * Check `mirror` out at `revision` into `target`, and answer the tree.
+    *
+    * The one operation that leaves files on disk, and it exists because the compiler mounts source
+    * *directories*: a resolution is a set of versions and a build is a set of roots, so something has
+    * to materialise one from the other. A worktree rather than a second clone or an export, because
+    * the objects are already in the mirror — the tree is all that is missing — and because the tree
+    * stays tied to the mirror that explains where it came from.
+    *
+    * `target` is taken as git resolves it, which is why every caller passes an absolute one: this
+    * operation stands *inside* the mirror (it operates on the repository it is in), so a relative
+    * target would be read against the mirror's directory rather than against the caller's.
+    */
+   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
 }
 
 /**

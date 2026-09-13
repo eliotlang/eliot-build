@@ -93,6 +93,24 @@ def testCases: Test = {
 
       (shown orElse "<none>") shouldBe "<none>"
    }
+   "addWorktree" should "check out a detached tree, standing inside the mirror the objects are in" in mocked {
+      addWorktree(AtVersion(version("v1.2")), treePath, mirror) with shellGit
+
+      calls shouldBe "/cache/github.com/x/foo$ git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.2"
+   }
+   "addWorktree" should "answer the tree it made, at the directory it was asked for" in mocked {
+      val made = addWorktree(AtVersion(version("v1.2")), treePath, mirror) with shellGit
+
+      show(made.worktreeDirectory) shouldBe "/cache/github.com/x/foo@v1.2"
+   }
+   "addWorktree" should "raise what git said about a revision it could not check out" in mocked {
+      whenSpawning("worktree", failing(128, "invalid reference: v1.9"))
+
+      raising[GitError](expectedCheckoutRefusal, {
+         addWorktree(AtVersion(version("v1.9")), treePath, mirror) with shellGit
+         unit
+      })
+   }
    "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
       cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
       fetch(mirror) with shellGit
@@ -107,10 +125,16 @@ private def mirrorPath: Path = path("/cache/github.com/x/foo")
 
 private def mirror: Mirror = Mirror(mirrorPath)
 
+private def treePath: Path = path("/cache/github.com/x/foo@v1.2")
+
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
 private def expectedRefusal: String =
    "'git ls-remote --tags https://github.com/x/foo' failed with exit code 128: no such repository"
+
+private def expectedCheckoutRefusal: String =
+   "'git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.9' failed with exit code 128: " ++
+      "invalid reference: v1.9"
 
 private def renderedTags(refs: List[TagRef]): String =
    refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")

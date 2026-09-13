@@ -60,6 +60,23 @@ implement shellGit: Git {
 
       fold(shown.exitCode == 0, Some(shown.standardOutput), None)
    }
+
+   /**
+    * `--detach` because a build checks out a *version*, and a branch checked out twice is a thing git
+    * refuses; `--force` because the cache is allowed to have been tidied up behind git's back. A tree
+    * removed with `rm -rf` leaves the mirror still holding its registration, and the plain `add` then
+    * refuses a path nothing occupies — a cache that cannot heal itself from a deleted directory would
+    * be a cache a user has to know how to repair.
+    */
+   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
+      val added = checked(
+         command("git").withArgument("worktree").withArgument("add").withArgument("--detach")
+            .withArgument("--force").withArgument(show(target)).withArgument(revisionName(revision)),
+         mirror.mirrorDirectory
+      )
+
+      Worktree(target)
+   }
 }
 
 /**

@@ -24,8 +24,9 @@ import eliot.build.git.Tags
  * Two things make it at home inside `mocked`. It **reports every operation through `Log`**, which the
  * framework's own double records into the one journal every verification reads — so `calls` shows a
  * cache's `isDirectory` and its `cloneMirror` in the order they happened, one line apiece, prefixed with
- * `log`. And a clone **leaves the directory behind** by arranging it with `withDirectory`, which is what
- * lets a test observe "clone on the first visit, not on the second" rather than seed it.
+ * `log`. And a clone — or a checkout — **leaves its directory behind** by arranging it with
+ * `withDirectory`, which is what lets a test observe "clone on the first visit, not on the second"
+ * rather than seed it.
  */
 
 /**
@@ -64,6 +65,13 @@ implement tableGit: Git {
       log("fileAt " ++ revisionName(revision) ++ ":" ++ path ++ " " ++ show(mirror.mirrorDirectory))
 
       dependency.heldFiles.lookupOption(revisionName(revision) ++ ":" ++ path)
+   }
+
+   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
+      log("addWorktree " ++ revisionName(revision) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
+      withDirectory(target)
+
+      unlessRefused(Worktree(target))
    }
 }
 
