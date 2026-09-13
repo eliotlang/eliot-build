@@ -39,9 +39,21 @@ data Plugin(pluginCoordinate: String, pluginJars: List[JarPin])
 /**
  * A build module of a multi-module repository. `exported` decides whether dependents mount its
  * sources; examples, applications and test fixtures are `internal`.
+ *
+ * `moduleDirectory` is where the module's `src/`, `compiler/` and `test/` are, relative to the
+ * repository root. It is always populated — the module's own name where the descriptor says nothing,
+ * which is the flat repository every zero-configuration package is — so a consumer reads a directory
+ * rather than folding an absence and re-deriving the default at every use. The default is a *reading*
+ * of the `at` clause and belongs to whoever reads one; by the time a descriptor is a value, where its
+ * modules live is settled.
+ *
+ * It is text rather than a `Path` because it is text in the *repository's* syntax, read out of a git
+ * object database and resolved against a checkout root that this model has never seen. Whoever
+ * assembles sources owns that resolution, and owns the platform's path type with it.
  */
 data BuildModule(
    moduleName: ModuleName,
+   moduleDirectory: String,
    exported: Bool,
    moduleDependencies: List[Dependency],
    moduleTestDependencies: List[Dependency],

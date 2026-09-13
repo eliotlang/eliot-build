@@ -20,8 +20,8 @@ import eliot.build.model.Descriptor
  * `eliot.build.format.DependencyClause` reads the `dep` line, the one clause every block here has in
  * common. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
  * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
- * left here is the keywords themselves: `module`, `artifact`, `plugin`, `jar`, `backend`, and which
- * field of the descriptor each of them feeds.
+ * left here is the keywords themselves: `module`, `at`, `artifact`, `plugin`, `jar`, `backend`, and
+ * which field of the descriptor each of them feeds.
  *
  * The two error channels meet here and nowhere else: the parser raises `ClauseError`, a reader raises
  * `ClauseProblem`, and `DescriptorError` is the union a caller catches. Unknown clauses are fatal by
@@ -104,6 +104,7 @@ private def moduleOf(clause: Clause): {Throw[ClauseProblem]} BuildModule = {
    knownChildren(moduleKeywords, clause)
    BuildModule(
       ModuleName(name),
+      directoryOf(name, clause),
       isEmpty(clause.childrenNamed("internal")),
       dependenciesOf(clause),
       testDependenciesOf(clause),
@@ -118,6 +119,34 @@ private def artifactOf(clause: Clause): {Throw[ClauseProblem]} Artifact = {
    knownChildren(artifactKeywords, clause)
    Artifact(name, dependenciesOf(clause), backendOf(clause))
 }
+
+/**
+ * Where a module's sources are, relative to the repository root: what its `at` clause says, or its own
+ * name where it says nothing — the flat repository of same-named directories, which is what a package
+ * looks like unless something else already owns its layout.
+ *
+ * The default is applied here rather than carried onwards as an absence, so the model hands every
+ * consumer a directory and the rule lives in one place. Reading `at` costs the module nothing it did
+ * not already spend: a repository whose layout is the convention never writes one.
+ */
+private def directoryOf(name: String, clause: Clause): {Throw[ClauseProblem]} String =
+   clause.childrenNamed("at").foldLeft(name, child -> _ -> atClause(child))
+
+/**
+ * `at <directory>` — a path *inside* the repository, so a descriptor fetched from a remote cannot
+ * point source assembly at a directory the checkout does not contain. An absolute path and a `..`
+ * segment are refused for that one reason, which is why they are refused together.
+ */
+private def atClause(clause: Clause): {Throw[ClauseProblem]} String = {
+   val directory = required(0, "an 'at' needs a directory", clause)
+
+   atMostArguments(1, clause)
+   requireThat(insideRepository(directory), "a module directory is a path inside the repository", clause)
+   directory
+}
+
+private def insideRepository(directory: String): Bool =
+   !startsWith("/", directory) && !any(segment -> segment == "..", split("/", directory))
 
 /**
  * `backend [<url>] { <key> <value>… }`. The package is named only to disambiguate: with exactly one
@@ -168,7 +197,7 @@ private def descriptorKeywords: List[String] =
    append(append(append(append(empty, "dep"), "module"), "test"), "artifact")
 
 private def moduleKeywords: List[String] =
-   append(append(append(append(empty, "internal"), "dep"), "test"), "plugin")
+   append(append(append(append(append(empty, "at"), "internal"), "dep"), "test"), "plugin")
 
 private def artifactKeywords: List[String] = append(append(empty, "dep"), "backend")
 

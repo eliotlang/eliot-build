@@ -51,6 +51,29 @@ def testCases: Test = {
    "parseDescriptor" should "treat a module as exported unless it says otherwise" in {
       parsed("module lang {\n   dep //other\n}") shouldBe "module lang {\n  dep //other\n}"
    }
+   "parseDescriptor" should "give a module the directory its own name spells, where it says nothing" in {
+      firstModuleDirectory("module stdlib {\n   dep //lang\n}") shouldBe "stdlib"
+   }
+   "parseDescriptor" should "let a module say where it is, for a repository that is not flat" in {
+      firstModuleDirectory("module stdlib {\n   at stdlib/eliot\n}") shouldBe "stdlib/eliot"
+   }
+   "parseDescriptor" should "keep a module's directory apart from the name dependents select it by" in {
+      roundTrip("module lang {\n  at lang/eliot\n  dep //stdlib\n}")
+   }
+   "parseDescriptor" should "write no 'at' where the directory is the module's name, which already said it" in {
+      parsed("module lang {\n   at lang\n}") shouldBe "module lang"
+   }
+   "parseDescriptor" should "reject an 'at' naming no directory" in {
+      parsed("module lang {\n   at\n}") shouldBe "an 'at' needs a directory in 'at'"
+   }
+   "parseDescriptor" should "reject an absolute module directory, which no checkout contains" in {
+      parsed("module lang {\n   at /etc\n}")
+         shouldBe "a module directory is a path inside the repository in 'at /etc'"
+   }
+   "parseDescriptor" should "reject a module directory climbing out of the repository" in {
+      parsed("module lang {\n   at ../elsewhere\n}")
+         shouldBe "a module directory is a path inside the repository in 'at ../elsewhere'"
+   }
    "parseDescriptor" should "yield nothing for a file of comments alone" in {
       parsed("-- nothing to declare\n\n-- really") shouldBe ""
    }
@@ -112,6 +135,17 @@ private def parsed(text: String): String =
    foldEither(
       error -> show(error),
       descriptor -> renderDescriptor(descriptor),
+      runThrow[DescriptorError](parseDescriptor(split("\n", text)))
+   )
+
+/**
+ * Where the first module of the descriptor `text` spells says it is — the one thing the rendering
+ * cannot show, since a directory that is the module's name is written as the name alone.
+ */
+private def firstModuleDirectory(text: String): String =
+   foldEither(
+      error -> show(error),
+      descriptor -> foldOption("", built -> built.moduleDirectory, descriptor.modules.head),
       runThrow[DescriptorError](parseDescriptor(split("\n", text)))
    )
 

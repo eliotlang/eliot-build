@@ -7,9 +7,10 @@ identity is decided by the URL *or* by a shared lineage anchor (see below). Amen
 2026-08-12: the modules that touch the outside carry their own logic and are tested
 (`docs/effectful-modules.md`), which retires one lesson below and rewrites another. Amended
 2026-09-13: the launcher has a `main` and one verb, which settles the second lesson below the way it
-said it would be settled.
+said it would be settled. Amended 2026-09-13: a module may say **where** it is (`at`), because the
+convention cannot hold in the one repository that has to dogfood it (below).
 
-**Where the implementation stands** (2026-09-13, 170 tests):
+**Where the implementation stands** (2026-09-13, 177 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -205,7 +206,8 @@ What remains:
   base, per-module, test, per-configuration.
 - **Modules**: the repo's build modules (the eliot repo itself: `lang`, `stdlib`, `jvm`). Per
   module: name, export flag (dependents mount every exported module's sources; examples/apps/test
-  fixtures are internal), its own dependency list. Directories by convention, not configuration.
+  fixtures are internal), its own dependency list, and where it is. Directories by convention — the
+  module's own name — with one clause to say otherwise (`at`, below).
   **One root descriptor** — per-module descriptor files reintroduce Maven's parent-POM web and
   Go's nested-modules mess, and break the one-parse LSP story.
 - **Build configurations** (see below): name, additional dependencies, backend-plugin invocation
@@ -259,6 +261,7 @@ dep github.com/x/foo v1.3                    -- base dep: all exported modules o
 dep github.com/eliot-lang/eliot//stdlib v1.2 -- module-selected dep
 
 module lang {                                -- multi-module repos only
+  at lang/eliot                              -- where it is (default: the module's name)
   internal                                   -- not exported (default: exported)
   dep //other-module                         -- intra-repo sibling
   dep github.com/x/bar v2                    -- module-scoped dep
@@ -287,6 +290,16 @@ artifact hello {                             -- a build configuration
   plugin's declared schema — the typed-plugin-config promise, enforced at parse time.
 - **No `module` clause** = the repo is one anonymous exported module with `src/`, `test/`,
   `compiler/` at the root — the zero-config common case.
+- `at` is the module's directory, relative to the repo root, and defaults to the module's **name** —
+  so a package laid out flat writes none, and the tool never invents a second way to spell the common
+  case (a directory equal to the name is written back out as nothing). It buys one thing: the module's
+  *name is not its path*. Names are half of package identity in a registry-less design (`URL//name`),
+  so a repo that rearranges itself would otherwise be breaking every dependent's descriptor — silently,
+  since `compat-check` diffs exported signatures and cannot see a layout. The concrete case is the
+  eliot repo, which is permanently polyglot (the compiler is Scala and owns `lang/src`), so its layers
+  sit at `lang/eliot/`, `stdlib/eliot/`, `jvm/eliot/` and are still selected as `//lang`, `//stdlib`,
+  `//jvm`. A path inside the repo, and nothing else: an absolute path or a `..` segment is refused,
+  since the descriptor is fetched from a remote and source assembly resolves this against a checkout.
 - `plugin` carries the plugin's **full flat jar closure** as `jar` sub-clauses (exact coordinate
   + SHA-256), computed by the author at release time — the consumer's launcher fetches and
   verifies without ever resolving a POM (see the plugin-binaries section).
@@ -330,7 +343,8 @@ binaries. Its exact format is tool-owned output, not hand-polished here.
 
 ## Standard layout: one base plus conditional overlays
 
-Per module, three conventional directories. Only `src/` is mandatory. Libraries and layers are
+Per module, three conventional directories — under the module's own directory, which is its name
+unless its `at` clause says otherwise. Only `src/` is mandatory. Libraries and layers are
 **not differentiated** — layer-ness is not declared anywhere; it is just what your sources do
 (even a pure-`src` package can concretely re-declare foreign abstract names).
 

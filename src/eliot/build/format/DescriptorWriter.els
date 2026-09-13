@@ -13,7 +13,8 @@ import eliot.build.model.Descriptor
  * is `model` and nothing else.
  *
  * Not a byte-for-byte round trip — comments, order within a keyword's group and spelling are the
- * author's, not the model's — but every clause the model carries reappears, canonically ordered. That
+ * author's, not the model's, and an `at` repeating the module's own name is dropped because the name
+ * already said it — but every clause the model carries reappears, canonically ordered. That
  * is what makes a descriptor inspectable, what makes the tool's own edits to one reviewable, and what
  * lets a reader's test assert on a rendering rather than on a shape.
  *
@@ -44,11 +45,19 @@ private def renderDependency(dependency: Dependency): String = dependency match 
 
 private def renderModule(built: BuildModule): String =
    "module " ++ show(built.moduleName) ++ renderBlock(
-      renderInternal(built) ++
+      renderAt(built) ++
+         renderInternal(built) ++
          built.moduleDependencies.map(renderDependency) ++
          renderTestBlock(built.moduleTestDependencies) ++
          built.modulePlugins.map(renderPlugin)
    )
+
+/**
+ * `at <directory>`, written only where the directory is not the module's name. Where it is, the name
+ * has already said so, and writing it out would spell a convention as though it were an override.
+ */
+private def renderAt(built: BuildModule): List[String] =
+   fold(built.moduleDirectory == show(built.moduleName), empty, singleton("at " ++ built.moduleDirectory))
 
 private def renderInternal(built: BuildModule): List[String] =
    fold(built.exported, empty, singleton("internal"))
