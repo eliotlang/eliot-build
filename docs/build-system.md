@@ -26,9 +26,14 @@ convention cannot hold in the one repository that has to dogfood it (below).
 | `Command` | what a command line asks for, what a resolution reads as | done for that verb |
 | — | lockfile, source assembly, the rest of the verb set, wrapper | not started |
 
-**There is a tool now.** `eliot resolve <configuration>` reads the descriptor where the user is
-standing, closes that configuration over the graph and prints what was selected, cloning and reading
-mirrors on the way. That is one verb of a fixed set, and it is the boring one — but it is what makes
+**There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
+the descriptor where the user is standing, closes that configuration over the graph and prints what was
+selected, cloning and reading mirrors on the way. As of 2026-09-13 it does that against a *published*
+package: the eliot repository carries a root `eliot.pkg` and a `v0.0` release, and a consumer declaring
+`dep github.com/robertbraeutigam/eliot//stdlib v0.0` gets the mirror fetched from GitHub, the descriptor
+read out of the object database at that tag, and `github.com/robertbraeutigam/eliot v0.0` selected once
+for both module selectors — modules of one repository version together, which is now a fact about a
+remote rather than about a table in a test. That is one verb of a fixed set, and it is the boring one — but it is what makes
 everything above it real: the launcher's `main` is the only place the platform's `Process` and
 `FileSystem` are resolved at all, so until it existed the modules beneath it compiled green without
 anybody knowing whether they ran (`docs/effectful-modules.md` §14).
@@ -130,6 +135,14 @@ follows:
   never branch heads: a moving head names different code on different days, has no
   human-readable version, and gives MVS nothing to order. A commit must be tagged to be
   consumable (no Go-style pseudo-versions).
+- **`v0` is the line that promises nothing.** The append-only contract is what a line *is*, so a
+  package whose signatures are still moving needs somewhere to be that does not claim otherwise:
+  line 0, by the same mechanics as any other (branch `v0`, tags `v0.0`, `v0.1`, and `v0.0`'s commit
+  as the lineage anchor) and with the guarantee explicitly suspended. Nothing in the resolver treats
+  it specially — MVS does not care which line it is selecting on — so this is a convention, and the
+  only one the format needs: the eliot repository itself is on it (`v0.0`, 2026-09-13), and moving to
+  `v1` is the ordinary act of starting a branch, done when the base stops changing shape and
+  `compat-check` exists to keep the promise.
 - **The guarantee has teeth**: `eliot compat-check` diffs exported signatures between the branch
   head and a candidate tag and refuses removals/changes (Elm precedent: computed, not promised).
   Caveat, accepted: use-site verification means a dependency's *body* change can surface new
