@@ -1,28 +1,32 @@
 import eliot.collection.List
 import eliot.build.format.Clause
 import eliot.build.format.ClauseReader
+import eliot.build.format.DependencyClause
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
 
 /**
- * The `eliot.pkg` file: the interpretation of a clause tree into the typed model, and the writing of
- * one back out.
+ * The `eliot.pkg` file: which keyword introduces what, and the reading of a whole file into the typed
+ * model — and the writing of one back out.
  *
  * `eliot.build.format.Clause` decides what shape a descriptor has; this module decides what the
- * shapes *mean*, and it is the only place that knows the vocabulary. Keeping the two apart is what
- * lets a foreign tool read the file's literal content without knowing the build model, and it puts
- * every "this descriptor needs a newer eliot" diagnostic in one place. The model itself is
- * `eliot.build.model.Descriptor`, which holds no syntax at all — so a consumer that only reads a
- * descriptor never imports this module.
+ * shapes *mean*. Keeping the two apart is what lets a foreign tool read the file's literal content
+ * without knowing the build model. The model itself is `eliot.build.model.Descriptor`, which holds no
+ * syntax at all — so a consumer that only reads a descriptor never imports this module.
  *
- * Reading a clause *carefully* is `eliot.build.format.ClauseReader`'s: which argument has to be
- * there, which children are recognised, and what a clause that does not say so is complained about
- * with. So this module states what a `dep` needs and never how a missing one is reported — and the two
- * error channels underneath it, the parser's `ClauseError` and the reader's `ClauseProblem`, become
- * `DescriptorError` here and nowhere else. Unknown clauses are fatal by design, which is how the
- * format evolves without a version field: a descriptor using a clause this launcher does not know
- * refuses to build rather than silently ignoring the line that would have changed the outcome.
+ * Two things the vocabulary is made of live next door, because neither is about a keyword.
+ * `eliot.build.format.ClauseReader` reads one clause carefully — which argument has to be there, which
+ * children are recognised, what a clause that does not say so is complained about with — and
+ * `eliot.build.format.DependencyClause` reads the `dep` line, the one clause every block here has in
+ * common. What is left is the keywords themselves: `module`, `artifact`, `plugin`, `jar`, `backend`,
+ * and which field of the descriptor each of them feeds.
+ *
+ * The two error channels meet here and nowhere else: the parser raises `ClauseError`, a reader raises
+ * `ClauseProblem`, and `DescriptorError` is the union a caller catches. Unknown clauses are fatal by
+ * design, which is how the format evolves without a version field — a descriptor using a clause this
+ * launcher does not know refuses to build rather than silently ignoring the line that would have
+ * changed the outcome.
  */
 
 /**
@@ -98,61 +102,11 @@ private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor 
    knownClauses(descriptorKeywords, clauses)
 
    Descriptor(
-      clausesNamed("dep", clauses).map(dependencyOf),
+      dependenciesIn(clauses),
       clausesNamed("module", clauses).map(moduleOf),
-      clausesNamed("test", clauses).flatMap(dependenciesOf),
+      testDependenciesIn(clauses),
       clausesNamed("artifact", clauses).map(artifactOf)
    )
-}
-
-/**
- * `dep <url> <version>` or `dep //module`. The version is required for a foreign package — a
- * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling
- * module, which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
- */
-private def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
-   val target = required(0, "a dep needs a package URL", clause)
-   val reference = referenceOf(target, clause)
-   val version = versionOf(optional(1, clause), clause)
-
-   atMostArguments(2, clause)
-   reference match {
-      case Sibling(name)    -> siblingDependencyOf(name, version, clause)
-      case Foreign(package) -> requirementOf(package, version, clause)
-   }
-}
-
-private def siblingDependencyOf(
-   name: ModuleName,
-   version: Option[Version],
-   clause: Clause
-): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      SiblingDependency(name),
-      _ -> raise(problemIn("a sibling module versions with its repository and carries no version", clause)),
-      version
-   )
-
-private def requirementOf(
-   package: Package,
-   version: Option[Version],
-   clause: Clause
-): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      raise(problemIn("a foreign dependency needs a minimum version", clause)),
-      minimum -> Requirement(package, minimum),
-      version
-   )
-
-/**
- * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less is an invariant of the
- * format, not merely of the canonical form `packageId` answers with: a written scheme is a spelling
- * the author expected to matter, and where the bytes come from is the consumer's configuration.
- * Refusing it here is what keeps `//` unambiguously the module selector.
- */
-private def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageId = {
-   checkSchemeless(target, clause)
-   packageId(target)
 }
 
 private def moduleOf(clause: Clause): {Throw[ClauseProblem]} BuildModule = {
@@ -221,30 +175,6 @@ private def jarClause(clause: Clause): {Throw[ClauseProblem]} JarPin = {
    requireThat(label == "sha256", "a jar's hash must be introduced by 'sha256'", clause)
    JarPin(coordinate, hash)
 }
-
-private def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
-   clause.childrenNamed("dep").map(dependencyOf)
-
-private def testDependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
-   clause.childrenNamed("test").flatMap(dependenciesOf)
-
-/**
- * Every version token is a git tag, spelled as the tag is: there is no `>=` to write and no range to
- * express, because the syntax cannot state what the resolver does not do. The token is *parsed*
- * rather than merely inspected — the model carries an ordered version from here on, which is what
- * resolution needs and what the string never was.
- */
-private def versionOf(token: Option[String], clause: Clause): {Throw[ClauseProblem]} Option[Version] =
-   foldOption(None, tag -> Some(checkedVersion(tag, clause)), token)
-
-private def checkedVersion(tag: String, clause: Clause): {Throw[ClauseProblem]} Version = {
-   val parsed: Option[Version] = runAbort(parseVersion(tag))
-
-   foldOption(raise(problemIn("a version must be a tag like 'v1.3'", clause)), version -> version, parsed)
-}
-
-private def checkSchemeless(target: String, clause: Clause): {Throw[ClauseProblem]} Unit =
-   requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)
 
 private def descriptorKeywords: List[String] =
    append(append(append(append(empty, "dep"), "module"), "test"), "artifact")
