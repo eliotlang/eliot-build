@@ -13,7 +13,8 @@ compiler plugins are release assets of the package that ships them rather than M
 the four questions that decision leaves open are recorded with it. Amended 2026-09-13: **the toolchain
 is reached through dependency-only modules** — a platform package is already a bill of materials, the
 test side gets one, and a user's descriptor is two lines that `eliot init` writes ("What a user
-writes", below); Q1 is decided by it.
+writes", below); Q1 is decided by it. Amended 2026-09-14: a tag push publishes its own plugin assets, so
+a release carries the sources and the compiler binaries built from them (below, "Compiler plugins").
 
 **Where the implementation stands** (2026-09-13, 202 tests):
 
@@ -593,9 +594,16 @@ does. Sources and binary cannot skew because they are the same tag.
   one combined wildcard classpath, a launcher script, an editor template — which is IDE scaffolding that
   retires when the build system can build the LSP, and which wants the opposite output to a release's
   three disjoint zips. **The assets belong in CI on a tag push**, which is what "CI builds the asset"
-  above already said: `mill` the module jars, assemble the zips, attach them to the release. The eliot
-  repository has no workflow at all today, and that — not any packaging question — is what stands
-  between `v0.1`'s clauses and `v0.1`'s assets.
+  above already said: `mill` the module jars, assemble the zips, attach them to the release. **It exists**
+  (2026-09-14): the eliot repository's `scripts/package-assets.sh` and `.github/workflows/release.yml`,
+  where pushing an annotated tag runs the suite, builds the three zips and creates the release with each
+  asset's sha256 in its notes. Two things writing it settled. The partition is a **rule**, not three
+  lists — a third-party jar rides with the lowest asset that needs it — so the three statements above are
+  what the rule *produces* from this repository's module graph rather than what somebody typed, and a new
+  dependency lands where it belongs without the script being edited. And the two properties the launcher
+  needs are **checked at build time**: disjoint (no basename in two assets) and complete (every jar the
+  deepest layer's run classpath names is in exactly one), because an overlap is `Has multiple
+  implementations.` at whoever consumes the tag, which is the worst possible place to find out.
 - **Exact, not minimum** — plugin assets are toolchain components, outside MVS, pinned by the tag their
   package was selected at.
 - **A published asset is never replaced.** A release asset is mutable where a git tag's content is not,
