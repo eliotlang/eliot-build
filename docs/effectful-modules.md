@@ -881,3 +881,76 @@ layout off the tagged descriptor and prints five roots — the project's `src` a
 is `internal`. Handed to the compiler verbatim, those five lines build the project and its 96 cases
 pass. §14's note stands unchanged: nothing runs the launcher automatically, and a change under `git/`,
 `resolve/` or `assemble/` is verified only when both the suite and the launcher have been run.
+
+## 16. Revisited, 2026-09-14 — the descriptor stops speaking Maven, and the tool gets a front door
+
+Same compiler and framework as §15. 205 cases green, three of them new, and the thing that was run is
+no longer the launcher this checkout built — it is the launcher a release published.
+
+**A change that needed neither a double nor the launcher, which is the layering paying out.** The
+`plugin` clause became what the design decided it should be: `Plugin(pluginAsset, pluginBackend,
+compilerBase)` instead of `Plugin(pluginCoordinate, pluginJars)`, and `plugin <asset> { backend <word>
+| compiler }` instead of `plugin <coord> { jar <coord> sha256 <hex> }`. `JarPin` is gone. Three files
+moved — `model/Descriptor`, `format/PackageFile`, `format/DescriptorWriter` — and nothing beneath them
+noticed, because there is nothing beneath them: the model holds no syntax and no effects, the reader
+and writer hold syntax and no effects, and none of the three can reach a filesystem to have needed a
+fake of one. §12 said what each file is allowed to know; this is the first revision since that tested
+the claim by changing the vocabulary itself, and the blast radius was exactly the three files that own
+it. A format revision cost nothing below the format.
+
+**Two of the design's open questions closed, and one of them closed by having nothing to say.** Q3 —
+which asset holds the compiler — is the bare marker `compiler`, the same shape as `internal` and for
+the same reason: it states a fact about the thing it sits in rather than relating it to anything, so
+there is nothing for it to take an argument about. Q2 — one classpath or one classloader per plugin —
+is decided as parent-and-children with a flat union as the interim, and the decision's content *for
+this repository* is that no clause changes either way. How a plugin's jars are loaded is the launcher's
+business and the compiler's; a descriptor that had an opinion about it would be a descriptor knowing
+something it has no use for.
+
+**`backend` is now one word in two blocks, and that is the point rather than a collision.** In an
+`artifact` it names the package whose plugin to call; in a `plugin` it names the command word that
+plugin answers to. Identity from the consumer, mechanism from the provider — the same split the rest of
+the design runs on — and neither block can spell the other's form, because each block's keyword set is
+its own. The parser needed no disambiguation to make that true; block scope already was the
+disambiguation.
+
+**The tool has a front door, and it is the first part of it not written in Eliot.** `eliotw` and
+`.eliot-version`: find a JRE, read the pinned version, fetch that launcher once into
+`~/.cache/eliot/launcher/<tag>/`, exec it. A hundred lines of POSIX shell that know three things — a
+URL shape, an asset name and a cache path — and nothing whatever about descriptors, resolution or
+verbs. That is the same rule every module in this project is held to, applied to a file the compiler
+never sees: what it is allowed to know is what it cannot do its job without.
+
+§14 left a note for it — "a `--self-check` could honestly live in the wrapper" — and the answer is
+that it could not. A self-check is a claim about the build system, and the wrapper is the one component
+with no access to one; it would have to fetch the launcher and ask *it*, which makes the check a verb
+and the wrapper what it already is. The note is withdrawn rather than deferred.
+
+**The platform check closed on itself.** §14 made the launcher the only thing that proves the effectful
+modules have an interpretation on the platform, and §15 ran it against a real repository. What ran this
+time is the published artifact: from a clean clone holding nothing but the wrapper, `./eliotw roots
+test` fetched `eliot-launcher.jar` from the v0.0 release, cloned two repositories, checked out their
+tags, and printed six roots — and those six roots, handed to the compiler, built this project's own 205
+cases. The check is no longer "the launcher I just compiled runs"; it is "the launcher a stranger would
+download builds this repository". Still nothing automatic, and §14's note otherwise stands.
+
+**One effect the platform does not have.** `Launcher.main` prints which of its four channels refused
+and returns `Unit`, so a failed build exits 0 and `./eliotw roots test && …` runs the second half
+anyway. Nothing in `eliot.system` sets *this* process's exit status — `Process` spawns others and
+reports theirs — and the gap is not only a missing native. An operation that never returns is
+`def exit(code: Int): A` in a language where every `A` is inhabited by returning, so it is the same
+shape as the three control-flow leaves in §11.6 and probably wants the same treatment: platform-private,
+with a discharge above it. Recorded here because it is a question about what an effect *is*, not about
+what the build system wants.
+
+**And one mechanism that was designed, built twice, and removed** — worth keeping because the second
+build is what made the first one legible. The launcher pin carried a `sha256`, hand-written. Bumping a
+version therefore meant download, hash, edit, so the wrapper learned to record the hash itself on first
+fetch — which fixed the typing and introduced something worse: the dumb half of the bootstrap could now
+rewrite a file the user had committed. Asked what the check actually won, the answer did not survive
+contact. It verified one link of a chain where nothing else is verified at all, against a threat TLS
+already covers except for a published asset being replaced at its own URL — which is a promise a
+publisher keeps, not a check a consumer runs. So the promise is written down and the hash is gone, and
+where an asset hash belongs was never in doubt: `eliot.lock`, tool-written, recorded on first fetch,
+beside every other one. The lesson is the doc's own subject in a different medium — a machine's fact
+had been put in a file a person maintains, and everything awkward downstream followed from that.
