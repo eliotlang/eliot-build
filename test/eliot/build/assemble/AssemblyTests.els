@@ -17,6 +17,15 @@ import eliot.build.assemble.Assembly
  * Run against `eliot.build.resolve.TablePackages`, whose trees are at `/trees/<url>@<tag>` and exist
  * only as answers — the subject here is the layout read off a descriptor, not how a version got onto
  * disk, which is `eliot.build.git.Cache`'s and `GitTests`' business.
+ *
+ * **A module is mounted at the directory the layout says, whether or not anything is there.** A
+ * package whose entire content is a compiler plugin ships no `.els` at all — the compiler itself is
+ * one, and so is a documentation backend — so the root it contributes is a directory that does not
+ * exist. That is deliberately not a failure: the compiler accepts a source root it finds nothing in
+ * (verified), and the one case that is genuinely a mistake — a mistyped `at` — is indistinguishable
+ * from it here, where the dependency line that would name the error has never been seen. The
+ * diagnostic belongs at the author's build, which is the same place the empty mounts above are
+ * already left to.
  */
 def testCases: Test = {
    "sourceRoots" should "mount the project's own sources, and its tests for the test scope" in {
@@ -42,6 +51,12 @@ def testCases: Test = {
          "dep github.com/e/eliot//jvm v1.2",
          publishing("github.com/e/eliot@v1.2", "module jvm {\n  at jvm/eliot\n}")
       ) shouldBe "/project/src, /project/test, /trees/github.com/e/eliot@v1.2/jvm/eliot/src"
+   }
+   "sourceRoots" should "mount a module that ships a plugin and no sources of its own" in {
+      assembled(
+         "dep github.com/e/eliot//apidoc v1.2",
+         publishing("github.com/e/eliot@v1.2", "module apidoc {\n  plugin eliot-apidoc.zip {\n    backend apidoc\n  }\n}")
+      ) shouldBe "/project/src, /project/test, /trees/github.com/e/eliot@v1.2/apidoc/src"
    }
    "sourceRoots" should "leave a module nobody selected out of the mount" in {
       assembled(
