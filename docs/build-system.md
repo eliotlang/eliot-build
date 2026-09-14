@@ -760,6 +760,18 @@ it settled.
   find one clause inside the *smart* file is a shell script that has started parsing the format. The
   proposal is not dead — one `grep` is not a parser either — but it buys one fewer file at the price of
   the one property the bootstrap rests on.
+- **What the comparison with `gradlew` and `millw` turned up.** Four defects, all now fixed, and each
+  one a thing both of those scripts learned the hard way: a pin committed with CRLF line endings put a
+  carriage return in the download URL (mill strips them explicitly); `dirname "$0"` is a symlink's
+  directory rather than the wrapper's, so a symlinked wrapper found no pin (gradlew walks the whole
+  chain); a `JAVA_HOME` that was set and wrong fell through to the PATH, silently building on a
+  different JVM than the user pointed at (gradlew dies, and is right to); and there was no way to pass
+  the JVM an option, which is `ELIOT_OPTS` now. Three of their features are deliberately absent: the
+  `ulimit -n` bump, which exists for Gradle's daemon and not for a process that runs once; path
+  conversion for Cygwin and MSYS, with `eliotw.bat` the real answer for Windows rather than a
+  translation layer; and an environment override for the *version*, which mill has and which trades
+  the reproducibility the pin exists for. One of ours is ahead of both: the hash is in the pin from the
+  first release, where Gradle's is opt-in and mill has none at all.
 - **A failure still exits 0.** `Launcher.main` prints which of its four channels refused and returns
   `Unit`, because nothing in `eliot.system` sets this process's exit status — `Process` spawns others
   and reports *their* codes. So `./eliotw roots test && …` runs the second half after a failure. The
