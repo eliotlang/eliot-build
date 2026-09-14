@@ -131,7 +131,15 @@ Every source root that should contribute tests must be passed: the framework's `
 
 ### Running the tool
 
-The tool has a `main`, and it is built the same way with its own module:
+There are two ways in. `./eliotw <verb> <configuration>` is the user's: the committed wrapper reads
+`.eliot-version`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
+it, so it needs no compiler checkout and no mill — but it runs the *published* launcher, never your
+working tree, which makes it the wrong tool for checking a change. `ELIOT_LAUNCHER_REPOSITORY` points
+it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
+which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
+
+The second is the platform check, and it is the one a change is verified with. The tool has a `main`,
+and it is built the same way as the suite with its own module:
 
 ```bash
 cd /home/robert/personal/eliot

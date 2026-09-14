@@ -744,6 +744,30 @@ library) and **spawns the compiler as a second `java` process** with the assembl
 dynamic jar loading from Eliot would need a bespoke native, while spawn is needed for git
 anyway and keeps the compiler's classpath isolated from the launcher's.
 
+**The wrapper exists** (2026-09-14): `eliotw` and `.eliot-version` at the root of this repository,
+a hundred lines of POSIX shell, half of them comment, doing exactly the four steps above
+and nothing else. Three things writing
+it settled.
+
+- **The launcher cache is machine-level** — `${XDG_CACHE_HOME:-~/.cache}/eliot/launcher/<tag>/`,
+  overridable by `ELIOT_CACHE`. Not a choice so much as an observation: the launcher has to exist
+  *before* the project has a `target/`, so there is nowhere else it could go. That makes it the first
+  thing actually living in a user-level cache, and the deferred proposal to move the mirror cache there
+  too is now the smaller change of the two rather than the larger.
+- **The pin stayed its own file.** The deferred proposal folds it into `eliot.pkg` as a first clause,
+  and writing the wrapper is what made the cost concrete: the wrapper reads its pin with a `while read
+  keyword value` loop in a checkout no eliot has ever run in, and a shell script that instead has to
+  find one clause inside the *smart* file is a shell script that has started parsing the format. The
+  proposal is not dead — one `grep` is not a parser either — but it buys one fewer file at the price of
+  the one property the bootstrap rests on.
+- **A failure still exits 0.** `Launcher.main` prints which of its four channels refused and returns
+  `Unit`, because nothing in `eliot.system` sets this process's exit status — `Process` spawns others
+  and reports *their* codes. So `./eliotw roots test && …` runs the second half after a failure. The
+  wrapper is already right (it `exec`s, so it propagates whatever the launcher returns); what is
+  missing is a jvm-layer primitive and the signature question that comes with it, since an operation
+  that never returns is `def exit(code: Int): A` in a language where every `A` is inhabited by
+  returning.
+
 **The full sequence**: script finds JRE → reads pin → fetches/caches/verifies launcher jar →
 execs it. Launcher parses `eliot.pkg` (+ `eliot.lock` if present) → MVS over git tags (shelling
 `git ls-remote`/`fetch`, verifying content hashes) → unions the plugin jar

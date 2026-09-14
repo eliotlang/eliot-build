@@ -1,0 +1,8 @@
+-- The launcher this project builds with, and the only file `eliotw` reads. Keeping it out of
+-- `eliot.pkg` is what lets the wrapper stay a dumb script: a shell loop over lines is not a parser,
+-- and the wrapper has to work in a checkout that no eliot has ever run in.
+--
+-- The hash is what a mirror cannot substitute past. It is optional everywhere else and committed
+-- here because this repository's own launcher is the one every other repository's trust starts at.
+v0.0
+sha256 eaacb12130a50ce0910b8f4a1e08050aa481255e4cfc7c5df8b6bf9a9f7e5510

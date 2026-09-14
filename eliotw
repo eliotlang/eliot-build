@@ -1,0 +1,109 @@
+#!/bin/sh
+#
+# The eliot wrapper: the one committed file that needs an eliot to be absent.
+#
+# Version-free and byte-identical in every repository — all the variance lives in `.eliot-version`
+# beside it — so "copy this script from anywhere" is literally true and no repository is ever a
+# version behind its own wrapper. Its whole job is four steps: find a JRE, read the pinned launcher
+# version, fetch that launcher once into a machine-level cache and verify it, then execute it.
+# Everything smart rides the dependency graph and is none of this script's business.
+#
+# The committed side pins *what*; the environment chooses *where from*. ELIOT_LAUNCHER_REPOSITORY
+# redirects the download at a mirror, because the same repository has to build inside and outside a
+# firewall — a mirror is consumer configuration, never package content. The pin's optional `sha256`
+# line is exactly what a redirected download cannot substitute past: the launcher executes before any
+# verification machinery of the build system itself exists, so it is the root of trust, and a
+# committed, reviewed hash is the only thing standing behind it.
+
+set -eu
+
+fail() {
+   echo "eliotw: $1" >&2
+   exit 1
+}
+
+scriptDirectory=$(dirname "$0")
+pinFile="$scriptDirectory/.eliot-version"
+launcherRepository="${ELIOT_LAUNCHER_REPOSITORY:-https://github.com/eliotlang/eliot-build}"
+launcherAsset="eliot-launcher.jar"
+cacheDirectory="${ELIOT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/eliot}"
+
+# The pin, read the way `eliot.pkg` reads: one clause per line, `--` comments, unknown words ignored
+# by position rather than by a grammar. The first bare word is the tag; `sha256 <hex>` is optional.
+# There is deliberately no default version — a baked-in one drifts, and "no pin means latest" trades
+# reproducibility for a convenience nobody asked for.
+[ -f "$pinFile" ] || fail "no '.eliot-version' beside this script. It pins the launcher this project
+   builds with, and there is no default: write one line naming a tag, such as 'v0.0'."
+
+pinnedVersion=""
+pinnedHash=""
+while read -r keyword value _rest || [ -n "${keyword:-}" ]; do
+   case "$keyword" in
+      "" | --*) ;;
+      sha256)
+         [ -n "$value" ] || fail "'$pinFile' has a 'sha256' line with no hash on it."
+         pinnedHash="$value"
+         ;;
+      *) [ -n "$pinnedVersion" ] || pinnedVersion="$keyword" ;;
+   esac
+done < "$pinFile"
+
+[ -n "$pinnedVersion" ] || fail "'$pinFile' names no launcher version. One line holding a tag, such
+   as 'v0.0', is the whole file."
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+   java="$JAVA_HOME/bin/java"
+elif command -v java > /dev/null 2>&1; then
+   java=java
+else
+   fail "no java found. Set JAVA_HOME or put java on the PATH — the launcher is a jar, and providing
+   a JRE is not this script's job."
+fi
+
+# A hash is checked on the downloaded bytes, before they are ever named as the launcher, so a cache
+# entry can only be created out of bytes that passed. Computed and compared rather than handed to
+# `sha256sum -c`, whose checksum-file format is one more thing to spell correctly in two dialects.
+sha256Of() {
+   if command -v sha256sum > /dev/null 2>&1; then
+      sha256sum "$1" | cut -d ' ' -f 1
+   elif command -v shasum > /dev/null 2>&1; then
+      shasum -a 256 "$1" | cut -d ' ' -f 1
+   else
+      fail "'$pinFile' pins a sha256, and neither sha256sum nor shasum is installed to check it."
+   fi
+}
+
+launcherDirectory="$cacheDirectory/launcher/$pinnedVersion"
+launcherJar="$launcherDirectory/$launcherAsset"
+
+if [ ! -f "$launcherJar" ]; then
+   # One concatenation on the launcher's own repository and tag — the same URL shape every binary in
+   # this system is fetched by, so the wrapper needs no coordinates and no resolution logic at all.
+   launcherUrl="$launcherRepository/releases/download/$pinnedVersion/$launcherAsset"
+   partialJar="$launcherJar.partial.$$"
+
+   mkdir -p "$launcherDirectory"
+   echo "eliotw: fetching the eliot launcher $pinnedVersion from $launcherUrl" >&2
+   if command -v curl > /dev/null 2>&1; then
+      curl --fail --location --silent --show-error --output "$partialJar" "$launcherUrl" ||
+         { rm -f "$partialJar"; fail "could not fetch $launcherUrl"; }
+   elif command -v wget > /dev/null 2>&1; then
+      wget --quiet --output-document "$partialJar" "$launcherUrl" ||
+         { rm -f "$partialJar"; fail "could not fetch $launcherUrl"; }
+   else
+      fail "neither curl nor wget is installed, and one of them has to fetch the launcher."
+   fi
+
+   if [ -n "$pinnedHash" ]; then
+      downloadedHash=$(sha256Of "$partialJar")
+      if [ "$downloadedHash" != "$pinnedHash" ]; then
+         rm -f "$partialJar"
+         fail "the launcher fetched from $launcherUrl is not the one '$pinFile' pins.
+   Expected $pinnedHash, got $downloadedHash. Nothing was cached."
+      fi
+   fi
+
+   mv "$partialJar" "$launcherJar"
+fi
+
+exec "$java" -jar "$launcherJar" "$@"
