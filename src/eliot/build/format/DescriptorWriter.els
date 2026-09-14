@@ -19,7 +19,8 @@ import eliot.build.model.Descriptor
  * lets a reader's test assert on a rendering rather than on a shape.
  *
  * Nesting is written by indenting a whole rendered block rather than by threading a depth through the
- * renderers, so a plugin's jars end up two levels in without any renderer knowing how deep it is.
+ * renderers, so a module's plugin sub-clauses end up two levels in without any renderer knowing how
+ * deep it is.
  */
 
 /**
@@ -66,9 +67,13 @@ private def renderTestBlock(dependencies: List[Dependency]): List[String] =
    fold(isEmpty(dependencies), empty, singleton("test" ++ renderBlock(dependencies.map(renderDependency))))
 
 private def renderPlugin(plugin: Plugin): String =
-   "plugin " ++ plugin.pluginCoordinate ++ renderBlock(plugin.pluginJars.map(renderJar))
+   "plugin " ++ plugin.pluginAsset ++ renderBlock(renderBackendWord(plugin) ++ renderCompiler(plugin))
 
-private def renderJar(jar: JarPin): String = "jar " ++ jar.jarCoordinate ++ " sha256 " ++ jar.jarSha256
+private def renderBackendWord(plugin: Plugin): List[String] =
+   foldOption(empty, word -> singleton("backend " ++ word), plugin.pluginBackend)
+
+private def renderCompiler(plugin: Plugin): List[String] =
+   fold(plugin.compilerBase, singleton("compiler"), empty)
 
 private def renderArtifact(artifact: Artifact): String =
    "artifact " ++ artifact.artifactName ++ renderBlock(

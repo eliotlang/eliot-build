@@ -25,16 +25,26 @@ data Dependency =
    Requirement(requiredPackage: Package, minimumVersion: Version)
 
 /**
- * One jar of a compiler plugin's flat closure: an exact Maven coordinate and the SHA-256 the
- * consumer verifies it against. Author-computed at release time, so the consumer's launcher never
- * resolves a POM.
+ * A compiler plugin a package ships: the name of a *release asset* of that package, plus what its
+ * consumer's launcher has to know before it can run anything with it.
+ *
+ * The asset name is the whole location. A release asset hangs off the same repository at the same tag
+ * the sources came from, so a consumer that has already chosen a version has already chosen the
+ * binary — the URL is one concatenation on facts it holds, nothing in any descriptor changes when a
+ * version does, and sources and plugin cannot skew. That is what a Maven coordinate could not do: it
+ * gave a plugin a second identity, with a second version number to drift.
+ *
+ * Both fields are the *provider's* statements about mechanism, which is why they are here rather than
+ * in the consumer's `Backend`. `pluginBackend` is the compiler command word the asset registers —
+ * present exactly when the plugin is a backend candidate, absent when it is an always-on contributor,
+ * which is what stops `lang` and `stdlib` counting as platforms. `compilerBase` marks the one asset
+ * holding the compiler itself, which a launcher must know before it can name a `Main` or hang the
+ * others off it.
+ *
+ * No hash, deliberately: an asset is built from the tagged tree *after* the tag exists, so no hash of
+ * it can live in the commit that tag names. `eliot.lock` records one on first fetch.
  */
-data JarPin(jarCoordinate: String, jarSha256: String)
-
-/**
- * A compiler plugin a package ships: its own exact coordinate plus the full flat jar closure.
- */
-data Plugin(pluginCoordinate: String, pluginJars: List[JarPin])
+data Plugin(pluginAsset: String, pluginBackend: Option[String], compilerBase: Bool)
 
 /**
  * A build module of a multi-module repository. `exported` decides whether dependents mount its

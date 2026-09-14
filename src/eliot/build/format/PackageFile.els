@@ -20,8 +20,11 @@ import eliot.build.model.Descriptor
  * `eliot.build.format.DependencyClause` reads the `dep` line, the one clause every block here has in
  * common. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
  * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
- * left here is the keywords themselves: `module`, `at`, `artifact`, `plugin`, `jar`, `backend`, and
- * which field of the descriptor each of them feeds.
+ * left here is the keywords themselves: `module`, `at`, `artifact`, `plugin`, `compiler`, `backend`,
+ * and which field of the descriptor each of them feeds. `backend` is the one word two blocks own, and
+ * it means the two halves of one thing: in an `artifact` it names the package whose plugin to call, in
+ * a `plugin` the command word that plugin answers to — identity from the consumer, mechanism from the
+ * provider, and neither reading is reachable from the other's block.
  *
  * The two error channels meet here and nowhere else: the parser raises `ClauseError`, a reader raises
  * `ClauseProblem`, and `DescriptorError` is the union a caller catches. Unknown clauses are fatal by
@@ -171,26 +174,34 @@ private def parameterOf(clause: Clause): Pair[String, String] =
 private def pluginsOf(clause: Clause): {Throw[ClauseProblem]} List[Plugin] =
    clause.childrenNamed("plugin").map(pluginClause)
 
+/**
+ * `plugin <asset> { backend <word> | compiler }` — the name of a release asset of this package, and
+ * the provider's two statements about it. No coordinate, no version, no URL and no hash: the asset
+ * hangs off this repository at the tag the consumer already selected, and what a fetch of it is
+ * *worth* is the lockfile's to record, since the asset is built after the tag exists.
+ */
 private def pluginClause(clause: Clause): {Throw[ClauseProblem]} Plugin = {
-   val coordinate = required(0, "a plugin needs a Maven coordinate", clause)
+   val asset = required(0, "a plugin needs a release asset name", clause)
 
    atMostArguments(1, clause)
    knownChildren(pluginKeywords, clause)
-   Plugin(coordinate, clause.childrenNamed("jar").map(jarClause))
+   Plugin(asset, backendWordOf(clause), !isEmpty(clause.childrenNamed("compiler")))
 }
 
 /**
- * `jar <coordinate> sha256 <hex>` — exact coordinate, exact hash. The one exact pin in the system,
- * and it rides inside a Maven coordinate, which is exact by nature.
+ * `backend <word>` — the compiler command word this asset registers, which is what makes it a backend
+ * candidate rather than an always-on contributor. The word rather than a package, because this is the
+ * provider's side: an artifact naming a backend names the *package*, and neither side can spell the
+ * other's half.
  */
-private def jarClause(clause: Clause): {Throw[ClauseProblem]} JarPin = {
-   val coordinate = required(0, "a jar needs a Maven coordinate", clause)
-   val label = required(1, "a jar needs 'sha256 <hex>'", clause)
-   val hash = required(2, "a jar needs 'sha256 <hex>'", clause)
+private def backendWordOf(clause: Clause): {Throw[ClauseProblem]} Option[String] =
+   clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendWordClause(child)))
 
-   atMostArguments(3, clause)
-   requireThat(label == "sha256", "a jar's hash must be introduced by 'sha256'", clause)
-   JarPin(coordinate, hash)
+private def backendWordClause(clause: Clause): {Throw[ClauseProblem]} String = {
+   val word = required(0, "a plugin's backend needs the command word it registers", clause)
+
+   atMostArguments(1, clause)
+   word
 }
 
 private def descriptorKeywords: List[String] =
@@ -201,4 +212,4 @@ private def moduleKeywords: List[String] =
 
 private def artifactKeywords: List[String] = append(append(empty, "dep"), "backend")
 
-private def pluginKeywords: List[String] = singleton("jar")
+private def pluginKeywords: List[String] = append(append(empty, "backend"), "compiler")

@@ -34,10 +34,17 @@ def testCases: Test = {
    "parseDescriptor" should "read the eliot repository's own multi-module shape" in {
       roundTrip(
          "module lang {\n" ++
-         "  plugin com.vanillasource:eliot-lang:0.5.0 {\n" ++
-         "    jar org.ow2.asm:asm:9.9 sha256 9f2ca9b1\n  }\n}\n" ++
+         "  at lang/eliot\n" ++
+         "  plugin eliot-compiler.zip {\n    compiler\n  }\n}\n" ++
+         "module jvm {\n" ++
+         "  at jvm/eliot\n" ++
+         "  dep //stdlib\n" ++
+         "  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}\n" ++
          "module examples {\n  internal\n  dep //jvm\n}"
       )
+   }
+   "parseDescriptor" should "read a plugin that is neither a backend nor the compiler" in {
+      roundTrip("module contrib {\n  plugin eliot-contrib.zip\n}")
    }
    "parseDescriptor" should "read a backend naming the package whose plugin to call" in {
       roundTrip("artifact hello {\n  backend github.com/eliot-lang/eliot//jvm {\n    kind exe-jar\n  }\n}")
@@ -113,9 +120,18 @@ def testCases: Test = {
    "parseDescriptor" should "reject a dep carrying more than a URL and a version" in {
       parsed("dep github.com/x/foo v1 extra") shouldBe "too many arguments in 'dep github.com/x/foo v1 extra'"
    }
-   "parseDescriptor" should "reject a jar pin without its hash" in {
-      parsed("module lang {\n  plugin a:b:1 {\n    jar c:d:2\n  }\n}")
-         shouldBe "a jar needs 'sha256 <hex>' in 'jar c:d:2'"
+   "parseDescriptor" should "reject a plugin naming no asset" in {
+      parsed("module lang {\n  plugin\n}")
+         shouldBe "a plugin needs a release asset name in 'plugin'"
+   }
+   "parseDescriptor" should "reject a plugin backend that does not say which word it registers" in {
+      parsed("module jvm {\n  plugin eliot-jvm.zip {\n    backend\n  }\n}")
+         shouldBe "a plugin's backend needs the command word it registers in 'backend'"
+   }
+   "parseDescriptor" should "reject the Maven-era jar pin, which the lockfile records now" in {
+      parsed("module lang {\n  plugin eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
+         shouldBe ("unknown clause 'jar'; this descriptor may need a newer eliot in " ++
+            "'jar c:d:2 sha256 9f2ca9b1'")
    }
    "parseDescriptor" should "reject a replacement, which the resolver has no way to honour" in {
       parsed("replace github.com/x/foo with ../foo-local")

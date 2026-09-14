@@ -61,7 +61,8 @@ because it is testable with no platform beneath it and the boundary never can be
 `eliot resolve <configuration>` prints the version selected per package, `eliot roots <configuration>`
 checks each out and prints the source directories that configuration compiles from — handed to the
 compiler verbatim, those lines build the project. The lockfile, spawning the compiler (blocked on
-published plugin jars) and the rest of the verb set are the steps after them.
+published plugin assets — the descriptor's side of that is done, `plugin <asset> { backend <word> |
+compiler }`) and the rest of the verb set are the steps after them.
 
 Neither `Git` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit` once, and `ShellGit`/`GitPackages` are the two modules nothing but
@@ -171,7 +172,7 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
 
-What that means for a change: **do not read a green 202 as evidence the tool runs** — the suite and the
+What that means for a change: **do not read a green 205 as evidence the tool runs** — the suite and the
 launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `Assembly` or the
 boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the

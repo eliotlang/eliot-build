@@ -338,8 +338,10 @@ module lang {                                -- multi-module repos only
   internal                                   -- not exported (default: exported)
   dep //other-module                         -- intra-repo sibling
   dep github.com/x/bar v2                    -- module-scoped dep
-  plugin eliot-lang.zip                      -- ships a compiler plugin: a release asset of this
-}                                            -- repo, at this tag
+  plugin eliot-compiler.zip {                -- ships a compiler plugin: a release asset of this
+    compiler                                 -- repo, at this tag. `compiler` = this asset holds
+  }                                          -- the compiler; `backend <word>` = it registers that
+}                                            -- command word; neither = always-on contributor
 
 test {                                       -- test scope (also allowed inside module)
   dep github.com/eliot-lang/eliot-test v1
@@ -355,10 +357,14 @@ artifact hello {                             -- a build configuration
 }
 ```
 
-- The `plugin` clause is **mid-revision**: it names a release asset of the shipping package rather
-  than a Maven coordinate, and the sub-clauses that would say which plugin is a backend and which asset
-  is the compiler base are open questions — see "Compiler plugins" below. The parser implements neither
-  yet; it still reads the Maven-era `plugin <coord> { jar <coord> sha256 <hex> }`.
+- The `plugin` clause names a **release asset** of the shipping package, at the tag that package was
+  selected at — no coordinate, no version, no URL, no closure (see "Compiler plugins" below). Its two
+  sub-clauses are what the provider declares *about* the asset, and both are the provider's to state
+  because both are mechanism: `backend <word>` says the asset registers that compiler command word and
+  is therefore a backend candidate (Q1), and `compiler` says it is the base asset — the one holding the
+  compiler itself, and the parent loader everything else hangs off (Q3). An asset declaring neither is
+  an always-on contributor. The hash is not here: an asset is built from the tagged tree *after* the tag
+  exists, so it is `eliot.lock` that records one, on first fetch.
 - `backend` names no platform: the backend is located among the artifact's deps (the packages
   declaring a `plugin` with a `backend` sub-clause — Q1, decided). With exactly one candidate no URL
   is needed; with several, disambiguate: `backend github.com/…//jvm { … }`. Its parameters are free-form keys validated against the
@@ -386,9 +392,10 @@ artifact hello {                             -- a build configuration
   sit at `lang/eliot/`, `stdlib/eliot/`, `jvm/eliot/` and are still selected as `//lang`, `//stdlib`,
   `//jvm`. A path inside the repo, and nothing else: an absolute path or a `..` segment is refused,
   since the descriptor is fetched from a remote and source assembly resolves this against a checkout.
-- `plugin` carries the plugin's **full flat jar closure** as `jar` sub-clauses (exact coordinate
-  + SHA-256), computed by the author at release time — the consumer's launcher fetches and
-  verifies without ever resolving a POM (see the plugin-binaries section).
+- `backend` is spelled in two places and means two halves of one thing: in an `artifact` it names the
+  *package* whose plugin to call (identity, the consumer's to state), and in a `plugin` it names the
+  *word* that plugin answers to (mechanism, the provider's). Neither block can write the other's form,
+  which is the split the whole design runs on.
 - Modules of one repo version together (tags are repo-wide): selector lines into the same repo
   at different minimums simply both feed MVS. Per-module versioning does not exist.
 
@@ -516,12 +523,26 @@ release asset attached to the package's own tag, not a Maven coordinate.** What 
 is an asset *name* — no coordinate, no version, no URL, no transitive closure.
 
 ```
+module lang {
+  at lang/eliot
+  plugin eliot-compiler.zip {
+    compiler
+  }
+}
+
 module jvm {
   at jvm/eliot
   dep //stdlib
-  plugin eliot-jvm.zip
+  plugin eliot-jvm.zip {
+    backend jvm
+  }
 }
 ```
+
+The asset name is all the descriptor carries; the two sub-clauses say what the *consumer's* launcher
+has to know before it can run anything — which asset holds the compiler (Q3) and which command word
+each other asset answers to (Q1). Both are decided below, and a package that ships a plugin needing
+neither writes the clause bare.
 
 Why the change. Maven gave a plugin a **second identity** (`group:artifact:version`) beside the
 package's own (URL + tag), which the earlier draft of this section had to keep apologising for: two
@@ -562,9 +583,11 @@ does. Sources and binary cannot skew because they are the same tag.
 ### Open questions
 
 Four things the release-asset decision did not settle. Each is written as the question, the options,
-and the current leaning — Q1 is decided since, by the bill-of-materials amendment; none is implemented,
-and the model still carries the Maven-era `Plugin(pluginCoordinate, pluginJars)` with its `jar`
-sub-clauses until the rest are chosen.
+and the answer. Q1 was decided by the bill-of-materials amendment; Q2 and Q3 were decided on
+2026-09-14, which is what let the descriptor stop speaking Maven — `Plugin(pluginAsset, pluginBackend,
+compilerBase)` is the model now, and `plugin <asset> { backend <word> | compiler }` the clause. Q4 is
+still a leaning, and it is the one the descriptor does not have to carry: where `eliot test` finds its
+main module is the test verb's business, and the test verb is unwritten.
 
 **Q1. Which plugin is the backend, and what word selects it.** The rule above ("Platforms") says an
 artifact need not name its backend when its dependencies offer exactly one candidate. That never holds:
@@ -608,8 +631,14 @@ available.
   `ServiceLoader.load(classOf[CompilerPlugin], loader)` per child with the results unioned, and a
   `--plugin <asset>` option, since plugins would no longer be on the app classpath.
 
-*Leaning: (b) as the shape, (a) as the stopgap* — the asset format is the same either way, so starting
-flat costs nothing later.
+*Decided: (b) as the shape, (a) until a second plugin-shipping package exists* (2026-09-14). The asset
+format is identical either way — that is the whole reason the question could be deferred past the
+format — so the flat union ships first and the split loaders arrive with the first closure that can
+actually skew. **The descriptor says nothing about either**, and that is the decision's real content:
+how a plugin's jars are loaded is the launcher's and the compiler's business, so no clause here changes
+when (b) lands. What the format owes Q2 is only the shape of the asset, which the section above fixed:
+jars at the top level, nothing merged, so one asset is one loader's worth of classpath whichever loader
+gets it.
 
 **Q3. Which asset is the compiler base.** Whatever Q2 decides, the launcher must know which asset holds
 `Main` and (under (b)) becomes the parent loader. Options: a fixed asset name by convention; a
@@ -617,9 +646,14 @@ flat costs nothing later.
 `.eliot-version` beside the launcher, which costs the self-healing property the toolchain section relies
 on (a package requiring a newer eliot would no longer drag the matching compiler).
 
-*Leaning: the sub-clause, attached to `lang`* — `lang` is in every program's closure, where a dedicated
-`eliotc` module would only be present if something depended on it, and a layer depending on the compiler
-reads backwards. `stdlib` then ships no `plugin` clause at all: its jar is inside that asset.
+*Decided: the sub-clause, attached to `lang`* (2026-09-14) — `lang` is in every program's closure, where
+a dedicated `eliotc` module would only be present if something depended on it, and a layer depending on
+the compiler reads backwards. `stdlib` then ships no `plugin` clause at all: its jar is inside that
+asset. The clause is the bare marker `compiler`, the same shape as `internal` and for the same reason —
+it states a fact about the thing it sits in rather than relating it to anything, so there is nothing for
+it to take an argument about. Two assets claiming it is an error the launcher raises when it assembles
+a toolchain, not one the format can catch: each descriptor is read alone, and the conflict only exists
+across a resolution.
 
 **Q4. Where `eliot test` gets its main module.** The test configuration is an ordinary artifact —
 backend from test scope, `kind exe-jar` — except that its `main` lives in the *framework*, a dependency,
