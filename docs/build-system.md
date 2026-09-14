@@ -520,7 +520,9 @@ already the URL — no platform-name namespace exists to govern.
 Plugins (backends, native contributors) are JVM binaries until the compiler is self-hosted, so a
 plugin-shipping package's descriptor names the binary it ships. **Amended 2026-09-13: that name is a
 release asset attached to the package's own tag, not a Maven coordinate.** What the descriptor carries
-is an asset *name* — no coordinate, no version, no URL, no transitive closure.
+is an asset *name* — no coordinate, no version, no URL, no transitive closure. **Tagged 2026-09-14**:
+the eliot repository's `v0.1` carries exactly the clauses below, one asset per module, and a consumer
+resolving that tag reads them.
 
 ```
 module lang {
@@ -528,6 +530,12 @@ module lang {
   plugin eliot-compiler.zip {
     compiler
   }
+}
+
+module stdlib {
+  at stdlib/eliot
+  dep //lang
+  plugin eliot-stdlib.zip
 }
 
 module jvm {
@@ -571,10 +579,23 @@ does. Sources and binary cannot skew because they are the same tag.
   also deletes the ugliest step of the Maven plan: the author shelling to coursier at release time to
   compute a flat closure.
 - **The closure ships inside the asset**, which is what made Maven's POM metadata unnecessary. This is
-  not a fat jar: `ide/lsp/package.sh` already assembles exactly the right thing — per-module jars plus
-  cats-effect, parsley, log4j and ASM, kept separate "so the bundle stays honest" — and the asset is
-  that directory, zipped, jars at the top level. Nothing is merged, so the `META-INF/services` collapse
-  that per-module jars exist to avoid cannot happen.
+  not a fat jar: per-module jars, kept separate, at the top level of the zip, nothing merged — so the
+  `META-INF/services` collapse that per-module jars exist to avoid cannot happen.
+- **One asset per module, and the assets must partition rather than overlap.** A second copy of a layer
+  jar on one classpath is `Has multiple implementations.`, so overlap is a build failure and not merely
+  wasted bytes. That sounds like it needs machinery and does not: the per-module run classpaths barely
+  differ, so the eliot repository's split at `v0.1` is three statements — `eliot-compiler.zip` is
+  eliotc's jar and lang's plus the fourteen third-party jars every module shares, `eliot-stdlib.zip` is
+  one jar (every dependency it has is already in the base), and `eliot-jvm.zip` is one jar plus ASM.
+- **`ide/lsp/package.sh` is not the release mechanism**, though an earlier draft of this section implied
+  it was. It is the *proof of shape*: it has assembled unmerged per-module jars since before this design
+  existed, for the same `META-INF/services` reason. What it builds, though, is a runnable LSP server —
+  one combined wildcard classpath, a launcher script, an editor template — which is IDE scaffolding that
+  retires when the build system can build the LSP, and which wants the opposite output to a release's
+  three disjoint zips. **The assets belong in CI on a tag push**, which is what "CI builds the asset"
+  above already said: `mill` the module jars, assemble the zips, attach them to the release. The eliot
+  repository has no workflow at all today, and that — not any packaging question — is what stands
+  between `v0.1`'s clauses and `v0.1`'s assets.
 - **Exact, not minimum** — plugin assets are toolchain components, outside MVS, pinned by the tag their
   package was selected at.
 - **A published asset is never replaced.** A release asset is mutable where a git tag's content is not,
@@ -651,10 +672,21 @@ gets it.
 `.eliot-version` beside the launcher, which costs the self-healing property the toolchain section relies
 on (a package requiring a newer eliot would no longer drag the matching compiler).
 
-*Decided: the sub-clause, attached to `lang`* (2026-09-14) — `lang` is in every program's closure, where
-a dedicated `eliotc` module would only be present if something depended on it, and a layer depending on
-the compiler reads backwards. `stdlib` then ships no `plugin` clause at all: its jar is inside that
-asset. The clause is the bare marker `compiler`, the same shape as `internal` and for the same reason —
+*Decided: the sub-clause, attached to `lang`* (2026-09-14) — and the reason is stronger than the one
+first written here, which was that `lang` is in every program's closure where a dedicated `eliotc`
+module would only be present if something depended on it. The fact underneath that: **`eliotc` cannot
+be a package at all.** It holds no `.els`, so nothing can ever `dep` it — a dep line is a statement
+about sources — and a jar with no package to belong to has to ride with one. `lang` is the package in
+every closure, so `lang` carries it, and the marker says that and nothing more. `apidoc` sits in the
+same position and stays undeclared for it: a backend with no sources of its own becomes a module the
+day a configuration names it as its backend, and not before.
+
+**`stdlib` does ship a plugin**, which this section had wrong when it said stdlib's jar rides inside the
+base asset. `StdlibPlugin` carries the compile-time natives backing `Int`'s dependent bounds; it is a
+module's own jar, so it gets its own asset and its own bare clause. Corrected 2026-09-14, when the
+clauses were tagged and the repository's actual shape was read off it rather than assumed.
+
+The clause is the bare marker `compiler`, the same shape as `internal` and for the same reason —
 it states a fact about the thing it sits in rather than relating it to anything, so there is nothing for
 it to take an argument about. Two assets claiming it is an error the launcher raises when it assembles
 a toolchain, not one the format can catch: each descriptor is read alone, and the conflict only exists
