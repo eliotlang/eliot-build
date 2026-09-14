@@ -708,7 +708,15 @@ It is one line:
 v0.6.2
 ```
 
-optionally followed by `sha256 <hex>`. No coordinates: the launcher is a release asset of its own
+optionally followed by `sha256 <hex>` **on the same line** — one line and not two, because a hash
+belongs to the version it was taken of, and two lines is a shape in which a bumped version can sit
+above a stale hash. **Nobody types the hash.** Bumping is mill's one hand edit — write the bare tag —
+and the wrapper records the hash of what it fetched, trust on first use, the same rule this design
+already gives every other release asset and for the same reason: no asset's hash can live in the
+commit its tag names, because the asset is built after the tag exists. It records only from the
+canonical source and never from a mirror, since what a committed hash is *for* is that a redirected
+download cannot substitute past it, and one a mirror established would have nothing behind it. No
+coordinates: the launcher is a release asset of its own
 repository, whose URL the script builds by the same concatenation the resolver uses for plugins
 (`https://<url>/releases/download/<tag>/<name>`), so fetching it is `curl` and nothing else — no POM
 logic in shell, and one URL shape for every binary the system fetches. **No repo line either**: where to

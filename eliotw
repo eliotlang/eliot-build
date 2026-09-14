@@ -43,10 +43,11 @@ launcherRepository="${ELIOT_LAUNCHER_REPOSITORY:-https://github.com/eliotlang/el
 launcherAsset="eliot-launcher.jar"
 cacheDirectory="${ELIOT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/eliot}"
 
-# The pin, read the way `eliot.pkg` reads: one clause per line, `--` comments, unknown words ignored
-# by position rather than by a grammar. The first bare word is the tag; `sha256 <hex>` is optional.
-# There is deliberately no default version — a baked-in one drifts, and "no pin means latest" trades
-# reproducibility for a convenience nobody asked for.
+# The pin: `--` comments, then one line reading `<tag> [sha256 <hex>]`. The tag and its hash are one
+# line and not two on purpose — a hash belongs to the version it was taken of, and two lines is a
+# shape in which a bumped version can sit above a stale hash. There is deliberately no default
+# version: a baked-in one drifts, and "no pin means latest" trades reproducibility for a convenience
+# nobody asked for.
 [ -f "$pinFile" ] || fail "no '.eliot-version' beside this script. It pins the launcher this project
    builds with, and there is no default: write one line naming a tag, such as 'v0.0'."
 
@@ -56,17 +57,23 @@ carriageReturn=$(printf '\r')
 tab=$(printf '\t')
 
 # A carriage return is a field separator rather than part of a word, so a pin committed from a
-# Windows checkout reads as the same two words it reads as everywhere else. Without this the tag
-# carries a `\r` into the download URL, and what a user sees is curl rejecting a malformed URL.
-while IFS=" $tab$carriageReturn" read -r keyword value _rest || [ -n "${keyword:-}" ]; do
-   case "$keyword" in
-      "" | --*) ;;
-      sha256)
-         [ -n "$value" ] || fail "'$pinFile' has a 'sha256' line with no hash on it."
-         pinnedHash="$value"
-         ;;
-      *) [ -n "$pinnedVersion" ] || pinnedVersion="$keyword" ;;
+# Windows checkout reads as the same words it reads as everywhere else. Without this the tag carries
+# a `\r` into the download URL, and what a user sees is curl rejecting a malformed URL.
+while IFS=" $tab$carriageReturn" read -r pinnedWord hashKeyword hashValue _rest ||
+   [ -n "${pinnedWord:-}" ]; do
+   case "$pinnedWord" in
+      "" | --*) continue ;;
    esac
+   [ -z "$pinnedVersion" ] || continue
+
+   pinnedVersion="$pinnedWord"
+   if [ -n "${hashKeyword:-}" ]; then
+      [ "$hashKeyword" = "sha256" ] ||
+         fail "'$pinFile' says '$pinnedWord $hashKeyword', and the only thing that may follow a
+   version is 'sha256 <hex>'."
+      [ -n "${hashValue:-}" ] || fail "'$pinFile' has a 'sha256' with no hash after it."
+      pinnedHash="$hashValue"
+   fi
 done < "$pinFile"
 
 [ -n "$pinnedVersion" ] || fail "'$pinFile' names no launcher version. One line holding a tag, such
@@ -94,9 +101,29 @@ sha256Of() {
       sha256sum "$1" | cut -d ' ' -f 1
    elif command -v shasum > /dev/null 2>&1; then
       shasum -a 256 "$1" | cut -d ' ' -f 1
-   else
-      fail "'$pinFile' pins a sha256, and neither sha256sum nor shasum is installed to check it."
    fi
+}
+
+# Recording rather than demanding is what keeps a version bump to one hand edit: change the tag, run
+# once, and the hash of what arrived is written back beside it. Nobody should ever type a hash — the
+# only way to know one is to fetch the thing and look, which is what this does. It is go.sum's trust
+# on first use, and it is the rule the design already gives every other release asset, for the reason
+# no asset's hash can live in the commit its tag names: the asset is built after the tag exists.
+#
+# Never from a mirror. What a committed hash is *for* is that a redirected download cannot substitute
+# past it, so one a mirror established would have nothing behind it. Under ELIOT_LAUNCHER_REPOSITORY
+# the wrapper checks what is pinned and records nothing.
+recordHash() {
+   recordedLine="$pinnedVersion sha256 $1"
+
+   [ -w "$pinFile" ] || fail "the launcher $pinnedVersion hashes to $1, and '$pinFile' cannot be
+   written to record it. Add it by hand: $recordedLine"
+   awk -v replacement="$recordedLine" '
+      recorded || /^[[:space:]]*(--|$)/ { print; next }
+      { print replacement; recorded = 1 }
+   ' "$pinFile" > "$pinFile.recording.$$" && mv "$pinFile.recording.$$" "$pinFile"
+   echo "eliotw: recorded '$recordedLine' in .eliot-version. Commit it — every fetch of
+   $pinnedVersion after this one is checked against it." >&2
 }
 
 launcherDirectory="$cacheDirectory/launcher/$pinnedVersion"
@@ -121,13 +148,17 @@ if [ ! -f "$launcherJar" ]; then
       fail "neither curl nor wget is installed, and one of them has to fetch the launcher."
    fi
 
+   downloadedHash=$(sha256Of "$partialJar")
    if [ -n "$pinnedHash" ]; then
-      downloadedHash=$(sha256Of "$partialJar")
+      [ -n "$downloadedHash" ] || { rm -f "$partialJar"; fail "'$pinFile' pins a sha256, and neither
+   sha256sum nor shasum is installed to check it against. Nothing was cached."; }
       if [ "$downloadedHash" != "$pinnedHash" ]; then
          rm -f "$partialJar"
          fail "the launcher fetched from $launcherUrl is not the one '$pinFile' pins.
    Expected $pinnedHash, got $downloadedHash. Nothing was cached."
       fi
+   elif [ -z "${ELIOT_LAUNCHER_REPOSITORY:-}" ] && [ -n "$downloadedHash" ]; then
+      recordHash "$downloadedHash"
    fi
 
    mv "$partialJar" "$launcherJar"
