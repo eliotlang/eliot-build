@@ -577,6 +577,11 @@ does. Sources and binary cannot skew because they are the same tag.
   that per-module jars exist to avoid cannot happen.
 - **Exact, not minimum** — plugin assets are toolchain components, outside MVS, pinned by the tag their
   package was selected at.
+- **A published asset is never replaced.** A release asset is mutable where a git tag's content is not,
+  so what stands behind it is a promise rather than a Merkle root: a mistake in a published asset is a
+  new tag, never a re-upload. This is the rule the bootstrap section leans on when it declines to put a
+  hash in the pin file, and it is the one every publisher in this ecosystem is expected to keep —
+  including for the launcher, which is the asset with the least excuse.
 - **Marked transitional**: when the compiler is self-hosted, plugins become Eliot source in ordinary git
   packages and this clause retires.
 
@@ -708,27 +713,37 @@ It is one line:
 v0.6.2
 ```
 
-optionally followed by `sha256 <hex>` **on the same line** — one line and not two, because a hash
-belongs to the version it was taken of, and two lines is a shape in which a bumped version can sit
-above a stale hash. **Nobody types the hash.** Bumping is mill's one hand edit — write the bare tag —
-and the wrapper records the hash of what it fetched, trust on first use, the same rule this design
-already gives every other release asset and for the same reason: no asset's hash can live in the
-commit its tag names, because the asset is built after the tag exists. It records only from the
-canonical source and never from a mirror, since what a committed hash is *for* is that a redirected
-download cannot substitute past it, and one a mirror established would have nothing behind it. No
-coordinates: the launcher is a release asset of its own
+and nothing else. **No hash** (2026-09-14, reversing the `distributionSha256Sum` precedent this
+section used to cite). A pinned hash was specified here, then implemented, then implemented a second
+time with the wrapper recording it so nobody had to type one — and the second implementation is what
+made the first one's cost legible: bumping a version had become edit, run, commit again, and a dumb
+wrapper had acquired the power to rewrite a committed file. Three things say the hash does not belong
+here.
+
+- **It would verify one link of an unverified chain.** The launcher would be hash-checked while the
+  compiler, every layer, every dependency and every plugin asset below it arrive by tag with nothing
+  checked at all. A padlock on one door of an open house is not proportionate to a cost paid at every
+  version bump by everyone.
+- **What it defends against is a policy question, and the policy is the publisher's.** TLS already
+  authenticates the source; the residual threat is a published asset being replaced at its own URL.
+  **So it is not: a published asset is never replaced, and a mistake in one is a new tag.** That is a
+  promise whoever publishes keeps, and it is worth more than a check consumers mostly would not run,
+  because it also covers the consumers who never pinned anything.
+- **There is already one home for asset hashes, and it is not a hand-edited file.** `eliot.lock`
+  records `lock-jar <url> <tag> <asset> <sha256>` on first fetch for exactly the reason the plugin
+  hash moved there: no asset's hash can live in the commit its tag names. The launcher's hash is the
+  same kind of fact, so when the lockfile lands this is where it goes, tool-written, alongside every
+  other one rather than in a file a person maintains.
+
+Each release publishes its sha256 in its notes, so checking one by hand stays available to anybody who
+wants it. No coordinates: the launcher is a release asset of its own
 repository, whose URL the script builds by the same concatenation the resolver uses for plugins
 (`https://<url>/releases/download/<tag>/<name>`), so fetching it is `curl` and nothing else — no POM
 logic in shell, and one URL shape for every binary the system fetches. **No repo line either**: where to
 fetch from is an *environment* property, not a project property (the same repo builds inside
 and outside a firewall) — the wrapper honors an env-var mirror override, per the design's rule
-that mirrors are consumer config, never committed content. The optional hash (Gradle's
-`distributionSha256Sum` precedent; the wrapper checks with `sha256sum -c` before executing) is
-near-redundant for the default HTTPS-from-Central fetch, but earns its keep exactly when the
-env var redirects to unvetted infrastructure: the launcher is the root of trust, executing
-before any verification machinery exists, and a committed, reviewed hash is what a poisoned
-mirror cannot substitute past. The committed side pins *what*; the environment chooses *where
-from*.
+that mirrors are consumer config, never committed content. The committed side pins *what*; the
+environment chooses *where from*.
 
 **The launcher is a single self-contained jar, written in Eliot.** The jvm backend's `exe-jar`
 output is already exactly that artifact shape, so self-hosting the build tool and satisfying the
@@ -778,8 +793,10 @@ it settled.
   `ulimit -n` bump, which exists for Gradle's daemon and not for a process that runs once; path
   conversion for Cygwin and MSYS, with `eliotw.bat` the real answer for Windows rather than a
   translation layer; and an environment override for the *version*, which mill has and which trades
-  the reproducibility the pin exists for. One of ours is ahead of both: the hash is in the pin from the
-  first release, where Gradle's is opt-in and mill has none at all.
+  the reproducibility the pin exists for. And a fourth that was briefly ours and is not any more: a
+  hash in the pin, where Gradle's is opt-in and mill has none at all — cut for the three reasons the
+  pin-file section gives, the first of which is that Gradle and mill are both right about this and the
+  earlier draft here was not.
 - **A failure still exits 0.** `Launcher.main` prints which of its four channels refused and returns
   `Unit`, because nothing in `eliot.system` sets this process's exit status — `Process` spawns others
   and reports *their* codes. So `./eliotw roots test && …` runs the second half after a failure. The

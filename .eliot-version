@@ -1,8 +1,4 @@
--- The launcher this project builds with, and the only file `eliotw` reads. Keeping it out of
--- `eliot.pkg` is what lets the wrapper stay a dumb script: a shell loop over lines is not a parser,
--- and the wrapper has to work in a checkout that no eliot has ever run in.
---
--- The hash is not typed by hand. Bump the version to a bare tag, run the wrapper once, and it
--- records the hash of what it fetched from the canonical source — never from a mirror, since what a
--- committed hash is for is that a redirected download cannot substitute past it.
-v0.0 sha256 eaacb12130a50ce0910b8f4a1e08050aa481255e4cfc7c5df8b6bf9a9f7e5510
+-- The launcher this project builds with, and the only file `eliotw` reads. One line: the tag.
+-- Keeping it out of `eliot.pkg` is what lets the wrapper stay a dumb script — a shell loop over
+-- lines is not a parser, and the wrapper has to work in a checkout no eliot has ever run in.
+v0.0
