@@ -80,12 +80,14 @@ doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11, §12, §13 and §15 of it first**, and read them before touching `Git`,
+`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15 and §16 of it first**, and read them before touching `Git`,
 `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
 implementation actually does and what is now genuinely unchecked. §12, §13 and §15 are where the modules
-came from and what was deliberately left whole.
+came from and what was deliberately left whole; §16 is what the packages under them cost to revise, what
+`eliotw` is allowed to know, and two findings recorded rather than fixed — a failed build exits 0, and
+what that operation's signature would even be.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
