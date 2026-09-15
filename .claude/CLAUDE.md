@@ -20,19 +20,24 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
   line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; a
-  `ModuleSelector` is `RootModule` or `ModuleSelected`, never an `Option[ModuleName]`; `Package` is the
-  two together; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`, never an
-  empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary before it
-  is git's, which is why the resolver imports no git at all), and `Descriptor` — the typed `eliot.pkg`
-  model as data alone, where a `Dependency` is a `SiblingDependency` or a `Requirement` with a
-  mandatory minimum.
+  `PackageSelector` is `RootPackage` or `PackageSelected`, never an `Option[PackageName]`; `Package` is
+  the two together; `rootPackageName` is `root` and `selectorFor` is where the bare-URL and `//root`
+  spellings are made to agree; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`,
+  never an empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary
+  before it is git's, which is why the resolver imports no git at all), and `Descriptor` — **a list of
+  `BuildPackage` and nothing else**, since the scopes are gone: a package is a root directory, deps, an
+  optional `main` and the plugins it ships, and a `Dependency` is a `SiblingDependency` or a
+  `Requirement` with a mandatory minimum.
 - **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser
-  (`clausesNamed` asks of a file what `childrenNamed` asks of a block, which is why the root is
-  interpreted exactly as every block in it is); `ClauseReader` is the checked access to one clause and
-  the `ClauseProblem` it complains with; `DependencyClause` is the `dep` line, the one clause every
-  block reads; `PackageFile` owns the keywords, `DescriptorError` and `descriptorFileName`, and is where
-  the parser's and the reader's error channels meet; `DescriptorWriter` writes a descriptor back out and
-  imports `model` alone.
+  (`clausesNamed` asks of a file what `childrenNamed` asks of a block, which is why the top level is
+  interpreted exactly as every block in it is — it *is* the root package's block with the braces off);
+  `ClauseReader` is the checked access to one clause and the `ClauseProblem` it complains with;
+  `DependencyClause` is the `dep` line, read identically at both places it appears; `PackageFile` owns
+  the keywords, `DescriptorError` and `descriptorFileName`, is where the parser's and the reader's error
+  channels meet, and carries the **compatibility path** — `module` is read as `package`, `test` and
+  `artifact` are dropped, because published tags spell them and a tag is never replaced;
+  `DescriptorWriter` writes a descriptor back out (the root package as the top level, never as a block)
+  and imports `model` alone.
 - **`git/`** — `Git` (`effect Git` — six operations over `Remote`, `Mirror`, `Worktree` and `Revision`,
   git's own vocabulary; a mirror is a bare `--mirror` clone, every *question* is answered from its object
   database, and the one thing ever checked out is a worktree, because a compiler mounts
@@ -50,17 +55,23 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17):
 - **`resolve/`** — `PackageSource` (what the tool asks of somebody else's repository: a descriptor, a
   lineage anchor, and — since assembly — a checked-out tree), `GitPackages` (`gitPackages`, the
   named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
-  `Configuration` (`TestScope` or `ArtifactNamed`, which of a descriptor's scopes each opens, and
-  `configurationNamed` — `Show`'s inverse, since the word a command line carries is the word that
-  instance writes), `Selection` (a version chosen per repository, the canonical order, `sameLineage`),
-  `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling, and
-  the module set a selection carries — the selector narrows the closure as well as the mount).
-- **`assemble/`** — `Assembly` (a resolution plus the standard layout become the source roots one
-  configuration compiles from; pure but for `{PackageSource}`, and it names no git) and `Toolchain`
-  (the same closure read the other way: which asset is marked `compiler`, which word the backend
-  answers to, and every asset the mounted modules ship — `ToolchainError` is where two packages
-  claiming the marker is caught, because a descriptor reader sees one descriptor and the conflict only
-  exists across a resolution).
+  `Configuration` (no type any more — a configuration is a `PackageName`; what is left is
+  `configuredPackages`, which closes a build's **sibling edges within one descriptor**, and
+  `configuredDependencies`, the foreign requirements that closure places on the graph. Siblings of the
+  *project* are followed here and not in the resolver, because the project is the one repository no
+  selection stands for), `Selection` (a version chosen per repository, the canonical order,
+  `sameLineage`), `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the
+  depth ceiling, and the package set a selection carries — the selector narrows the closure as well as
+  the mount).
+- **`assemble/`** — `Assembly` (a resolution plus the standard layout become the source roots one build
+  compiles from; **one rule — a package's sources are `<package root>/src`** — pure but for
+  `{PackageSource}`, and it names no git) and `Toolchain` (the same closure read the other way: which
+  asset is marked `compiler`, which word the backend answers to, every asset the mounted packages ship,
+  and **the one `main` in the closure** — the project's own opened packages are searched alongside the
+  dependencies', which is how a suite gets the framework's runner and an executable its own.
+  `ToolchainError` is where two packages claiming the marker, two shipping a backend and two declaring
+  a `main` are caught, because a descriptor reader sees one descriptor and each conflict only exists
+  across a resolution).
 
 Above the six, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
 the run boundary, the one place writing `with gitPackages with shellGit with shellAssets` and the
@@ -69,17 +80,18 @@ the source where mirrors live, and where the six failure channels are discharged
 reporting as itself and every one of them registering a non-zero exit code — and **`Command`**, the
 half that is about text rather than about running
 (the `Request` sum a command line asks for, what a resolution and an assembly read as), split out
-because it is testable with no platform beneath it and the boundary never can be. Three verbs:
-`eliot resolve <configuration>` prints the version selected per package, `eliot roots <configuration>`
-checks each out and prints the source directories that configuration compiles from, and `eliot build
-<configuration>` fetches the plugin assets those same versions ship and runs the compiler over those
-same roots — inheriting its streams and registering its exit code. The lockfile and the rest of the
-verb set are the steps after them.
+because it is testable with no platform beneath it and the boundary never can be. Three verbs, each
+taking a **package name**: `eliot resolve <package>` prints the version selected per dependency, `eliot
+roots <package>` checks each out and prints the source directories it compiles from, and `eliot build
+<package>` fetches the plugin assets those same versions ship and runs the compiler over those same
+roots — inheriting its streams and registering its exit code. `root` is the library itself, which is
+the query the IDE wants and the old model had no way to ask. The lockfile and the rest of the verb set
+are the steps after them.
 
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
 the three modules nothing but that boundary imports. `test/` mirrors
-the tree package for package, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
+the tree package for package under `test/src`, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
 this project's own effects, which the framework cannot double (`Assets` needs none: `Toolchain` names
 assets without fetching any, and `ShellAssets` is checked under `mocked` like `ShellGit`). **Bind a named implementation with an
 expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `with` binds the
@@ -124,6 +136,14 @@ launcher the *previous* release published, which is what `.eliot-version` pins. 
 exception and had to be: it was built by the working tree that became it, because nothing before it
 could build anything.
 
+**`v0.2` is the second exception, for the same reason one level up.** The descriptor format changed
+when the scopes were cut, and `v0.1`'s launcher cannot parse a `package` clause — so `./eliotw build
+test` in this working tree fails against the pin, and CI cannot cut `v0.2` the way it cuts every other
+release. Build it the way `v0.1` was built: `./mill examples.run jvm exe-jar -m eliot.build.Launcher
+<this repo>/src -o target` in the compiler checkout, then `java -jar target/Launcher.jar build test`
+and `build launcher` with the jar that came out, and attach that. From `v0.2` onward the loop closes
+again, because `v0.2`'s launcher reads both spellings.
+
 Bump `.eliot-version` to the new tag on `master` after publishing. A published asset is never replaced —
 a mistake is a new tag.
 
@@ -134,6 +154,13 @@ asked. One commit per coherent change, with a message that says what the code no
 the style of the existing history.
 
 ## Building and running (compiler CLI)
+
+**The launcher reads both descriptor spellings**, which is what makes the 2026-09-15 format change
+survivable: `module` is read as `package`, and `test`/`artifact` blocks are dropped. Published tags
+spell the old form — eliot `v0.0`–`v0.2` and eliot-test `v0.0` all do — and a tag is never replaced, so
+the compatibility path in `PackageFile` is load-bearing rather than politeness. What it does *not* do is
+work backwards: a launcher older than `v0.2` cannot read this repository's own descriptor, which is why
+`./eliotw` is broken here until `v0.2` is published (see "Releasing").
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
 eliot `v0.2`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
@@ -149,7 +176,7 @@ cd /home/robert/personal/eliot          # the compiler checkout
 ./mill examples.run jvm exe-jar -m eliot.test.Runner \
    /home/robert/personal/eliot-test/src \
    /home/robert/personal/eliot-build/src \
-   /home/robert/personal/eliot-build/test \
+   /home/robert/personal/eliot-build/test/src \
    -o /home/robert/personal/eliot-build/target
 java -jar /home/robert/personal/eliot-build/target/Runner.jar   # runs the discovered tests
 ```
@@ -160,7 +187,8 @@ the positional source roots (once positional roots are consumed the subcommand s
 is **fully qualified** — `eliot.test.Runner`, not `Runner`.
 
 Every source root that should contribute tests must be passed: the framework's `src`, this project's
-`src`, and this project's `test`.
+`src`, and this project's `test/src` — a package's sources are `<package root>/src`, and the suite's
+package root is `test/`.
 
 ### Running the tool
 

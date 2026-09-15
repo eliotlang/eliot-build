@@ -1,92 +1,113 @@
 import eliot.collection.List
+import eliot.build.model.PackageId
 import eliot.build.model.Descriptor
 
 /**
- * The unit of resolution: which of a descriptor's dependency scopes are closed over the graph.
+ * What building one package opens of the repository it is in.
  *
- * **Two configurations never meet.** Platform layers are declared per artifact precisely so that
- * flat-listing a jvm layer and an avr layer would not mount both into one resolution and collide on
- * every name a layer implements. So there is no such thing as "the" resolution of a repository —
- * there is one per artifact, plus one for the test scope, and the test scope is a configuration like
- * any other that just needs no `artifact` clause to name it.
+ * **A configuration is a package name now, and nothing more.** There used to be a type here — a sum
+ * of `TestScope` and `ArtifactNamed` — because a descriptor had four dependency scopes and something
+ * had to say which of them a build read. It has one kind of thing in it now, so the question "which
+ * scopes does this open" collapses into "which package is this, and which of its siblings does it
+ * reach" (`docs/build-system.md`, "What this replaced, and why").
  *
- * What a configuration *opens* is a fact about descriptors, true whether or not anybody resolves
- * anything: the repository's base dependencies, plus an artifact's own — the platform layers among
- * them — or plus the test block's, the framework and a platform the build host can run. An artifact's
- * dependencies never reach a consumer and neither do a test block's, which is exactly why platform
- * layers are declared there.
+ * **Two builds never meet**, which is what the scopes were legislating and is now the shape of the
+ * graph. A jvm executable and an avr executable are two packages, so they are two closures, and
+ * nothing has to forbid a descriptor from mentioning both. The same fact retires the other two rules:
+ * a suite's dependencies do not travel because nothing deps a suite, and an executable's platform does
+ * not travel because nothing deps an executable.
  *
- * Nothing here fails. A configuration nobody declared is absent rather than refused, because *which*
- * error that is belongs to the caller asking — `eliot.build.resolve.Resolution` raises
- * `NoSuchConfiguration`, and a future `eliot get` may want to answer differently.
+ * **Sibling edges are closed here, not in the resolver.** `dep //root` inside a `test` package names
+ * a package of the descriptor being read, and the project's own descriptor is the one the resolver
+ * never selects a version of — so there is no selection to hang a sibling on. Walking those edges is a
+ * local graph walk over one file, with no effect and no way to fail, which is exactly the kind of
+ * thing that belongs beside the descriptor rather than inside the closure. What the resolver is handed
+ * is foreign requirements alone.
+ *
+ * Nothing here fails. A package nobody declared is absent rather than refused, because *which* error
+ * that is belongs to the caller asking — `eliot.build.resolve.Resolution` raises `NoSuchPackage`, and
+ * a future `eliot get` may want to answer differently.
  */
-data Configuration = TestScope | ArtifactNamed(artifactName: String)
 
-implement Show[Configuration] {
-   def show(value: Configuration): String = value match {
-      case TestScope           -> "test"
-      case ArtifactNamed(name) -> name
-   }
+/**
+ * The packages of `descriptor` that building `name` opens: the one named, and every sibling reachable
+ * from it. Absent where the descriptor declares no such package.
+ *
+ * This is what the project mounts of *itself*, so it is what source assembly asks for as well as what
+ * the requirements below are read off. A `test` package that deps `//root` opens both, which is how a
+ * suite compiles against the library it is testing.
+ *
+ * ```eliot
+ * val opened = configuredPackages(PackageName("test"), descriptor)
+ * ```
+ */
+def configuredPackages(name: PackageName, descriptor: Descriptor): Option[List[BuildPackage]] =
+   foldOption(
+      None,
+      start -> Some(closedOver(singleton(start), descriptor)),
+      packageNamed(name, descriptor)
+   )
+
+/**
+ * The foreign requirements building `name` places on the graph: those of every package it opens.
+ *
+ * Siblings are gone by the time the resolver sees this list, having been followed above. What is left
+ * is the requirements MVS is about — a repository and a minimum — which is the only kind of edge a
+ * closure over *other people's* descriptors can act on.
+ *
+ * ```eliot
+ * val requirements = configuredDependencies(PackageName("launcher"), descriptor)
+ * ```
+ */
+def configuredDependencies(name: PackageName, descriptor: Descriptor): Option[List[Dependency]] =
+   foldOption(
+      None,
+      opened -> Some(opened.flatMap(built -> built.packageDependencies.filter(isForeign))),
+      configuredPackages(name, descriptor)
+   )
+
+private def isForeign(dependency: Dependency): Bool = dependency match {
+   case SiblingDependency(_) -> false
+   case Requirement(_, _)    -> true
 }
 
 /**
- * The dependencies `configuration` opens of `descriptor`, absent where the descriptor declares no
- * such artifact.
+ * Every package reachable from `opened` by sibling edges, as a fold over a fixed number of rounds:
+ * user code cannot recurse, so depth is a list to fold over rather than a condition to repeat under.
  *
- * ```eliot
- * val requirements = configuredDependencies(ArtifactNamed("controller-jvm"), descriptor)
- * ```
+ * Sixteen is far past what one repository's own packages ever chain to, and running out of rounds is
+ * not a failure here the way it is in the closure over the graph — the rounds that remain after a
+ * round that added nothing are folds over a set that cannot grow, since a package already reached is
+ * never added twice.
  */
-def configuredDependencies(configuration: Configuration, descriptor: Descriptor): Option[List[Dependency]] =
-   configuration match {
-      case TestScope           -> Some(descriptor.baseDependencies ++ descriptor.testDependencies)
-      case ArtifactNamed(name) -> artifactDependenciesOf(name, descriptor)
-   }
+private def closedOver(opened: List[BuildPackage], descriptor: Descriptor): List[BuildPackage] =
+   siblingRounds.foldLeft(opened, _ -> reached -> expanded(reached, descriptor))
+
+private def expanded(reached: List[BuildPackage], descriptor: Descriptor): List[BuildPackage] =
+   reached
+      .flatMap(built -> built.packageDependencies.flatMap(siblingsOf))
+      .foldLeft(reached, name -> acc -> withSibling(name, acc, descriptor))
+
+private def siblingsOf(dependency: Dependency): List[PackageName] = dependency match {
+   case SiblingDependency(name) -> singleton(name)
+   case Requirement(_, _)       -> empty
+}
 
 /**
- * The backend call `configuration` makes, absent where it makes none.
- *
- * Absent covers three different things and deliberately does not tell them apart: the test scope,
- * which has no `artifact` clause to carry one; an artifact that declares no `backend`, which is the
- * case the "exactly one candidate" rule exists for; and a configuration no descriptor declares, which
- * the resolver has already refused by the time anybody asks this. All three mean the same thing to the
- * caller — nothing here narrows what backend to call.
- *
- * ```eliot
- * val backend = configuredBackend(ArtifactNamed("controller-jvm"), descriptor)
- * ```
+ * A sibling naming a package the descriptor does not declare reaches nothing, rather than failing:
+ * the honest report names a `dep` line, and the caller holding one is the author's build, not this.
  */
-def configuredBackend(configuration: Configuration, descriptor: Descriptor): Option[Backend] =
-   configuration match {
-      case TestScope           -> None
-      case ArtifactNamed(name) -> declaredBackend(name, descriptor)
-   }
-
-/**
- * The configuration `text` names — `show`'s inverse, and the one place a configuration is read back
- * from the word that spells it.
- *
- * A caller with a word rather than a `Configuration` is a caller reading a command line, and the word
- * it reads is exactly the one `Show` writes: the spelling lives in this module or it drifts between
- * the two halves of it. Nothing is refused, for the reason nothing else here refuses — a name no
- * artifact declares is a resolution failure naming it, and that answer belongs to the resolver.
- *
- * ```eliot
- * val configuration = configurationNamed("controller-jvm")
- * ```
- */
-def configurationNamed(text: String): Configuration =
-   fold(text == show(TestScope), TestScope, ArtifactNamed(text))
-
-private def artifactDependenciesOf(name: String, descriptor: Descriptor): Option[List[Dependency]] =
-   foldOption(
-      None,
-      found -> Some(descriptor.baseDependencies ++ found.artifactDependencies),
-      artifactNamed(name, descriptor)
+private def withSibling(
+   name: PackageName,
+   reached: List[BuildPackage],
+   descriptor: Descriptor
+): List[BuildPackage] =
+   fold(
+      reached.any(built -> built.packageName == name),
+      reached,
+      foldOption(reached, found -> append(reached, found), packageNamed(name, descriptor))
    )
 
-private def declaredBackend(name: String, descriptor: Descriptor): Option[Backend] =
-   foldOption(None, found -> found.artifactBackend, artifactNamed(name, descriptor))
+private def siblingRounds: List[Unit] = twice(twice(twice(twice(singleton(unit)))))
 
-private def artifactNamed(name: String, descriptor: Descriptor): Option[Artifact] =
-   descriptor.artifacts.find(artifact -> artifact.artifactName == name)
+private def twice(list: List[Unit]): List[Unit] = list ++ list

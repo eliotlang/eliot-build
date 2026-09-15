@@ -17,14 +17,26 @@ import eliot.build.model.Descriptor
  * Two things the vocabulary is made of live next door, because neither is about a keyword.
  * `eliot.build.format.ClauseReader` reads one clause carefully — which argument has to be there, which
  * children are recognised, what a clause that does not say so is complained about with — and
- * `eliot.build.format.DependencyClause` reads the `dep` line, the one clause every block here has in
- * common. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
- * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
- * left here is the keywords themselves: `module`, `at`, `artifact`, `plugin`, `compiler`, `backend`,
- * and which field of the descriptor each of them feeds. `backend` is the one word two blocks own, and
- * it means the two halves of one thing: in an `artifact` it names the package whose plugin to call, in
- * a `plugin` the command word that plugin answers to — identity from the consumer, mechanism from the
- * provider, and neither reading is reachable from the other's block.
+ * `eliot.build.format.DependencyClause` reads the `dep` line, which the top level and every `package`
+ * block read identically. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs
+ * none of this module's machinery — a model in hand cannot fail to be written — and imports `model`
+ * alone. What is left here is the keywords themselves: `package`, `at`, `internal`, `main`, `plugin`,
+ * `compiler`, `backend`, and which part of the model each of them feeds.
+ *
+ * **The top level is a package block with the braces left off.** Its `dep`, `main` and `plugin`
+ * clauses describe the *root package* — the one whose directory is the repository's own and which a
+ * `dep` line carrying no selector selects — so a flat repository writes no block at all and a
+ * repository with several packages beside the root writes one each. The root package is synthesised
+ * whether or not anything was written for it, because a bare dep on a repository has to land
+ * somewhere and "somewhere" should not depend on which clauses the author happened to need.
+ *
+ * **Retired keywords are read, not refused.** `module`, `test` and `artifact` are what this format
+ * spelled before the scopes were cut (`docs/build-system.md`, "What this replaced, and why"), and
+ * tags carrying them are published and immutable — a resolver that could not read them could not
+ * resolve anything. So `module` is read exactly as `package` is, which it turns out to be: its `at`
+ * meant the same directory, holding the same `src/`. `test` and `artifact` are *dropped*, which loses
+ * nothing, because neither ever reached a consumer and a consumer's descriptor is the only one this
+ * path ever sees.
  *
  * The two error channels meet here and nowhere else: the parser raises `ClauseError`, a reader raises
  * `ClauseProblem`, and `DescriptorError` is the union a caller catches. Unknown clauses are fatal by
@@ -48,7 +60,7 @@ implement Show[DescriptorError] {
 }
 
 /**
- * The descriptor's file name, at the root of every package.
+ * The descriptor's file name, at the root of every repository.
  *
  * A fact about the *format*, so it lives with the format: `eliot.build.git.Cache` reads the file out
  * of a mirror and needs the name, but nothing about which name it is belongs to cache policy.
@@ -81,7 +93,8 @@ private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descrip
    )
 
 /**
- * The descriptor `clauses` spell: every top-level clause read into the field its keyword feeds.
+ * The descriptor `clauses` spell: the root package the top level describes, then every package
+ * declared beside it.
  *
  * The root is read exactly as every block inside it is read — by asking for the clauses of one
  * keyword and interpreting those — rather than by folding a growing `Descriptor` through a sum over
@@ -92,44 +105,52 @@ private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descrip
 private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor = {
    knownClauses(descriptorKeywords, clauses)
 
-   Descriptor(
-      dependenciesIn(clauses),
-      clausesNamed("module", clauses).map(moduleOf),
-      testDependenciesIn(clauses),
-      clausesNamed("artifact", clauses).map(artifactOf)
-   )
+   Descriptor(prepend(declaredPackages(clauses), rootPackageOf(clauses)))
 }
 
-private def moduleOf(clause: Clause): {Throw[ClauseProblem]} BuildModule = {
-   val name = required(0, "a module needs a name", clause)
+/**
+ * Every package the file declares a block for, `module` blocks among them: a retired keyword that
+ * meant what `package` means, read the same way so an already-published tag still resolves.
+ */
+private def declaredPackages(clauses: List[Clause]): {Throw[ClauseProblem]} List[BuildPackage] =
+   clausesNamed("package", clauses).map(packageOf) ++ clausesNamed("module", clauses).map(packageOf)
+
+/**
+ * The root package: the top level's own clauses, at the repository root, exported because a bare `dep`
+ * line on this repository is exactly what selects it.
+ */
+private def rootPackageOf(clauses: List[Clause]): {Throw[ClauseProblem]} BuildPackage =
+   BuildPackage(
+      rootPackageName,
+      rootPackageDirectory,
+      true,
+      dependenciesIn(clauses),
+      mainIn(clauses),
+      pluginsIn(clauses)
+   )
+
+private def packageOf(clause: Clause): {Throw[ClauseProblem]} BuildPackage = {
+   val name = required(0, "a package needs a name", clause)
 
    atMostArguments(1, clause)
-   knownChildren(moduleKeywords, clause)
-   BuildModule(
-      ModuleName(name),
+   knownChildren(packageKeywords, clause)
+   BuildPackage(
+      PackageName(name),
       directoryOf(name, clause),
       isEmpty(clause.childrenNamed("internal")),
       dependenciesOf(clause),
-      testDependenciesOf(clause),
+      mainIn(clause.children),
       pluginsOf(clause)
    )
 }
 
-private def artifactOf(clause: Clause): {Throw[ClauseProblem]} Artifact = {
-   val name = required(0, "an artifact needs a name", clause)
-
-   atMostArguments(1, clause)
-   knownChildren(artifactKeywords, clause)
-   Artifact(name, dependenciesOf(clause), backendOf(clause))
-}
-
 /**
- * Where a module's sources are, relative to the repository root: what its `at` clause says, or its own
- * name where it says nothing — the flat repository of same-named directories, which is what a package
- * looks like unless something else already owns its layout.
+ * Where a package's root directory is, relative to the repository root: what its `at` clause says, or
+ * its own name where it says nothing — the flat repository of same-named directories, which is what a
+ * package looks like unless something else already owns its layout.
  *
  * The default is applied here rather than carried onwards as an absence, so the model hands every
- * consumer a directory and the rule lives in one place. Reading `at` costs the module nothing it did
+ * consumer a directory and the rule lives in one place. Reading `at` costs the package nothing it did
  * not already spend: a repository whose layout is the convention never writes one.
  */
 private def directoryOf(name: String, clause: Clause): {Throw[ClauseProblem]} String =
@@ -144,7 +165,7 @@ private def atClause(clause: Clause): {Throw[ClauseProblem]} String = {
    val directory = required(0, "an 'at' needs a directory", clause)
 
    atMostArguments(1, clause)
-   requireThat(insideRepository(directory), "a module directory is a path inside the repository", clause)
+   requireThat(insideRepository(directory), "a package directory is a path inside the repository", clause)
    directory
 }
 
@@ -152,27 +173,27 @@ private def insideRepository(directory: String): Bool =
    !startsWith("/", directory) && !any(segment -> segment == "..", split("/", directory))
 
 /**
- * `backend [<url>] { <key> <value>… }`. The package is named only to disambiguate: with exactly one
- * plugin-shipping dependency in the artifact's scope there is nothing to choose between.
+ * `main <module>` — the Eliot module holding the entry point, and the only thing a consumer states
+ * about producing an executable. Which backend runs, which word it answers to and what it emits are
+ * all read off the closure instead, from the packages that know those facts about themselves.
+ *
+ * A package declaring one is runnable; the framework declares its own, which is how a suite gets a
+ * command without its author naming anybody's internals.
  */
-private def backendOf(clause: Clause): {Throw[ClauseProblem]} Option[Backend] =
-   clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendClause(child)))
+private def mainIn(clauses: List[Clause]): {Throw[ClauseProblem]} Option[String] =
+   clausesNamed("main", clauses).foldLeft(None, child -> _ -> Some(mainClause(child)))
 
-private def backendClause(clause: Clause): {Throw[ClauseProblem]} Backend = {
-   val named = optional(0, clause)
+private def mainClause(clause: Clause): {Throw[ClauseProblem]} String = {
+   val module = required(0, "a main needs the module holding it", clause)
 
    atMostArguments(1, clause)
-   Backend(backendPackageOf(named, clause), clause.children.map(parameterOf))
+   module
 }
 
-private def backendPackageOf(named: Option[String], clause: Clause): {Throw[ClauseProblem]} Option[PackageId] =
-   foldOption(None, target -> Some(referenceOf(target, clause)), named)
+private def pluginsIn(clauses: List[Clause]): {Throw[ClauseProblem]} List[Plugin] =
+   clausesNamed("plugin", clauses).map(pluginClause)
 
-private def parameterOf(clause: Clause): Pair[String, String] =
-   Pair(clause.keyword, clause.arguments.joined(" "))
-
-private def pluginsOf(clause: Clause): {Throw[ClauseProblem]} List[Plugin] =
-   clause.childrenNamed("plugin").map(pluginClause)
+private def pluginsOf(clause: Clause): {Throw[ClauseProblem]} List[Plugin] = pluginsIn(clause.children)
 
 /**
  * `plugin <asset> { backend <word> | compiler }` — the name of a release asset of this package, and
@@ -190,9 +211,9 @@ private def pluginClause(clause: Clause): {Throw[ClauseProblem]} Plugin = {
 
 /**
  * `backend <word>` — the compiler command word this asset registers, which is what makes it a backend
- * candidate rather than an always-on contributor. The word rather than a package, because this is the
- * provider's side: an artifact naming a backend names the *package*, and neither side can spell the
- * other's half.
+ * candidate rather than an always-on contributor. The word is the *provider's* and nobody else ever
+ * writes it: a consumer names dependencies and an entry point, and the one candidate in the closure
+ * is what the backend is.
  */
 private def backendWordOf(clause: Clause): {Throw[ClauseProblem]} Option[String] =
    clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendWordClause(child)))
@@ -204,12 +225,17 @@ private def backendWordClause(clause: Clause): {Throw[ClauseProblem]} String = {
    word
 }
 
+/**
+ * `test` and `artifact` are listed so a published descriptor still parses, and read nowhere: neither
+ * ever reached a consumer, and a consumer's descriptor is the only one a retired keyword is met in.
+ */
 private def descriptorKeywords: List[String] =
-   append(append(append(append(empty, "dep"), "module"), "test"), "artifact")
+   append(
+      append(append(append(append(append(empty, "dep"), "package"), "main"), "plugin"), "module"),
+      "test"
+   ) ++ singleton("artifact")
 
-private def moduleKeywords: List[String] =
-   append(append(append(append(append(empty, "at"), "internal"), "dep"), "test"), "plugin")
-
-private def artifactKeywords: List[String] = append(append(empty, "dep"), "backend")
+private def packageKeywords: List[String] =
+   append(append(append(append(append(append(empty, "at"), "internal"), "dep"), "main"), "plugin"), "test")
 
 private def pluginKeywords: List[String] = append(append(empty, "backend"), "compiler")

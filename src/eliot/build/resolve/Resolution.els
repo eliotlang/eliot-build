@@ -8,18 +8,19 @@ import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
 
 /**
- * Minimal version selection: the closure of what a build configuration depends on, and the version
- * chosen for each package in it.
+ * Minimal version selection: the closure of what one package depends on, and the version chosen for
+ * each repository in it.
  *
  * A declared version is a **minimum**, never a range and never an upper bound, so selection is the
  * maximum of the declared minimums — the oldest version satisfying everyone. That is the whole
  * algorithm: no solver, no backtracking, and the same answer on every machine without consulting a
  * lockfile. Publishing a new version changes nobody's build; only raising a minimum does.
  *
- * What is resolved is a `Configuration` and what comes out is a `Resolution` of `Selection`s, both of
- * them next door: `eliot.build.resolve.Configuration` says which of a descriptor's scopes a
- * configuration opens, and `eliot.build.resolve.Selection` says what a chosen version is and when two
- * spellings are one package. What is left here is the part that is genuinely an algorithm — the
+ * What is resolved is a package *name* and what comes out is a `Resolution` of `Selection`s, and both
+ * neighbours carry a half of it: `eliot.build.resolve.Configuration` says which packages of the
+ * project's own descriptor a build opens and closes their sibling edges, so what arrives here is
+ * foreign requirements alone; `eliot.build.resolve.Selection` says what a chosen version is and when
+ * two spellings are one repository. What is left is the part that is genuinely an algorithm — the
  * closure, the merging of two minimums, and the ceiling it gives up at.
  *
  * **The closure is a fold over rounds.** User code cannot recurse and cannot loop, so a fixpoint is a
@@ -40,14 +41,14 @@ import eliot.build.resolve.Selection
  * attribute to a dependency line is a failure they cannot fix.
  */
 data ResolutionError =
-   NoSuchConfiguration(missingConfiguration: Configuration) |
+   NoSuchPackage(missingPackage: PackageName) |
    Unavailable(missingRepository: Repository, missingVersion: Version) |
    MajorConflict(conflictedRepository: Repository, oneVersion: Version, otherVersion: Version) |
    TooDeep(reachedDepth: Int)
 
 implement Show[ResolutionError] {
    def show(value: ResolutionError): String = value match {
-      case NoSuchConfiguration(configuration) -> "no configuration named '" ++ show(configuration) ++ "'"
+      case NoSuchPackage(name) -> "no package named '" ++ show(name) ++ "'"
       case Unavailable(absent, version) -> show(absent) ++ " publishes no " ++ show(version)
       case MajorConflict(conflicted, one, other) ->
          show(conflicted) ++ " is required at both " ++ show(one) ++ " and " ++ show(other) ++
@@ -57,22 +58,21 @@ implement Show[ResolutionError] {
 }
 
 /**
- * What `configuration` resolves to: the repository's base dependencies plus the configuration's own
- * — for an artifact, the platform layers among them; for the test scope, the framework and a platform
- * the build host can run — closed over the graph.
+ * What building `name` resolves to: every requirement of the packages it opens — its own, and those of
+ * the siblings it reaches — closed over the graph.
  *
  * ```eliot
- * val resolution = resolve(ArtifactNamed("controller-jvm"), descriptor)
+ * val resolution = resolve(PackageName("controller-jvm"), descriptor)
  * ```
  */
 def resolve(
-   configuration: Configuration,
+   name: PackageName,
    descriptor: Descriptor
 ): {PackageSource, Throw[ResolutionError]} Resolution =
    foldOption(
-      raise(NoSuchConfiguration(configuration)),
+      raise(NoSuchPackage(name)),
       resolveRequirements,
-      configuredDependencies(configuration, descriptor)
+      configuredDependencies(name, descriptor)
    )
 
 /**
@@ -89,8 +89,8 @@ def resolutionDepthLimit: Int = rounds.size
 /**
  * The closure so far: what has been selected, and which of those selections still owe their own
  * requirements to the graph. A selection joins `pending` exactly when it is new, when its version went
- * up, or when it gained a module — which is what makes a cycle terminate, since versions only rise and
- * a module set only grows within what the descriptors name: the second visit learns nothing, so nothing
+ * up, or when it gained a package — which is what makes a cycle terminate, since versions only rise and
+ * a package set only grows within what the descriptors name: the second visit learns nothing, so nothing
  * is pending and the remaining rounds are folds over an empty list.
  */
 data ResolutionState(selected: List[Selection], pending: List[Selection])
@@ -137,28 +137,27 @@ private def withDependenciesOf(
 }
 
 /**
- * What a *dependency's* descriptor contributes to the closure: its base dependencies, and those of the
- * modules this selection actually wants. An artifact's dependencies are its own build's business and a
- * test block's are its own suite's — neither travels to a consumer, which is exactly why platform
- * layers are declared there.
+ * What a *dependency's* descriptor contributes to the closure: the dependencies of the packages this
+ * selection actually wants, and nothing else. There is no scope to add on top of them any more — a
+ * package's `dep` lines reach whoever deps that package, which is the whole rule, and a suite's or an
+ * executable's do not travel because nothing deps one.
  *
- * **The selector narrows the closure, not only the mount.** Feeding every exported module's edges in
- * was harmless while a selector merely picked source directories; it is wrong now that `//stdlib` must
- * not drag in what `//jvm` depends on, which in one repository shipping a base layer and a platform
- * layer is the difference between a base scope that resolves and one that mounts a platform nobody
- * asked for. `exported` still gates: a module a dependent may not mount is a module whose edges are
- * none of the dependent's business either.
+ * **The selector narrows the closure, not only the mount.** `//stdlib` must not drag in what `//jvm`
+ * depends on, which in one repository shipping a base layer and a platform layer is the difference
+ * between a closure that resolves and one that mounts a platform nobody asked for. The bare `dep` line
+ * is the same rule with the root package as its selector, which is why what used to be a separate list
+ * of base dependencies is now this filter finding the package called `root`. `exported` still gates: a
+ * package a dependent may not mount is one whose edges are none of the dependent's business either.
  */
 private def mountedDependencies(selection: Selection, descriptor: Descriptor): List[Dependency] =
-   descriptor.baseDependencies ++
-      descriptor.modules
-         .filter(module -> module.exported && mounts(module.moduleName, selection))
-         .flatMap(module -> module.moduleDependencies)
+   descriptor.packages
+      .filter(built -> built.exported && mounts(built.packageName, selection))
+      .flatMap(built -> built.packageDependencies)
 
 /**
  * `owner` is the repository whose descriptor `requirements` were read from — absent for the root
- * project, which is the one package a resolution never selects a version of. It is what a sibling line
- * is resolved against: `dep //stdlib` names a module of whoever wrote it.
+ * project, which is the one repository a resolution never selects a version of. It is what a sibling
+ * line is resolved against: `dep //stdlib` names a package of whoever wrote it.
  */
 private def withRequirements(
    owner: Option[Repository],
@@ -168,12 +167,12 @@ private def withRequirements(
    requirements.foldLeft(state, dependency -> acc -> withRequirement(owner, dependency, acc))
 
 /**
- * A sibling (`dep //stdlib`) selects no version: it names a module of the repository that declared it,
- * which is already selected at the version its tag gave it. What it does say is that one more module of
+ * A sibling (`dep //stdlib`) selects no version: it names a package of the repository that declared it,
+ * which is already selected at the version its tag gave it. What it does say is that one more package of
  * that repository is in the build — `//jvm` depending on `//stdlib` is how a platform layer carries the
  * base it is written against — so it is added to the owner's selection, and a selection that gained a
- * module owes the graph that module's own edges. A requirement selects its *repository*, and records
- * which module of it was asked for; the module has no bearing on which version is chosen, since a tag
+ * package owes the graph that package's own edges. A requirement selects its *repository*, and records
+ * which package of it was asked for; the package has no bearing on which version is chosen, since a tag
  * is repository-wide.
  */
 private def withRequirement(
@@ -186,15 +185,17 @@ private def withRequirement(
 }
 
 /**
- * A sibling of the root project's own descriptor reaches nothing: the root is not selected, so there is
- * no selection to add a module to, and what the root mounts of itself is the assembler's question.
+ * A sibling of the root project's own descriptor reaches nothing, and never arrives: those edges are
+ * followed by `eliot.build.resolve.Configuration` before the closure starts, because the project is the
+ * one repository no selection stands for. What is left for this to handle is a *dependency's* sibling
+ * line, which does have a selection to add a package to.
  */
 private def withSibling(
    owner: Option[Repository],
-   name: ModuleName,
+   name: PackageName,
    state: ResolutionState
 ): ResolutionState =
-   foldOption(state, known -> wanting(ModuleSelected(name), known, state), ownerSelection(owner, state))
+   foldOption(state, known -> wanting(selectorFor(name), known, state), ownerSelection(owner, state))
 
 private def ownerSelection(owner: Option[Repository], state: ResolutionState): Option[Selection] =
    foldOption(
@@ -212,8 +213,8 @@ private def withMinimum(
    val identity = identified(target, minimum, state)
 
    foldOption(
-      inserted(Selection(target, minimum, identity.anchorFound, singleton(package.selectedModule)), state),
-      known -> merged(known, package.selectedModule, minimum, state),
+      inserted(Selection(target, minimum, identity.anchorFound, singleton(package.selectedPackage)), state),
+      known -> merged(known, package.selectedPackage, minimum, state),
       identity.matched
    )
 }
@@ -241,7 +242,7 @@ private def byLineage(target: Repository, minimum: Version, state: ResolutionSta
  */
 private def merged(
    known: Selection,
-   selector: ModuleSelector,
+   selector: PackageSelector,
    minimum: Version,
    state: ResolutionState
 ): {Throw[ResolutionError]} ResolutionState = {
@@ -259,13 +260,13 @@ private def conflictBetween(known: Selection, minimum: Version): Option[Resoluti
 
 /**
  * The known selection keeps its repository — the URL the closure reached first, which is the root's
- * spelling before any dependency's — and takes the higher version and the wider set of modules. A
+ * spelling before any dependency's — and takes the higher version and the wider set of packages. A
  * requirement that asks for no more than what is already selected changes nothing, and so queues
  * nothing.
  */
 private def upgraded(
    known: Selection,
-   selector: ModuleSelector,
+   selector: PackageSelector,
    minimum: Version,
    state: ResolutionState
 ): ResolutionState =
@@ -275,40 +276,40 @@ private def upgraded(
          known.selectedRepository,
          max(known.selectedVersion, minimum),
          known.lineageAnchor,
-         withModule(selector, known.selectedModules)
+         withPackage(selector, known.selectedPackages)
       ),
       state
    )
 
 /**
- * `known` with one more module among the ones it wants — the sibling half of the same step `upgraded`
+ * `known` with one more package among the ones it wants — the sibling half of the same step `upgraded`
  * makes for a requirement, which is why both end in `replacedWhenGrown`.
  */
-private def wanting(selector: ModuleSelector, known: Selection, state: ResolutionState): ResolutionState =
+private def wanting(selector: PackageSelector, known: Selection, state: ResolutionState): ResolutionState =
    replacedWhenGrown(
       known,
       Selection(
          known.selectedRepository,
          known.selectedVersion,
          known.lineageAnchor,
-         withModule(selector, known.selectedModules)
+         withPackage(selector, known.selectedPackages)
       ),
       state
    )
 
 /**
  * The one rule that keeps the closure finite: a selection re-enters the frontier only when it learned
- * something, and what it can learn — a higher version, one more module — only ever goes one way.
+ * something, and what it can learn — a higher version, one more package — only ever goes one way.
  */
 private def replacedWhenGrown(known: Selection, next: Selection, state: ResolutionState): ResolutionState =
    fold(grew(known, next), replaced(next, state), state)
 
 private def grew(known: Selection, next: Selection): Bool =
    known.selectedVersion != next.selectedVersion ||
-      known.selectedModules.size != next.selectedModules.size
+      known.selectedPackages.size != next.selectedPackages.size
 
-private def withModule(selector: ModuleSelector, modules: List[ModuleSelector]): List[ModuleSelector] =
-   fold(modules.any(known -> known == selector), modules, append(modules, selector))
+private def withPackage(selector: PackageSelector, packages: List[PackageSelector]): List[PackageSelector] =
+   fold(packages.any(known -> known == selector), packages, append(packages, selector))
 
 private def inserted(selection: Selection, state: ResolutionState): ResolutionState =
    ResolutionState(append(state.selected, selection), append(state.pending, selection))

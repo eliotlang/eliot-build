@@ -11,9 +11,9 @@ import eliot.build.model.Lineage
  * expands a graph, asks a source anything or can fail — so a consumer of a resolution (a lockfile
  * writer, an assembly step, `eliot get`) reads these types and drags no closure behind it.
  *
- * **Selection is per repository, not per module.** Tags are repository-wide, so `//stdlib v1.2` and
- * `//jvm v1.4` into one repository are two minimums on one package rather than two packages. The
- * selectors are *kept* rather than dropped, as the set of modules the closure reached — which is what
+ * **Selection is per repository, not per package.** Tags are repository-wide, so `//stdlib v1.2` and
+ * `//jvm v1.4` into one repository are two minimums on one repository rather than two of them. The
+ * selectors are *kept* rather than dropped, as the set of packages the closure reached — which is what
  * decides both what a build mounts and, before that, whose dependencies the closure follows. A
  * repository reached only as `//stdlib` must not carry `//jvm`'s edges, so the set is part of what a
  * resolution answers rather than something an assembler could re-derive.
@@ -28,7 +28,7 @@ data Selection(
    selectedRepository: Repository,
    selectedVersion: Version,
    lineageAnchor: Option[Commit],
-   selectedModules: List[ModuleSelector]
+   selectedPackages: List[PackageSelector]
 )
 
 /**
@@ -50,11 +50,14 @@ implement Compare[Selection] {
 }
 
 /**
- * `true` when `selection` wants `name` — the module's own name against the selectors the closure
- * collected, which is what narrows a multi-module repository to the part of it a build actually uses.
+ * `true` when `selection` wants `name` — the package's own name against the selectors the closure
+ * collected, which is what narrows a repository to the part of it a build actually uses.
+ *
+ * Through `selectorFor`, so the root package answers to the bare `dep` line that selects it: a
+ * repository reached with no selector at all mounts the package called `root` and nothing else.
  */
-def mounts(name: ModuleName, selection: Selection): Bool =
-   selection.selectedModules.any(selector -> selector == ModuleSelected(name))
+def mounts(name: PackageName, selection: Selection): Bool =
+   selection.selectedPackages.any(selector -> selector == selectorFor(name))
 
 /**
  * The version `resolution` selected for `repository`, absent when the closure never reached it.

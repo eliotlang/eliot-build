@@ -10,18 +10,18 @@ import eliot.build.resolve.TablePackages
 
 def testCases: Test = {
    "resolve" should "select the version the only requirement declared" in {
-      resolved("test {\n  dep github.com/x/foo v1.2\n}", publishing("github.com/x/foo@v1.2", ""))
+      resolved("dep github.com/x/foo v1.2", publishing("github.com/x/foo@v1.2", ""))
          shouldBe "github.com/x/foo v1.2"
    }
    "resolve" should "select the maximum of two declared minimums" in {
       resolved(
-         "dep github.com/x/foo v1.2\ntest {\n  dep github.com/x/foo v1.4\n}",
+         "dep github.com/x/foo v1.2\ndep github.com/x/foo v1.4",
          publishing("github.com/x/foo@v1.2", "").published("github.com/x/foo@v1.4", "")
       ) shouldBe "github.com/x/foo v1.4"
    }
    "resolve" should "keep a requirement that asks for less than is already selected" in {
       resolved(
-         "dep github.com/x/foo v1.4\ntest {\n  dep github.com/x/foo v1.1\n}",
+         "dep github.com/x/foo v1.4\ndep github.com/x/foo v1.1",
          publishing("github.com/x/foo@v1.4", "")
       ) shouldBe "github.com/x/foo v1.4"
    }
@@ -39,58 +39,80 @@ def testCases: Test = {
             .published("github.com/x/bar@v1.5", "")
       ) shouldBe "github.com/x/bar v1.5, github.com/x/foo v1.2"
    }
-   "resolve" should "follow the edges of the module a dependency line selected" in {
+   "resolve" should "follow the edges of the package a dependency line selected" in {
       resolved(
          "dep github.com/x/foo//jvm v1.2",
-         publishing("github.com/x/foo@v1.2", "module jvm {\n  dep github.com/x/bar v1.1\n}")
+         publishing("github.com/x/foo@v1.2", "package jvm {\n  dep github.com/x/bar v1.1\n}")
             .published("github.com/x/bar@v1.1", "")
       ) shouldBe "github.com/x/bar v1.1, github.com/x/foo v1.2"
    }
-   "resolve" should "leave the edges of a module nobody selected out of the closure" in {
+   "resolve" should "leave the edges of a package nobody selected out of the closure" in {
       resolved(
          "dep github.com/x/foo v1.2",
-         publishing("github.com/x/foo@v1.2", "module jvm {\n  dep github.com/x/bar v1.1\n}")
+         publishing("github.com/x/foo@v1.2", "package jvm {\n  dep github.com/x/bar v1.1\n}")
             .published("github.com/x/bar@v1.1", "")
       ) shouldBe "github.com/x/foo v1.2"
    }
-   "resolve" should "follow a selected module's siblings, which is how a layer carries its base" in {
+   "resolve" should "follow a selected package's siblings, which is how a layer carries its base" in {
       resolved(
          "dep github.com/e/eliot//jvm v1.2",
          publishing(
             "github.com/e/eliot@v1.2",
-            "module jvm {\n  dep //stdlib\n}\nmodule stdlib {\n  dep github.com/x/bar v1.1\n}"
+            "package jvm {\n  dep //stdlib\n}\npackage stdlib {\n  dep github.com/x/bar v1.1\n}"
          ).published("github.com/x/bar@v1.1", "")
       ) shouldBe "github.com/e/eliot v1.2, github.com/x/bar v1.1"
    }
-   "resolve" should "record every module of a repository the closure reached" in {
+   "resolve" should "record every package of a repository the closure reached" in {
       mounted(
          "github.com/e/eliot",
          "dep github.com/e/eliot//jvm v1.2",
-         publishing("github.com/e/eliot@v1.2", "module jvm {\n  dep //stdlib\n}\nmodule stdlib {\n}")
+         publishing("github.com/e/eliot@v1.2", "package jvm {\n  dep //stdlib\n}\npackage stdlib {\n}")
       ) shouldBe "//jvm, //stdlib"
    }
-   "resolve" should "record the root module for a dependency line carrying no selector" in {
+   "resolve" should "record the root package for a dependency line carrying no selector" in {
       mounted("github.com/x/foo", "dep github.com/x/foo v1.2", publishing("github.com/x/foo@v1.2", ""))
          shouldBe "<root>"
    }
-   "resolve" should "leave a dependency's own test and artifact scopes out of the closure" in {
+   "resolve" should "follow a bare dep to the root package and no further" in {
       resolved(
          "dep github.com/x/foo v1.2",
          publishing(
             "github.com/x/foo@v1.2",
-            "dep github.com/x/base v1.0\n" ++
-               "test {\n  dep github.com/x/tester v1\n}\nartifact app {\n  dep github.com/x/jvm v1\n}"
+            "dep github.com/x/base v1.0\npackage test {\n  dep github.com/x/tester v1\n}"
          ).published("github.com/x/base@v1.0", "")
       ) shouldBe "github.com/x/base v1.0, github.com/x/foo v1.2"
    }
-   "resolve" should "treat two module selectors into one repository as one selection" in {
+   "resolve" should "leave a dependency's own suite out of the closure, since nothing deps it" in {
+      resolved(
+         "dep github.com/x/foo v1.2",
+         publishing(
+            "github.com/x/foo@v1.2",
+            "package test {\n  dep github.com/x/tester v1.0\n}"
+         ).published("github.com/x/tester@v1.0", "")
+      ) shouldBe "github.com/x/foo v1.2"
+   }
+   "resolve" should "treat two package selectors into one repository as one selection" in {
       resolved(
          "dep github.com/e/eliot//stdlib v1.2\ndep github.com/e/eliot//jvm v1.4",
          publishing("github.com/e/eliot@v1.2", "").published("github.com/e/eliot@v1.4", "")
       ) shouldBe "github.com/e/eliot v1.4"
    }
-   "resolve" should "select nothing for a sibling module, which versions with its own repository" in {
+   "resolve" should "select nothing for a sibling, which versions with its own repository" in {
       resolved("dep //stdlib", publishing("unused", "")) shouldBe ""
+   }
+   "resolve" should "open a sibling package of the project, which is how a suite reaches its library" in {
+      resolvedFor(
+         "test",
+         "dep github.com/x/base v1.0\npackage test {\n  dep //root\n  dep github.com/x/tester v1.0\n}",
+         publishing("github.com/x/base@v1.0", "").published("github.com/x/tester@v1.0", "")
+      ) shouldBe "github.com/x/base v1.0, github.com/x/tester v1.0"
+   }
+   "resolve" should "leave the project's own library out of a package that does not dep it" in {
+      resolvedFor(
+         "test",
+         "dep github.com/x/base v1.0\npackage test {\n  dep github.com/x/tester v1.0\n}",
+         publishing("github.com/x/base@v1.0", "").published("github.com/x/tester@v1.0", "")
+      ) shouldBe "github.com/x/tester v1.0"
    }
    "resolve" should "reach a package by every path a diamond offers, selecting it once" in {
       resolved(
@@ -110,27 +132,27 @@ def testCases: Test = {
    }
    "resolve" should "call two URLs one package when their anchors agree" in {
       resolvedWithAnchors(
-         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/mirror/foo v1.4\n}",
+         "dep github.com/x/foo v1.2\ndep gitlab.com/mirror/foo v1.4",
          publishing("github.com/x/foo@v1.2", "").published("github.com/x/foo@v1.4", ""),
          anchoring("github.com/x/foo@v1", "a1b2c3").anchored("gitlab.com/mirror/foo@v1", "a1b2c3")
       ) shouldBe "github.com/x/foo v1.4"
    }
    "resolve" should "keep two packages apart when their anchors differ" in {
       resolvedWithAnchors(
-         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/other/foo v1.4\n}",
+         "dep github.com/x/foo v1.2\ndep gitlab.com/other/foo v1.4",
          publishing("github.com/x/foo@v1.2", "").published("gitlab.com/other/foo@v1.4", ""),
          anchoring("github.com/x/foo@v1", "a1b2c3").anchored("gitlab.com/other/foo@v1", "d4e5f6")
       ) shouldBe "github.com/x/foo v1.2, gitlab.com/other/foo v1.4"
    }
    "resolve" should "unify nothing on a missing anchor, which is evidence of nothing" in {
       resolved(
-         "dep github.com/x/foo v1.2\ntest {\n  dep gitlab.com/mirror/foo v1.4\n}",
+         "dep github.com/x/foo v1.2\ndep gitlab.com/mirror/foo v1.4",
          publishing("github.com/x/foo@v1.2", "").published("gitlab.com/mirror/foo@v1.4", "")
       ) shouldBe "github.com/x/foo v1.2, gitlab.com/mirror/foo v1.4"
    }
    "resolve" should "refuse two compatibility lines of one package" in {
       resolved(
-         "dep github.com/x/foo v1.2\ntest {\n  dep github.com/x/foo v2.0\n}",
+         "dep github.com/x/foo v1.2\ndep github.com/x/foo v2.0",
          publishing("github.com/x/foo@v1.2", "")
       ) shouldBe "github.com/x/foo is required at both v1.2 and v2.0, which are different compatibility lines"
    }
@@ -138,24 +160,25 @@ def testCases: Test = {
       resolved("dep github.com/x/foo v1.2", publishing("github.com/x/foo@v1.1", ""))
          shouldBe "github.com/x/foo publishes no v1.2"
    }
-   "resolve" should "resolve the base dependencies together with the artifact's own" in {
+   "resolve" should "resolve an executable together with the library it deps" in {
       resolvedFor(
          "controller-jvm",
-         "dep github.com/x/api v2.0\nartifact controller-jvm {\n  dep github.com/x/jvm v1.3\n}",
+         "dep github.com/x/api v2.0\n" ++
+            "package controller-jvm {\n  dep //root\n  dep github.com/x/jvm v1.3\n}",
          publishing("github.com/x/api@v2.0", "").published("github.com/x/jvm@v1.3", "")
       ) shouldBe "github.com/x/api v2.0, github.com/x/jvm v1.3"
    }
-   "resolve" should "leave another artifact's platform layer out of this one" in {
+   "resolve" should "leave another executable's platform layer out of this one" in {
       resolvedFor(
          "controller-jvm",
-         "artifact controller-jvm {\n  dep github.com/x/jvm v1.3\n}\n" ++
-            "artifact controller-attiny {\n  dep github.com/x/avr v1.1\n}",
+         "package controller-jvm {\n  dep github.com/x/jvm v1.3\n}\n" ++
+            "package controller-attiny {\n  dep github.com/x/avr v1.1\n}",
          publishing("github.com/x/jvm@v1.3", "").published("github.com/x/avr@v1.1", "")
       ) shouldBe "github.com/x/jvm v1.3"
    }
-   "resolve" should "report a configuration the descriptor does not name" in {
-      resolvedFor("controller-avr", "artifact controller-jvm {\n}", publishing("unused", ""))
-         shouldBe "no configuration named 'controller-avr'"
+   "resolve" should "report a package the descriptor does not name" in {
+      resolvedFor("controller-avr", "package controller-jvm {\n}", publishing("unused", ""))
+         shouldBe "no package named 'controller-avr'"
    }
    "resolutionDepthLimit" should "be the number of rounds the closure may take" in {
       show(resolutionDepthLimit) shouldBe "64"
@@ -195,52 +218,55 @@ private def resolvedWithAnchors(
    lineages: List[Pair[String, String]]
 ): String =
    reported(
-      against(universeOf(universe, lineages), renderedSelections(resolve(TestScope, descriptorOf(rootText))))
+      against(
+         universeOf(universe, lineages),
+         renderedSelections(resolve(rootPackageName, descriptorOf(rootText)))
+      )
    )
 
-private def resolvedFor(configurationName: String, rootText: String, universe: List[Pair[String, String]]): String =
+private def resolvedFor(name: String, rootText: String, universe: List[Pair[String, String]]): String =
    reported(
       against(
          universeOf(universe, empty),
-         renderedSelections(resolve(ArtifactNamed(configurationName), descriptorOf(rootText)))
+         renderedSelections(resolve(PackageName(name), descriptorOf(rootText)))
       )
    )
 
 /**
- * The modules of `url` the test configuration of `rootText` reached, in the order it reached them —
- * the half of a selection that decides what a build mounts and whose edges the closure follows.
+ * The packages of `url` the root package of `rootText` reached, in the order it reached them — the
+ * half of a selection that decides what a build mounts and whose edges the closure follows.
  */
 private def mounted(url: String, rootText: String, universe: List[Pair[String, String]]): String =
    reported(
       against(
          universeOf(universe, empty),
-         renderedModules(repositoryAt(url), resolve(TestScope, descriptorOf(rootText)))
+         renderedPackages(repositoryAt(url), resolve(rootPackageName, descriptorOf(rootText)))
       )
    )
 
-private def renderedModules(repository: Repository, resolution: Resolution): String =
+private def renderedPackages(repository: Repository, resolution: Resolution): String =
    foldOption(
       "<unselected>",
-      selection -> selection.selectedModules.map(namedSelector).joined(", "),
+      selection -> selection.selectedPackages.map(namedSelector).joined(", "),
       resolution.selections.find(selection -> selection.selectedRepository == repository)
    )
 
 /**
- * The root module spells itself as nothing — that is what a `dep` line with no selector carries — so
+ * The root package spells itself as nothing — that is what a `dep` line with no selector carries — so
  * it is named here rather than asserted as the empty string it renders as.
  */
-private def namedSelector(selector: ModuleSelector): String =
+private def namedSelector(selector: PackageSelector): String =
    fold(show(selector) == "", "<root>", show(selector))
 
 /**
- * The version `url` was selected at in the test configuration of `rootText`, so the reading side of a
+ * The version `url` was selected at by the root package of `rootText`, so the reading side of a
  * resolution is exercised rather than only its rendering.
  */
 private def versionSelected(url: String, rootText: String, universe: List[Pair[String, String]]): String =
    reported(
       against(
          universeOf(universe, empty),
-         renderedVersion(selectedVersionOf(repositoryAt(url), resolve(TestScope, descriptorOf(rootText))))
+         renderedVersion(selectedVersionOf(repositoryAt(url), resolve(rootPackageName, descriptorOf(rootText))))
       )
    )
 

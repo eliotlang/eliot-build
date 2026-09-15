@@ -3,7 +3,7 @@ import eliot.file.Path
 import eliot.system.Process
 import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
-import eliot.build.resolve.Configuration
+import eliot.build.model.PackageId
 import eliot.build.resolve.Selection
 
 /**
@@ -14,14 +14,14 @@ import eliot.build.resolve.Selection
  * anything is cloned, so they are testable without a platform beneath them while
  * `eliot.build.Launcher` — which is the boundary, and is where the implementations are bound — can
  * never be. That is the same cut `eliot.build.format.DescriptorWriter` makes against the parser, for
- * the same reason, and the import list is the argument here too: this knows what a configuration and
+ * the same reason, and the import list is the argument here too: this knows what a package name and
  * a selection are and nothing about git, the filesystem or a subprocess.
  *
  * **Two verbs, so there is a sum.** A fixed verb set is the design's first decision, and it was worth
  * exactly nothing while there was one verb; `Request` arrives now, with the second, rather than in
- * anticipation of it. Both verbs take a configuration and both resolve one, which is the shape the
- * rest of the set has too: a verb names what to do *with* a resolution, and the resolution is the
- * argument's business.
+ * anticipation of it. Every verb takes a *package* and resolves it, which is the shape the rest of the
+ * set has too: a verb names what to do *with* a resolution, and the resolution is the argument's
+ * business.
  *
  * `resolve` reports to a person — a header and an indented line per package. `roots` reports to
  * whatever runs next: one directory per line, unadorned, because the list is the compiler's `--path`
@@ -36,20 +36,20 @@ import eliot.build.resolve.Selection
  */
 
 /**
- * What a command line asks the tool to do: name the versions of one configuration, name the
+ * What a command line asks the tool to do: name the versions one package resolves to, name the
  * directories it compiles from, or compile them.
  */
 data Request =
-   Resolve(resolvedConfiguration: Configuration) |
-   Roots(rootsConfiguration: Configuration) |
-   Build(builtConfiguration: Configuration)
+   Resolve(resolvedPackage: PackageName) |
+   Roots(rootsPackage: PackageName) |
+   Build(builtPackage: PackageName)
 
 /**
  * What `commandLine` asks for, absent where it asks for anything the tool does not offer.
  *
- * Absent covers every unknown verb, a missing configuration and a spare argument alike, because a
+ * Absent covers every unknown verb, a missing package name and a spare argument alike, because a
  * tool that read past an argument it did not understand would act on something the user did not
- * name. What is *not* refused here is a configuration no descriptor declares: that is a fact about a
+ * name. What is *not* refused here is a package no descriptor declares: that is a fact about a
  * descriptor this module has never seen, and the resolver already reports it against the one it has.
  *
  * ```eliot
@@ -60,28 +60,28 @@ def requested(commandLine: List[String]): Option[Request] = {
    val verb = at(0, commandLine) orElse ""
    val named = at(1, commandLine) orElse ""
 
-   fold(size(commandLine) == 2, verbRequest(verb, configurationNamed(named)), None)
+   fold(size(commandLine) == 2, verbRequest(verb, PackageName(named)), None)
 }
 
 /**
- * The configuration `request` is about — every verb takes one, and a failure has to name it.
+ * The package `request` is about — every verb takes one, and a failure has to name it.
  */
-def requestedConfiguration(request: Request): Configuration = request match {
-   case Resolve(configuration) -> configuration
-   case Roots(configuration)   -> configuration
-   case Build(configuration)   -> configuration
+def requestedPackage(request: Request): PackageName = request match {
+   case Resolve(name) -> name
+   case Roots(name)   -> name
+   case Build(name)   -> name
 }
 
 /**
- * What a resolution looks like on a terminal: the configuration it is of, then one indented line per
- * package.
+ * What a resolution looks like on a terminal: the package it is of, then one indented line per
+ * dependency.
  *
  * The order is the resolution's own, which is canonical per repository rather than the order the
  * closure happened to discover things in — so two runs of one graph print the same text, and a
  * future lockfile records the same lines it shows.
  */
-def report(configuration: Configuration, resolution: Resolution): List[String] =
-   prepend(resolution.selections.map(selectionLine), show(configuration) ++ ":")
+def report(name: PackageName, resolution: Resolution): List[String] =
+   prepend(resolution.selections.map(selectionLine), show(name) ++ ":")
 
 /**
  * What an assembly looks like on a terminal: one source root per line and nothing else.
@@ -96,7 +96,7 @@ def reportRoots(roots: List[Path]): List[String] = roots.map(show)
 /**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
  * plugins were unpacked into, the backend word and the artifact kind that select what it produces, the
- * module holding `main` where the artifact has one, the source roots, and where the result goes.
+ * module holding `main`, the source roots, and where the result goes.
  *
  * A record rather than seven arguments, because every field here is decided somewhere else — the
  * toolchain says the backend word, the resolution says the roots, the launcher says the JVM — and a
@@ -107,7 +107,7 @@ data Compilation(
    toolchainClasspath: List[Path],
    backendCommand: String,
    artifactKind: String,
-   mainModule: Option[String],
+   mainModule: String,
    compiledRoots: List[Path],
    outputDirectory: Path
 )
@@ -122,7 +122,7 @@ data Compilation(
  * what keeps it out of the boundary.
  *
  * ```eliot
- * val line = compilerCommand(Compilation("java", plugins, "jvm", "exe-jar", Some(testRunnerModule), roots, target))
+ * val line = compilerCommand(Compilation("java", plugins, "jvm", "exe-jar", main, roots, target))
  * ```
  */
 def compilerCommand(compilation: Compilation): List[String] =
@@ -130,8 +130,8 @@ def compilerCommand(compilation: Compilation): List[String] =
       .withArgument("-cp").withArgument(classpathOf(compilation.toolchainClasspath))
       .withArgument(compilerMainClass)
       .withArgument(compilation.backendCommand)
-      .withArgument(compilation.artifactKind)) ++
-      moduleArguments(compilation.mainModule) ++
+      .withArgument(compilation.artifactKind)
+      .withArgument("-m").withArgument(compilation.mainModule)) ++
       compilation.compiledRoots.map(show) ++
       (command("-o").withArgument(show(compilation.outputDirectory)))
 
@@ -146,40 +146,15 @@ def compilerCommand(compilation: Compilation): List[String] =
 def compilerMainClass: String = "com.vanillasource.eliot.eliotc.compiler.Main"
 
 /**
- * Where a test configuration's `main` lives — in the framework, which is a dependency rather than
- * anything the project being built wrote.
+ * What a build produces — a runnable jar, which is what every backend anybody has declared so far
+ * emits.
  *
- * Hard-coded deliberately, as `docs/build-system.md`'s Q4 leans: the alternative is a clause in the
- * framework's own descriptor, and one constant with the reason attached is the cheaper thing to
- * change when a second test framework exists to justify one.
- */
-def testRunnerModule: String = "eliot.test.Runner"
-
-/**
- * What a configuration produces when it says nothing else — a runnable jar, which is what both a test
- * run and every artifact anybody has declared so far wants.
+ * Transitional, and the one thing `docs/build-system.md` says should come off the closure that still
+ * does not: the kind belongs to the platform package, which would declare it beside the command word
+ * its plugin registers. No published tag carries such a clause, so this constant stands in until one
+ * does — and no consumer writes a kind either way, which is the half of the design that matters.
  */
 def defaultArtifactKind: String = "exe-jar"
-
-/**
- * What `configuration` asks the backend to produce — its `backend` block's `kind`, or a runnable jar
- * where it says nothing and for the test scope, which has no block to say anything in.
- */
-def compiledKind(configuration: Configuration, descriptor: Descriptor): String =
-   parameterOf("kind", configuration, descriptor) orElse defaultArtifactKind
-
-/**
- * The module holding the `main` of `configuration`, absent for an artifact that names none.
- *
- * The test scope's is the framework's runner and is not the project's to state; an artifact's is its
- * own `backend` parameter. That asymmetry is the whole of Q4: a test configuration's entry point lives
- * in a dependency, so somebody has to know its name, and the test verb is the somebody.
- */
-def compiledMain(configuration: Configuration, descriptor: Descriptor): Option[String] =
-   configuration match {
-      case TestScope        -> Some(testRunnerModule)
-      case ArtifactNamed(_) -> parameterOf("main", configuration, descriptor)
-   }
 
 /**
  * A classpath the JVM expands itself: one wildcard entry per unpacked asset, so an asset's jars are
@@ -206,23 +181,11 @@ def failed(doing: String, problem: String): List[String] = singleton("eliot: " +
  * one saying what the argument they share is.
  */
 def usage: List[String] =
-   singleton("usage: eliot <verb> <configuration>") ++
-      singleton("   " ++ resolveVerb ++ "   the version selected for each package of the configuration") ++
-      singleton("   " ++ rootsVerb ++ "     the source directories the configuration compiles from") ++
+   singleton("usage: eliot <verb> <package>") ++
+      singleton("   " ++ resolveVerb ++ "   the version selected for each dependency of the package") ++
+      singleton("   " ++ rootsVerb ++ "     the source directories the package compiles from") ++
       singleton("   " ++ buildVerb ++ "     compile those directories with the toolchain they select") ++
-      singleton("   <configuration>   'test', or the name of an artifact declared in " ++ descriptorFileName)
-
-private def parameterOf(key: String, configuration: Configuration, descriptor: Descriptor): Option[String] =
-   foldOption(
-      None,
-      backend -> backend.backendParameters.lookupOption(key),
-      configuredBackend(configuration, descriptor)
-   )
-
-private def moduleArguments(module: Option[String]): List[String] =
-   foldOption(noArguments, name -> command("-m").withArgument(name), module)
-
-private def noArguments: List[String] = empty
+      singleton("   <package>   'root', 'test', or any package declared in " ++ descriptorFileName)
 
 /**
  * Written with `fold` rather than as the `if..else..else None` chain it obviously is, and the reason is
@@ -233,14 +196,14 @@ private def noArguments: List[String] = empty
  * mentions one. `fold` introduces no `Abort`, so there is nothing to collide. Undo this once the
  * compiler emits both.
  */
-private def verbRequest(verb: String, configuration: Configuration): Option[Request] =
+private def verbRequest(verb: String, name: PackageName): Option[Request] =
    fold(
       verb == resolveVerb,
-      Some(Resolve(configuration)),
+      Some(Resolve(name)),
       fold(
          verb == rootsVerb,
-         Some(Roots(configuration)),
-         fold(verb == buildVerb, Some(Build(configuration)), None)
+         Some(Roots(name)),
+         fold(verb == buildVerb, Some(Build(name)), None)
       )
    )
 

@@ -20,35 +20,48 @@ import eliot.build.resolve.Resolution
  * **The toolchain is discovered, never configured.** There is no toolchain directive anywhere in this
  * system: a package requiring a newer eliot raises the minimum, MVS unifies it, and the tag that wins
  * is the tag whose assets these are. So finding the compiler is reading the `plugin` clauses of the
- * modules the closure already mounted — the one marked `compiler` holds it, one with a `backend` word
+ * packages the closure already mounted — the one marked `compiler` holds it, one with a `backend` word
  * answers to that word, and the rest are always-on contributors that simply come along.
  *
- * **Both refusals here are about a graph rather than a file.** Two packages claiming `compiler` is not
- * something a descriptor reader can catch — each descriptor is read alone and the conflict exists only
- * across a resolution — so it is raised here, which is where the whole closure is in view for the
- * first time. That is `docs/build-system.md`'s Q3 answered by construction.
+ * **The entry point is discovered the same way**, and that is what Q4 became. A suite's `main` lives in
+ * the test framework and an application's in the application, which used to be an asymmetry the test
+ * verb papered over with a hard-coded constant; both are now a `main` clause on a package, read off one
+ * closure by one rule. The project's own opened packages are searched alongside the dependencies'
+ * precisely because the two are not different kinds of thing.
+ *
+ * **Every refusal here is about a graph rather than a file.** Two packages claiming `compiler`, or two
+ * declaring a `main`, is not something a descriptor reader can catch — each descriptor is read alone
+ * and the conflict exists only across a resolution — so they are raised here, which is where the whole
+ * closure is in view for the first time. That is `docs/build-system.md`'s Q3 and Q4 answered by
+ * construction.
  */
 
 /**
- * Why a resolution does not describe something runnable. Each names the configuration or the assets it
- * is about, because a toolchain a user cannot attribute to a dependency line is one they cannot fix.
+ * Why a resolution does not describe something runnable. Each names the package or the assets it is
+ * about, because a toolchain a user cannot attribute to a dependency line is one they cannot fix.
  */
 data ToolchainError =
-   NoCompiler(compilerlessConfiguration: Configuration) |
+   NoCompiler(compilerlessPackage: PackageName) |
    TwoCompilers(oneCompiler: Asset, otherCompiler: Asset) |
-   NoBackend(backendlessConfiguration: Configuration) |
-   TwoBackends(oneBackend: Asset, otherBackend: Asset)
+   NoBackend(backendlessPackage: PackageName) |
+   TwoBackends(oneBackend: Asset, otherBackend: Asset) |
+   NoMain(mainlessPackage: PackageName) |
+   TwoMains(oneMain: String, otherMain: String)
 
 implement Show[ToolchainError] {
    def show(value: ToolchainError): String = value match {
-      case NoCompiler(configuration) ->
-         "nothing '" ++ show(configuration) ++ "' depends on ships a compiler"
+      case NoCompiler(name) ->
+         "nothing '" ++ show(name) ++ "' depends on ships a compiler"
       case TwoCompilers(one, other) ->
          "both " ++ show(one) ++ " and " ++ show(other) ++ " claim to be the compiler"
-      case NoBackend(configuration) ->
-         "nothing '" ++ show(configuration) ++ "' depends on ships a backend"
+      case NoBackend(name) ->
+         "nothing '" ++ show(name) ++ "' depends on ships a backend"
       case TwoBackends(one, other) ->
          "both " ++ show(one) ++ " and " ++ show(other) ++ " ship a backend, so one has to be named"
+      case NoMain(name) ->
+         "nothing in '" ++ show(name) ++ "' declares a main, so there is nothing to run"
+      case TwoMains(one, other) ->
+         "both " ++ one ++ " and " ++ other ++ " are declared as a main, so there is no one entry point"
    }
 }
 
@@ -75,46 +88,89 @@ data Backing(backingAsset: Asset, backingWord: String)
  * eventual shape is a parent loader on the compiler asset with a child per plugin, and `compilerAsset`
  * is exactly the fact that split needs; until then it says which asset `Main` is in.
  */
-data Toolchain(compilerAsset: Asset, backendWord: String, toolchainAssets: List[Asset])
+data Toolchain(compilerAsset: Asset, backendWord: String, toolchainAssets: List[Asset], toolchainMain: String)
 
 /**
- * What `configuration` builds with, given what it resolved to.
+ * What building `name` runs with, given what it resolved to.
  *
  * The resolution is passed in rather than computed, because a build wants the roots and the toolchain
  * of *one* closure — resolving twice would be two closures that merely ought to agree.
  *
  * ```eliot
- * val toolchain = toolchainOf(TestScope, descriptor, resolve(TestScope, descriptor))
+ * val toolchain = toolchainOf(name, descriptor, resolve(name, descriptor))
  * ```
  */
 def toolchainOf(
-      configuration: Configuration,
+      name: PackageName,
       descriptor: Descriptor,
       resolution: Resolution
    ): {PackageSource, Throw[ResolutionError], Throw[ToolchainError]} Toolchain = {
    val shipped = resolution.selections.flatMap(shippedBy)
+   val mains = declaredMains(name, descriptor) ++ resolution.selections.flatMap(mainsIn)
 
    Toolchain(
       sole(
-         NoCompiler(configuration),
+         NoCompiler(name),
          one -> other -> TwoCompilers(one, other),
          entry -> entry.shippedAsset,
          compilersIn(shipped)
       ).shippedAsset,
       sole(
-         NoBackend(configuration),
+         NoBackend(name),
          one -> other -> TwoBackends(one, other),
          candidate -> candidate.backingAsset,
-         backendsIn(configuration, descriptor, shipped)
+         backendsIn(shipped)
       ).backingWord,
-      shipped.map(entry -> entry.shippedAsset)
+      shipped.map(entry -> entry.shippedAsset),
+      soleMain(name, mains)
    )
 }
 
 /**
- * Every plugin one selected package ships, paired with the asset it is published as.
+ * The `main` clauses of the project's *own* packages that this build opens — its executable's, when an
+ * executable is what was asked for, and none when a suite was, since a suite's entry point is the
+ * framework's.
+ */
+private def declaredMains(name: PackageName, descriptor: Descriptor): List[String] =
+   foldOption(
+      empty,
+      opened -> opened.flatMap(built -> mainOf(built)),
+      configuredPackages(name, descriptor)
+   )
+
+/**
+ * The `main` clauses of the packages one selected dependency mounts — where a suite's comes from, the
+ * framework having declared its own runner about itself.
+ */
+private def mainsIn(selection: Selection): {PackageSource, Throw[ResolutionError]} List[String] =
+   foldOption(
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      descriptor -> mountedPackages(selection, descriptor).flatMap(built -> mainOf(built)),
+      descriptorAt(selection.selectedVersion, selection.selectedRepository)
+   )
+
+private def mainOf(built: BuildPackage): List[String] =
+   foldOption(empty, module -> singleton(module), built.packageMain)
+
+/**
+ * The one entry point in the closure, or which two made it a question.
  *
- * Of the modules the closure *mounted*, and only those: a plugin is a module's, so a module nobody
+ * Two is a real conflict rather than a thing to prefer between: a build produces one executable, and
+ * picking the nearer declaration would make what runs depend on how the graph happened to be shaped.
+ * It is also why an executable is its own package — were a library's `main` in the same package as its
+ * sources, every suite testing that library would inherit it alongside the framework's.
+ */
+private def soleMain(name: PackageName, mains: List[String]): {Throw[ToolchainError]} String =
+   foldOption(
+      raise(NoMain(name)),
+      only -> foldOption(only, second -> raise(TwoMains(only, second)), mains.at(1)),
+      mains.head
+   )
+
+/**
+ * Every plugin one selected repository ships, paired with the asset it is published as.
+ *
+ * Of the packages the closure *mounted*, and only those: a plugin is a package's, so a package nobody
  * selected ships nothing into this build, exactly as it contributes no sources. A selected version
  * whose descriptor cannot be read back is `Unavailable` — the resolver's own error, the same fact
  * under a different verb, which is what `eliot.build.assemble.Assembly` says about the same read.
@@ -127,9 +183,11 @@ private def shippedBy(selection: Selection): {PackageSource, Throw[ResolutionErr
    )
 
 private def declaredBy(selection: Selection, descriptor: Descriptor): List[Shipped] =
-   descriptor.modules
-      .filter(module -> module.exported && mounts(module.moduleName, selection))
-      .flatMap(module -> module.modulePlugins.map(plugin -> Shipped(assetOf(selection, plugin), plugin)))
+   mountedPackages(selection, descriptor)
+      .flatMap(built -> built.packagePlugins.map(plugin -> Shipped(assetOf(selection, plugin), plugin)))
+
+private def mountedPackages(selection: Selection, descriptor: Descriptor): List[BuildPackage] =
+   descriptor.packages.filter(built -> built.exported && mounts(built.packageName, selection))
 
 private def assetOf(selection: Selection, plugin: Plugin): Asset =
    Asset(selection.selectedRepository, selection.selectedVersion, plugin.pluginAsset)
@@ -142,19 +200,12 @@ private def compilersIn(shipped: List[Shipped]): List[Shipped] =
  *
  * A plugin *is* a candidate exactly when it declares a word, which is the whole of Q1's decision: the
  * provider says what it answers to, so `lang` and `stdlib` stop counting and the "exactly one
- * candidate" rule an artifact leans on becomes true. Where the artifact named a package, only that
- * package's are kept — identity from the consumer, mechanism from the provider, and neither side ever
- * spells the other's half.
+ * candidate" rule becomes true. Nothing filters them by anything a consumer wrote, because a consumer
+ * writes nothing about backends any more — a closure holding two of them holds two platform layers,
+ * which would collide on every name they implement, so it is a conflict to report rather than a choice
+ * to offer.
  */
-private def backendsIn(
-   configuration: Configuration,
-   descriptor: Descriptor,
-   shipped: List[Shipped]
-): List[Backing] = {
-   val named = namedRepository(configuredBackend(configuration, descriptor))
-
-   shipped.flatMap(candidateOf).filter(candidate -> chosenBy(named, candidate.backingAsset))
-}
+private def backendsIn(shipped: List[Shipped]): List[Backing] = shipped.flatMap(candidateOf)
 
 /**
  * One candidate, or none — a plugin that declares no word is not a backend, which is the whole of what
@@ -168,12 +219,6 @@ private def candidateOf(entry: Shipped): List[Backing] =
    )
 
 private def noCandidate: List[Backing] = empty
-
-private def chosenBy(named: Option[Repository], asset: Asset): Bool =
-   foldOption(true, chosen -> asset.assetRepository == chosen, named)
-
-private def namedRepository(backend: Option[Backend]): Option[Repository] =
-   foldOption(None, chosen -> foldOption(None, named -> repositoryOf(named), chosen.backendPackage), backend)
 
 /**
  * The one candidate, or which two of them made it a question.

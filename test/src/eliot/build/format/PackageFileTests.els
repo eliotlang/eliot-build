@@ -11,85 +11,108 @@ def testCases: Test = {
    "parseDescriptor" should "read the minimal library descriptor of the design" in {
       roundTrip("dep github.com/eliot-lang/eliot//stdlib v1\ndep github.com/somelib/collections v1.3")
    }
-   "parseDescriptor" should "keep a module selector apart from the URL it narrows" in {
+   "parseDescriptor" should "keep a package selector apart from the URL it narrows" in {
       parsed("dep github.com/eliot-lang/eliot//stdlib v1.2")
          shouldBe "dep github.com/eliot-lang/eliot//stdlib v1.2"
    }
-   "parseDescriptor" should "read a sibling module reference, which carries no version" in {
-      parsed("module jvm {\n   dep //stdlib\n}") shouldBe "module jvm {\n  dep //stdlib\n}"
+   "parseDescriptor" should "read a sibling reference, which carries no version" in {
+      parsed("package jvm {\n   dep //stdlib\n}") shouldBe "package jvm {\n  dep //stdlib\n}"
    }
    "parseDescriptor" should "read an application targeting two platforms" in {
       roundTrip(
          "dep github.com/somelib/sensor-api v2\n" ++
-         "artifact controller-jvm {\n" ++
+         "package controller-jvm {\n" ++
+         "  dep //root\n" ++
          "  dep github.com/eliot-lang/eliot//jvm v1\n" ++
-         "  backend {\n    kind exe-jar\n    main Controller\n  }\n" ++
+         "  main Controller\n" ++
+         "}\n" ++
+         "package controller-attiny {\n" ++
+         "  dep //root\n" ++
+         "  dep github.com/vendor/eliot-avr//attiny85 v1\n" ++
+         "  main Controller\n" ++
          "}"
       )
    }
-   "parseDescriptor" should "read a backend written inline" in {
-      parsed("artifact hello {\n   backend { kind exe-jar, main HelloWorld }\n}")
-         shouldBe "artifact hello {\n  backend {\n    kind exe-jar\n    main HelloWorld\n  }\n}"
-   }
-   "parseDescriptor" should "read the eliot repository's own multi-module shape" in {
+   "parseDescriptor" should "read a suite as an ordinary package depending on the root" in {
       roundTrip(
-         "module lang {\n" ++
+         "dep github.com/eliot-lang/eliot//stdlib v1\n" ++
+         "package test {\n" ++
+         "  dep //root\n" ++
+         "  dep github.com/eliot-lang/eliot//jvm-test v1\n" ++
+         "}"
+      )
+   }
+   "parseDescriptor" should "read the eliot repository's own multi-package shape" in {
+      roundTrip(
+         "package lang {\n" ++
          "  at lang/eliot\n" ++
          "  plugin eliot-compiler.zip {\n    compiler\n  }\n}\n" ++
-         "module jvm {\n" ++
+         "package jvm {\n" ++
          "  at jvm/eliot\n" ++
          "  dep //stdlib\n" ++
          "  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}\n" ++
-         "module examples {\n  internal\n  dep //jvm\n}"
+         "package examples {\n  internal\n  dep //jvm\n}"
       )
    }
    "parseDescriptor" should "read a plugin that is neither a backend nor the compiler" in {
-      roundTrip("module contrib {\n  plugin eliot-contrib.zip\n}")
+      roundTrip("package contrib {\n  plugin eliot-contrib.zip\n}")
    }
-   "parseDescriptor" should "read a backend naming the package whose plugin to call" in {
-      roundTrip("artifact hello {\n  backend github.com/eliot-lang/eliot//jvm {\n    kind exe-jar\n  }\n}")
+   "parseDescriptor" should "let the root package itself be the executable" in {
+      roundTrip("dep github.com/eliot-lang/eliot//jvm v1\nmain Hello")
    }
    "parseDescriptor" should "canonicalize a dependency URL, so one package is one identity" in {
       parsed("dep GitHub.com/x/foo.git v1") shouldBe "dep github.com/x/foo v1"
    }
-   "parseDescriptor" should "read a test block" in {
-      roundTrip("test {\n  dep github.com/eliot-lang/eliot-test v1\n}")
+   "parseDescriptor" should "treat a package as exported unless it says otherwise" in {
+      parsed("package lang {\n   dep //other\n}") shouldBe "package lang {\n  dep //other\n}"
    }
-   "parseDescriptor" should "treat a module as exported unless it says otherwise" in {
-      parsed("module lang {\n   dep //other\n}") shouldBe "module lang {\n  dep //other\n}"
+   "parseDescriptor" should "give a package the directory its own name spells, where it says nothing" in {
+      directoryOf("stdlib", "package stdlib {\n   dep //lang\n}") shouldBe "stdlib"
    }
-   "parseDescriptor" should "give a module the directory its own name spells, where it says nothing" in {
-      firstModuleDirectory("module stdlib {\n   dep //lang\n}") shouldBe "stdlib"
+   "parseDescriptor" should "put the root package at the repository root, which is not a choice" in {
+      directoryOf("root", "dep github.com/x/foo v1") shouldBe "."
    }
-   "parseDescriptor" should "let a module say where it is, for a repository that is not flat" in {
-      firstModuleDirectory("module stdlib {\n   at stdlib/eliot\n}") shouldBe "stdlib/eliot"
+   "parseDescriptor" should "let a package say where it is, for a repository that is not flat" in {
+      directoryOf("stdlib", "package stdlib {\n   at stdlib/eliot\n}") shouldBe "stdlib/eliot"
    }
-   "parseDescriptor" should "keep a module's directory apart from the name dependents select it by" in {
-      roundTrip("module lang {\n  at lang/eliot\n  dep //stdlib\n}")
+   "parseDescriptor" should "keep a package's directory apart from the name dependents select it by" in {
+      roundTrip("package lang {\n  at lang/eliot\n  dep //stdlib\n}")
    }
-   "parseDescriptor" should "write no 'at' where the directory is the module's name, which already said it" in {
-      parsed("module lang {\n   at lang\n}") shouldBe "module lang"
+   "parseDescriptor" should "write no 'at' where the directory is the package's name, which already said it" in {
+      parsed("package lang {\n   at lang\n}") shouldBe "package lang"
    }
    "parseDescriptor" should "reject an 'at' naming no directory" in {
-      parsed("module lang {\n   at\n}") shouldBe "an 'at' needs a directory in 'at'"
+      parsed("package lang {\n   at\n}") shouldBe "an 'at' needs a directory in 'at'"
    }
-   "parseDescriptor" should "reject an absolute module directory, which no checkout contains" in {
-      parsed("module lang {\n   at /etc\n}")
-         shouldBe "a module directory is a path inside the repository in 'at /etc'"
+   "parseDescriptor" should "reject an absolute package directory, which no checkout contains" in {
+      parsed("package lang {\n   at /etc\n}")
+         shouldBe "a package directory is a path inside the repository in 'at /etc'"
    }
-   "parseDescriptor" should "reject a module directory climbing out of the repository" in {
-      parsed("module lang {\n   at ../elsewhere\n}")
-         shouldBe "a module directory is a path inside the repository in 'at ../elsewhere'"
+   "parseDescriptor" should "reject a package directory climbing out of the repository" in {
+      parsed("package lang {\n   at ../elsewhere\n}")
+         shouldBe "a package directory is a path inside the repository in 'at ../elsewhere'"
    }
-   "parseDescriptor" should "yield nothing for a file of comments alone" in {
+   "parseDescriptor" should "yield nothing but a bare root package for a file of comments alone" in {
       parsed("-- nothing to declare\n\n-- really") shouldBe ""
+   }
+   "parseDescriptor" should "read a retired 'module' block as the package it always was" in {
+      parsed("module lang {\n  at lang/eliot\n  dep //stdlib\n}")
+         shouldBe "package lang {\n  at lang/eliot\n  dep //stdlib\n}"
+   }
+   "parseDescriptor" should "drop a retired 'test' block, which never reached a consumer" in {
+      parsed("dep github.com/x/foo v1\ntest {\n  dep github.com/y/bar v2\n}")
+         shouldBe "dep github.com/x/foo v1"
+   }
+   "parseDescriptor" should "drop a retired 'artifact' block, which nothing could ever depend on" in {
+      parsed("dep github.com/x/foo v1\nartifact hello {\n  backend {\n    kind exe-jar\n  }\n}")
+         shouldBe "dep github.com/x/foo v1"
    }
    "parseDescriptor" should "reject an unknown top-level clause, pointing at the upgrade" in {
       parsed("registry https://example.com")
          shouldBe "unknown clause 'registry'; this descriptor may need a newer eliot in 'registry https://example.com'"
    }
-   "parseDescriptor" should "reject an unknown clause inside a module" in {
-      parsed("module lang {\n   exports everything\n}")
+   "parseDescriptor" should "reject an unknown clause inside a package" in {
+      parsed("package lang {\n   exports everything\n}")
          shouldBe "unknown clause 'exports'; this descriptor may need a newer eliot in 'exports everything'"
    }
    "parseDescriptor" should "reject a dependency URL carrying a scheme" in {
@@ -113,23 +136,26 @@ def testCases: Test = {
    "parseDescriptor" should "reject a foreign dependency that declares no minimum" in {
       parsed("dep github.com/x/foo") shouldBe "a foreign dependency needs a minimum version in 'dep github.com/x/foo'"
    }
-   "parseDescriptor" should "reject a version on a sibling module, which versions with its repository" in {
-      parsed("module jvm {\n   dep //stdlib v1.2\n}")
-         shouldBe "a sibling module versions with its repository and carries no version in 'dep //stdlib v1.2'"
+   "parseDescriptor" should "reject a version on a sibling, which versions with its repository" in {
+      parsed("package jvm {\n   dep //stdlib v1.2\n}")
+         shouldBe "a sibling package versions with its repository and carries no version in 'dep //stdlib v1.2'"
    }
    "parseDescriptor" should "reject a dep carrying more than a URL and a version" in {
       parsed("dep github.com/x/foo v1 extra") shouldBe "too many arguments in 'dep github.com/x/foo v1 extra'"
    }
+   "parseDescriptor" should "reject a main naming no module" in {
+      parsed("package launcher {\n  main\n}") shouldBe "a main needs the module holding it in 'main'"
+   }
    "parseDescriptor" should "reject a plugin naming no asset" in {
-      parsed("module lang {\n  plugin\n}")
+      parsed("package lang {\n  plugin\n}")
          shouldBe "a plugin needs a release asset name in 'plugin'"
    }
    "parseDescriptor" should "reject a plugin backend that does not say which word it registers" in {
-      parsed("module jvm {\n  plugin eliot-jvm.zip {\n    backend\n  }\n}")
+      parsed("package jvm {\n  plugin eliot-jvm.zip {\n    backend\n  }\n}")
          shouldBe "a plugin's backend needs the command word it registers in 'backend'"
    }
    "parseDescriptor" should "reject the Maven-era jar pin, which the lockfile records now" in {
-      parsed("module lang {\n  plugin eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
+      parsed("package lang {\n  plugin eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
          shouldBe ("unknown clause 'jar'; this descriptor may need a newer eliot in " ++
             "'jar c:d:2 sha256 9f2ca9b1'")
    }
@@ -155,13 +181,14 @@ private def parsed(text: String): String =
    )
 
 /**
- * Where the first module of the descriptor `text` spells says it is — the one thing the rendering
- * cannot show, since a directory that is the module's name is written as the name alone.
+ * Where the package called `name` says it is — the one thing the rendering cannot show, since a
+ * directory that is the package's name is written as the name alone, and the root package's is never
+ * written at all.
  */
-private def firstModuleDirectory(text: String): String =
+private def directoryOf(name: String, text: String): String =
    foldEither(
       error -> show(error),
-      descriptor -> foldOption("", built -> built.moduleDirectory, descriptor.modules.head),
+      descriptor -> foldOption("", built -> built.packageRoot, packageNamed(PackageName(name), descriptor)),
       runThrow[DescriptorError](parseDescriptor(split("\n", text)))
    )
 

@@ -1,11 +1,19 @@
 -- The build tool as a package — the one whose descriptor the tool itself has to be able to read, and
 -- as of v0.2 of the toolchain the one it can build.
--- One anonymous module: `src/` is the tool, `test/` is its suite, both at the repository root, which
--- is what no `module` clause means.
 --
--- `//stdlib` alone in the base scope, because that is what `src` names: `eliot.collection.List`,
+-- **Three packages, no scopes.** Top-level clauses are the *root package*: the library at `src/`,
+-- which is what a consumer would get and what `//root` names. `launcher` is that library plus a
+-- platform plus an entry point, and `test` is the suite at `test/src`. Nothing depends on either, so
+-- neither one's platform layer reaches anybody — the isolation the old `artifact` and `test` scopes
+-- were enforcing is the shape of the graph now (`docs/build-system.md`, "What this replaced, and why").
+--
+-- `launcher` is a package rather than a clause on the root, and it has to be: were `main
+-- eliot.build.Launcher` declared beside the sources, `test` would inherit it through `dep //root`
+-- alongside the framework's runner, and the closure would hold two entry points.
+--
+-- `//stdlib` alone in the root package, because that is what `src` names: `eliot.collection.List`,
 -- `eliot.file` and `eliot.system`. The `lang` layer arrives underneath it anyway — the eliot
--- repository's own descriptor says `module stdlib { dep //lang }` — and a dependency this package
+-- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
 -- `v0.2` and not lower, everywhere: `src` performs `eliot.system.Process.registerExitCode`, which the
@@ -13,27 +21,22 @@
 -- arrived at `v0.1`. A floor is a statement about what this code needs, and both halves of that are
 -- true here for once — the sources and the toolchain that compiles them are the same requirement.
 --
--- The `launcher` artifact is what makes this repository self-hosting in the only sense that is
--- available yet: `eliot build launcher` reads these lines, fetches the compiler this file selected and
--- produces the jar that `eliotw` downloads. It names `//jvm` because a platform layer is declared per
--- artifact rather than in base scope, and it needs no `backend <package>` — `//jvm` is the one plugin
--- in its closure that registers a command word, which is exactly the case the "exactly one candidate"
--- rule exists for.
---
--- Test scope is the framework plus a platform to run on, which is the shape every Eliot suite has:
--- `eliot.test.Runner` needs a jvm to be an executable, and nothing in `src` does.
+-- `test` declares the framework's own entry point, which under this design is the framework's to
+-- declare about itself. It is written here because `eliot-test v0.0` is the only tag that exists and
+-- it predates the `main` clause; a published tag is never replaced, so the line moves out of this file
+-- the day a tag carrying it can be depended on.
 
 dep github.com/robertbraeutigam/eliot//stdlib v0.2
 
-artifact launcher {
+package launcher {
+  dep //root
   dep github.com/robertbraeutigam/eliot//jvm v0.2
-  backend {
-    kind exe-jar
-    main eliot.build.Launcher
-  }
+  main eliot.build.Launcher
 }
 
-test {
+package test {
+  dep //root
   dep github.com/eliotlang/eliot-test v0.0
   dep github.com/robertbraeutigam/eliot//jvm v0.2
+  main eliot.test.Runner
 }

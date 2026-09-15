@@ -6,7 +6,6 @@ import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Lineage
 import eliot.build.model.Descriptor
-import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
 import eliot.build.Command
 
@@ -19,22 +18,22 @@ import eliot.build.Command
  * checked by running it.
  */
 def testCases: Test = {
-   "requested" should "read the configuration the resolve verb names" in {
-      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "resolve artifact controller-jvm"
+   "requested" should "read the package the resolve verb names" in {
+      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "resolve controller-jvm"
    }
-   "requested" should "read the test scope by the word that spells it" in {
-      described(requested(commandLine("resolve", "test"))) shouldBe "resolve test scope"
+   "requested" should "read the suite by the word that spells it, which is a package name like any other" in {
+      described(requested(commandLine("resolve", "test"))) shouldBe "resolve test"
    }
-   "requested" should "tell the verbs apart, and the configuration is the same argument" in {
-      described(requested(commandLine("roots", "test"))) shouldBe "roots test scope"
+   "requested" should "tell the verbs apart, and the package is the same argument" in {
+      described(requested(commandLine("roots", "root"))) shouldBe "roots root"
    }
    "requested" should "read the verb that actually compiles" in {
-      described(requested(commandLine("build", "controller-jvm"))) shouldBe "build artifact controller-jvm"
+      described(requested(commandLine("build", "controller-jvm"))) shouldBe "build controller-jvm"
    }
    "requested" should "ask for nothing where the verb is not one the tool offers" in {
       described(requested(commandLine("fetch", "test"))) shouldBe "<none>"
    }
-   "requested" should "ask for nothing where no configuration was named" in {
+   "requested" should "ask for nothing where no package was named" in {
       described(requested(append(empty, "resolve"))) shouldBe "<none>"
    }
    "requested" should "ask for nothing rather than read past an argument it does not understand" in {
@@ -44,39 +43,37 @@ def testCases: Test = {
       described(requested(empty)) shouldBe "<none>"
    }
 
-   "report" should "name the configuration and then one line per package" in {
-      joined("/", report(TestScope, resolutionOf(selected("github.com/x/foo", 1, 2))))
+   "report" should "name the package and then one line per dependency" in {
+      joined("/", report(PackageName("test"), resolutionOf(selected("github.com/x/foo", 1, 2))))
          shouldBe "test:/   github.com/x/foo v1.2"
    }
    "report" should "keep the canonical order the resolution holds" in {
       joined(
          "/",
          report(
-            ArtifactNamed("app"),
+            PackageName("app"),
             resolutionOf(selected("github.com/x/bar", 2, 0)).addSelection(selected("github.com/x/foo", 1, 2))
          )
       ) shouldBe "app:/   github.com/x/bar v2.0/   github.com/x/foo v1.2"
    }
-   "report" should "name a configuration that resolved to nothing at all" in {
-      joined("/", report(TestScope, Resolution(empty))) shouldBe "test:"
+   "report" should "name a package that resolved to nothing at all" in {
+      joined("/", report(rootPackageName, Resolution(empty))) shouldBe "root:"
    }
 
    "reportRoots" should "print one root per line, unadorned, because the lines are arguments" in {
       joined("/", reportRoots(append(singleton(path("/project/src")), path("/cache/x/foo@v1.2/src"))))
          shouldBe "/project/src//cache/x/foo@v1.2/src"
    }
-   "reportRoots" should "print nothing at all for a configuration that mounts nothing" in {
+   "reportRoots" should "print nothing at all for a package that mounts nothing" in {
       joined("/", reportRoots(empty)) shouldBe ""
    }
 
    "compilerCommand" should "put -m between the artifact kind and the first source root" in {
-      joined(" ", compilerCommand(compilationOf(Some("eliot.test.Runner")))) shouldBe expectedCompilerCommand
-   }
-   "compilerCommand" should "leave -m out for an artifact that names no main module" in {
-      joined(" ", compilerCommand(compilationOf(None))) shouldBe expectedMainlessCommand
+      joined(" ", compilerCommand(compilationOf("eliot.test.Runner"))) shouldBe expectedCompilerCommand
    }
    "compilerCommand" should "run the java it was given rather than one it decided" in {
-      joined(" ", compilerCommand(compilationOf(None))).startsWith("/opt/jdk/bin/java -cp").shouldBeTrue
+      joined(" ", compilerCommand(compilationOf("eliot.demo.App"))).startsWith("/opt/jdk/bin/java -cp")
+         .shouldBeTrue
    }
 
    "classpathOf" should "name each unpacked asset by a wildcard the jvm expands itself" in {
@@ -87,21 +84,8 @@ def testCases: Test = {
       classpathOf(empty) shouldBe ""
    }
 
-   "compiledMain" should "name the framework's runner for the test scope, which is nobody's descriptor to state" in {
-      describedMain(TestScope, emptyDescriptor) shouldBe "eliot.test.Runner"
-   }
-   "compiledMain" should "read an artifact's own main out of its backend block" in {
-      describedMain(ArtifactNamed("app"), withArtifact("main", "eliot.demo.App")) shouldBe "eliot.demo.App"
-   }
-   "compiledMain" should "answer absent for an artifact that names none" in {
-      describedMain(ArtifactNamed("app"), withArtifact("kind", "apidoc")) shouldBe "<none>"
-   }
-
-   "compiledKind" should "produce a runnable jar where nothing says otherwise" in {
-      compiledKind(TestScope, emptyDescriptor) shouldBe "exe-jar"
-   }
-   "compiledKind" should "produce what an artifact's backend block asked for" in {
-      compiledKind(ArtifactNamed("app"), withArtifact("kind", "apidoc")) shouldBe "apidoc"
+   "defaultArtifactKind" should "produce a runnable jar, which is what every backend so far emits" in {
+      defaultArtifactKind shouldBe "exe-jar"
    }
 
    "failed" should "attribute the failure to what could not be done" in {
@@ -114,11 +98,11 @@ def testCases: Test = {
 }
 
 private def expectedUsage: String =
-   "usage: eliot <verb> <configuration>/" ++
-      "   resolve   the version selected for each package of the configuration/" ++
-      "   roots     the source directories the configuration compiles from/" ++
+   "usage: eliot <verb> <package>/" ++
+      "   resolve   the version selected for each dependency of the package/" ++
+      "   roots     the source directories the package compiles from/" ++
       "   build     compile those directories with the toolchain they select/" ++
-      "   <configuration>   'test', or the name of an artifact declared in eliot.pkg"
+      "   <package>   'root', 'test', or any package declared in eliot.pkg"
 
 /**
  * The order is the compiler's own argument parser's: `-m` after the kind and before the first
@@ -129,15 +113,7 @@ private def expectedCompilerCommand: String =
       "com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner " ++
       "/project/src /project/test -o /project/target"
 
-private def expectedMainlessCommand: String =
-   "/opt/jdk/bin/java -cp /cache/assets/eliot-compiler.zip/* " ++
-      "com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar " ++
-      "/project/src /project/test -o /project/target"
-
-private def describedMain(configuration: Configuration, descriptor: Descriptor): String =
-   compiledMain(configuration, descriptor) orElse "<none>"
-
-private def compilationOf(main: Option[String]): Compilation =
+private def compilationOf(main: String): Compilation =
    Compilation(
       "/opt/jdk/bin/java",
       singleton(path("/cache/assets/eliot-compiler.zip")),
@@ -153,31 +129,17 @@ private def compilationOf(main: Option[String]): Compilation =
  * because what a `backend` block *spells* is `eliot.build.format.PackageFile`'s subject and nothing
  * here is about it.
  */
-private def withArtifact(key: String, value: String): Descriptor =
-   Descriptor(
-      empty,
-      empty,
-      empty,
-      singleton(Artifact("app", empty, Some(Backend(None, singleton(Pair(key, value))))))
-   )
-
 /**
- * `Show[Configuration]` renders `TestScope` and an artifact named "test" identically — they are one
- * word on a command line — so a case about which of them was read has to look at the constructor.
- * Same for the verbs, which is why the request is described rather than shown.
+ * A request renders as its verb and the package it is about, because a `Show[Request]` would have to
+ * choose one of the three and there is nothing to choose: the verb is half of what was asked for.
  */
 private def described(request: Option[Request]): String =
    foldOption("<none>", found -> describe(found), request)
 
 private def describe(request: Request): String = request match {
-   case Resolve(configuration) -> "resolve " ++ describeConfiguration(configuration)
-   case Roots(configuration)   -> "roots " ++ describeConfiguration(configuration)
-   case Build(configuration)   -> "build " ++ describeConfiguration(configuration)
-}
-
-private def describeConfiguration(configuration: Configuration): String = configuration match {
-   case TestScope           -> "test scope"
-   case ArtifactNamed(name) -> "artifact " ++ name
+   case Resolve(name) -> "resolve " ++ show(name)
+   case Roots(name)   -> "roots " ++ show(name)
+   case Build(name)   -> "build " ++ show(name)
 }
 
 private def commandLine(verb: String, argument: String): List[String] = append(singleton(verb), argument)
@@ -188,4 +150,4 @@ private def addSelection(selection: Selection, resolution: Resolution): Resoluti
    Resolution(append(resolution.selections, selection))
 
 private def selected(url: String, major: Int, minor: Int): Selection =
-   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(RootModule))
+   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(RootPackage))

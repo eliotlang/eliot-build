@@ -15,13 +15,14 @@
  * type answers the offline half of that question; the lineage half belongs to the resolver, which is
  * the part holding a remote.
  *
- * A `//name` selector narrows a multi-module repository to one of its modules. It is part of the
+ * A `//name` selector narrows a repository to one of the packages inside it. It is part of the
  * identity — `…/eliot//stdlib` and `…/eliot//jvm` are different dependencies — but not of the
- * *repository*, which is what git fetches and what tags version: modules of one repository version
+ * *repository*, which is what git fetches and what tags version: packages of one repository version
  * together, since a tag is repository-wide. That is why there are four types here rather than one:
- * a `Repository` is what is cloned, tagged, cached and selected; a `ModuleSelector` is which module of
- * one is wanted; a `Package` is the two together; a `PackageId` is what a `dep` line spells, which may
- * also be a *sibling* — a module of the repository being read, with no URL and no version of its own.
+ * a `Repository` is what is cloned, tagged, cached and selected; a `PackageSelector` is which package
+ * of one is wanted; a `Package` is the two together; a `PackageId` is what a `dep` line spells, which
+ * may also be a *sibling* — a package of the repository being read, with no URL and no version of its
+ * own.
  */
 /**
  * A repository, by its canonical URL: the unit git works in — what is cloned, what a version tag
@@ -30,33 +31,51 @@
 data Repository(repositoryUrl: String)
 
 /**
- * The name of a build module inside a multi-module repository — what `//name` selects and what a
- * `module` clause declares.
+ * The name of a package inside a repository — what `//name` selects and what a `package` clause
+ * declares.
  */
-data ModuleName(moduleNameText: String)
+data PackageName(packageNameText: String)
 
 /**
- * Which module of a repository is wanted: the one a `//name` selector names, or the repository's root
- * module, which is what a `dep` line carrying no selector means.
+ * Which package of a repository is wanted: the one a `//name` selector names, or the repository's
+ * *root package*, which is what a `dep` line carrying no selector means.
  *
- * A sum rather than an `Option[ModuleName]` because the root module is a module — the whole of a
- * repository that declares no `module` clause — rather than the absence of one, and because what is
- * mounted is a *set* of these, which an `Option` would make unreadable at every use.
+ * A sum rather than an `Option[PackageName]` because the root package is a package — the one whose
+ * directory is the repository's own, which every descriptor has — rather than the absence of one, and
+ * because what is mounted is a *set* of these, which an `Option` would make unreadable at every use.
  */
-data ModuleSelector = RootModule | ModuleSelected(selectorName: ModuleName)
+data PackageSelector = RootPackage | PackageSelected(selectorName: PackageName)
 
 /**
- * A foreign package a dependency refers to: a repository and the one module of it wanted.
+ * A foreign package a dependency refers to: a repository and the one package of it wanted.
  */
-data Package(packageRepository: Repository, selectedModule: ModuleSelector)
+data Package(packageRepository: Repository, selectedPackage: PackageSelector)
 
 /**
- * What a `dep` line, or a `backend` clause, names: a module of the repository being read (`//stdlib`),
- * or a package in a foreign repository. A sibling is a *constructor* rather than a package with an
- * empty URL, so the code that must treat the two differently — resolution selects nothing for a
- * sibling — matches on it rather than testing a sentinel.
+ * What a `dep` line, or a `backend` clause, names: a package of the repository being read
+ * (`//stdlib`), or a package in a foreign repository. A sibling is a *constructor* rather than a
+ * package with an empty URL, so the code that must treat the two differently — resolution selects
+ * nothing for a sibling — matches on it rather than testing a sentinel.
  */
-data PackageId = Sibling(siblingModule: ModuleName) | Foreign(foreignPackage: Package)
+data PackageId = Sibling(siblingPackage: PackageName) | Foreign(foreignPackage: Package)
+
+/**
+ * The name of the **root package**: the one whose directory is the repository's own, which top-level
+ * clauses describe and which a `dep` line carrying no selector selects.
+ *
+ * It is a name like any other, and that is the point — the root stopped being an anonymous module
+ * that may or may not exist and became a package that is always there, spelled `//root` when a
+ * sibling names it. Because it has both a name and an empty selector, the two spellings have to agree:
+ * `selectorFor` is where they are made to, so `//root` and a bare URL cannot resolve to two packages.
+ */
+def rootPackageName: PackageName = PackageName("root")
+
+/**
+ * The selector that selects the package called `name` — `RootPackage` for the root package's own
+ * name, since a bare `dep` line already spells that one with no selector at all.
+ */
+def selectorFor(name: PackageName): PackageSelector =
+   fold(name == rootPackageName, RootPackage, PackageSelected(name))
 
 /**
  * The package `text` identifies, in canonical form.
@@ -75,8 +94,8 @@ def packageId(text: String): PackageId = {
    val url = before("//", body)
 
    foldOption(
-      Foreign(Package(Repository(canonicalUrl(url)), RootModule)),
-      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), ModuleSelected(name)))),
+      Foreign(Package(Repository(canonicalUrl(url)), RootPackage)),
+      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), selectorFor(name)))),
       selectorOf(body)
    )
 }
@@ -88,7 +107,7 @@ def packageId(text: String): PackageId = {
 def repositoryAt(text: String): Repository = Repository(canonicalUrl(withoutScheme(text)))
 
 /**
- * The repository `id` lives in, absent for a sibling: a sibling is a module of whatever repository is
+ * The repository `id` lives in, absent for a sibling: a sibling is a package of whatever repository is
  * being read, which this type cannot know.
  */
 def repositoryOf(id: PackageId): Option[Repository] = id match {
@@ -112,34 +131,38 @@ implement Compare[Repository] {
    def lessThanOrEqual(a: Repository, b: Repository): Bool = a.repositoryUrl <= b.repositoryUrl
 }
 
-implement Show[ModuleName] {
-   def show(value: ModuleName): String = value.moduleNameText
+implement Show[PackageName] {
+   def show(value: PackageName): String = value.packageNameText
 }
 
-implement Eq[ModuleName] {
-   def equals(a: ModuleName, b: ModuleName): Bool = a.moduleNameText == b.moduleNameText
+implement Eq[PackageName] {
+   def equals(a: PackageName, b: PackageName): Bool = a.packageNameText == b.packageNameText
+}
+
+implement Compare[PackageName] {
+   def lessThanOrEqual(a: PackageName, b: PackageName): Bool = a.packageNameText <= b.packageNameText
 }
 
 /**
- * A selector spells itself as a `dep` line carries it — which is nothing at all for the root module,
+ * A selector spells itself as a `dep` line carries it — which is nothing at all for the root package,
  * so that appending it to a URL gives the package back.
  */
-implement Show[ModuleSelector] {
-   def show(value: ModuleSelector): String = value match {
-      case RootModule           -> ""
-      case ModuleSelected(name) -> "//" ++ show(name)
+implement Show[PackageSelector] {
+   def show(value: PackageSelector): String = value match {
+      case RootPackage           -> ""
+      case PackageSelected(name) -> "//" ++ show(name)
    }
 }
 
-implement Eq[ModuleSelector] {
-   def equals(a: ModuleSelector, b: ModuleSelector): Bool = show(a) == show(b)
+implement Eq[PackageSelector] {
+   def equals(a: PackageSelector, b: PackageSelector): Bool = show(a) == show(b)
 }
 
 /**
  * The canonical spelling, which is also what a descriptor is written back out as.
  */
 implement Show[Package] {
-   def show(value: Package): String = show(value.packageRepository) ++ show(value.selectedModule)
+   def show(value: Package): String = show(value.packageRepository) ++ show(value.selectedPackage)
 }
 
 /**
@@ -172,8 +195,8 @@ implement Compare[PackageId] {
 
 private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)
 
-private def selectorOf(body: String): Option[ModuleName] =
-   fold(contains("//", body), Some(ModuleName(after("//", body))), None)
+private def selectorOf(body: String): Option[PackageName] =
+   fold(contains("//", body), Some(PackageName(after("//", body))), None)
 
 /**
  * The suffixes are stripped outermost first, so a URL wearing both (`…/foo.git/`) loses both.

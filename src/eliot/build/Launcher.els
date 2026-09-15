@@ -10,7 +10,7 @@ import eliot.build.git.ShellGit
 import eliot.build.assets.Assets
 import eliot.build.assets.ShellAssets
 import eliot.build.resolve.PackageSource
-import eliot.build.resolve.Configuration
+import eliot.build.model.PackageId
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.GitPackages
 import eliot.build.assemble.Assembly
@@ -114,11 +114,11 @@ private def attempted(request: Request, here: Path, java: String): {FileSystem, 
                   catch[ToolchainError, List[String]](
                      performed(request, here, java),
                      problem -> reporting(
-                        failed("cannot build '" ++ show(requestedConfiguration(request)) ++ "'", show(problem))
+                        failed("cannot build '" ++ show(requestedPackage(request)) ++ "'", show(problem))
                      )
                   ),
                   problem -> reporting(
-                     failed("cannot resolve '" ++ show(requestedConfiguration(request)) ++ "'", show(problem))
+                     failed("cannot resolve '" ++ show(requestedPackage(request)) ++ "'", show(problem))
                   )
                ),
                problem -> reporting(failed("malformed " ++ descriptorFileName, show(problem)))
@@ -181,9 +181,9 @@ private def rendered(
 ): {
    Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
 } List[String] = request match {
-   case Resolve(configuration) -> report(configuration, resolve(configuration, descriptor))
-   case Roots(configuration)   -> reportRoots(sourceRoots(configuration, Project(here, descriptor)))
-   case Build(configuration)   -> compiled(configuration, descriptor, here, java)
+   case Resolve(name) -> report(name, resolve(name, descriptor))
+   case Roots(name)   -> reportRoots(sourceRoots(name, Project(here, descriptor)))
+   case Build(name)   -> compiled(name, descriptor, here, java)
 }
 
 /**
@@ -198,22 +198,22 @@ private def rendered(
  * inherited, and a summary from the tool would only be a second opinion about work it did not do.
  */
 private def compiled(
-      configuration: Configuration,
+      name: PackageName,
       descriptor: Descriptor,
       here: Path,
       java: String
    ): {
       Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
    } List[String] = {
-   val resolution = resolve(configuration, descriptor)
-   val toolchain = toolchainOf(configuration, descriptor, resolution)
+   val resolution = resolve(name, descriptor)
+   val toolchain = toolchainOf(name, descriptor, resolution)
    val compilation = Compilation(
       java,
       toolchain.toolchainAssets.map(assetTree),
       toolchain.backendWord,
-      compiledKind(configuration, descriptor),
-      compiledMain(configuration, descriptor),
-      rootsOf(configuration, Project(here, descriptor), resolution),
+      defaultArtifactKind,
+      toolchain.toolchainMain,
+      rootsOf(name, Project(here, descriptor), resolution),
       outputRoot(here)
    )
 

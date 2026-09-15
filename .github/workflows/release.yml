@@ -3,6 +3,10 @@
 # system whose location is not derived from anything — which is exactly why it is pinned by hand in each
 # consumer's `.eliot-version` and why what is attached here has to be right.
 #
+# One-off for v0.2: the descriptor format changed when the scopes were cut, and v0.1's launcher cannot
+# parse a `package` clause — so this workflow cannot cut v0.2. Build and attach that one by hand, the
+# way v0.1 was built (see `.claude/CLAUDE.md`, "Releasing"); from v0.3 on this runs as written again.
+#
 # The jar is built by the build system, by the previous launcher. `./eliotw build launcher` reads this
 # tag's `eliot.pkg`, fetches the compiler this tag selected, and compiles `src` with it — so a release is
 # built by the toolchain its own descriptor names rather than by whatever this workflow happens to have

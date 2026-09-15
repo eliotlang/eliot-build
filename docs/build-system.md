@@ -418,10 +418,13 @@ package lang {                               -- a layer, and a plugin-shipping p
 - **Top-level clauses are the default package**, whose name is `src` and whose source directory is
   `src/`. Writing `package src { … }` explicitly means the same thing; the zero-config library writes
   neither. A bare repository dep selects that package and nothing else.
-- **A repository either is a package or contains packages.** Declare `package` blocks and there is no
-  default package, so a bare dep on the repository is an error listing the packages to choose from. The
-  old model's conditional root module — present or absent depending on a remote file, with one spelling
-  meaning both — is gone.
+- **The root package always exists**, whether or not the file writes a clause for it, and that is what
+  killed the ghost. The old model's root module was present when a repository declared no `module`
+  clauses and absent when it did, so one spelling of a bare dep meant two things depending on a remote
+  file. Now a bare dep always names one package at one directory; a repository whose packages all live
+  in subdirectories simply has a root package nobody mounts, and a bare dep on it mounts an empty
+  `src/`. That last case is a diagnostic the author's build owes — "you exported nothing" — rather than
+  a dichotomy the format has to state and every reader has to remember.
 - **A package need not have sources.** One that has none is a bill of materials: what it contributes is
   its `dep` lines, to whoever deps it. It is *not* a parent — it contributes dependencies only, never
   configuration and never a directory — which is what keeps it from being Maven's parent POM, rejected
@@ -439,7 +442,8 @@ package lang {                               -- a layer, and a plugin-shipping p
   application author's. A package may state backend parameters about itself for that reason, and the
   consumer may override one it disagrees with; neither writes the plugin's internal word.
 - `at` is the package's **root directory**, relative to the repo root, defaulting to the package's
-  name — so `test` and a flat layer write none, and the root package is at `.`. Its sources are
+  name — so `test` and a flat layer write none, and the root package is at `.`, which is not a choice
+  and is never written. Its sources are
   `<at>/src` and its compile-time overlay `<at>/compiler`, both fixed names no descriptor spells
   ("Standard layout", below). It buys one thing: the package's *name is not
   its path*. Names are half of package identity in a registry-less design (`URL//name`), so a repo that
@@ -538,6 +542,22 @@ The lockfile uses the same clause style, machine-written: `lock <url> <tag> <com
 resolved dependency per package, `lock-jar <url> <tag> <asset> <sha256>` for plugin binaries — which is
 where a plugin's hash lives, since it cannot live in the tag that produced it (see "Compiler plugins").
 Its exact format is tool-owned output, not hand-polished here.
+
+**Retired keywords are read, not refused** — the one thing building this added to the design.
+`module`, `test` and `artifact` are what the format spelled before, and tags carrying them are
+published and immutable, so a resolver that could not read them could not resolve anything. `module`
+is read exactly as `package` is, which it turns out to be: its `at` meant the same directory holding
+the same `src/`, so the eliot repository's published layers mount unchanged. `test` and `artifact` are
+*dropped*, which loses nothing — neither ever reached a consumer, and a consumer's descriptor is the
+only one a retired keyword is ever met in. This is the reverse of the "unknown clauses are fatal" rule
+and does not weaken it: that rule is about a descriptor from the *future*, which a launcher must refuse
+rather than misread, and this is about one from the past, which it can read exactly.
+
+**One thing this design asks for that the tool does not do yet**: the artifact kind. `docs` says it
+comes off the closure, from the platform package that knows what it emits, and no published tag
+declares such a clause — so `exe-jar` is a constant in the launcher until one does. No consumer writes
+a kind either way, which is the half that mattered; a `flash-image` target is what will force the
+clause.
 
 ### What this replaced, and why (2026-09-15)
 

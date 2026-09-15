@@ -9,10 +9,11 @@ import eliot.build.model.Descriptor
  * What a `dep` line names.
  *
  * Every other clause of a descriptor is read at one place in the file, into one thing. `dep` is read
- * at four — the top level, a `module`, the `test` block inside a module, an `artifact` — and a
- * `backend` names a package the same way for a fifth. That is what makes it a module rather than a
- * paragraph of `eliot.build.format.PackageFile`: the one clause whose meaning several block readers
- * have to agree on, with the rules that are only about it in the same place.
+ * at two — the top level, where it describes the root package, and inside any `package` block — and
+ * the two readings are the same reading, which is the whole of what dropping the scopes bought. That
+ * is what makes it a module rather than a paragraph of `eliot.build.format.PackageFile`: the one
+ * clause whose meaning more than one block reader has to agree on, with the rules that are only about
+ * it in the same place.
  *
  * Those rules are three. A version token is a **git tag** and is parsed here rather than merely
  * inspected, because the model carries an ordered version from here on and a string never was one.
@@ -23,9 +24,9 @@ import eliot.build.model.Descriptor
  */
 
 /**
- * `dep <url> <version>` or `dep //module`. The version is required for a foreign package — a
- * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling
- * module, which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
+ * `dep <url> <version>` or `dep //package`. The version is required for a foreign package — a
+ * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling,
+ * which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
  */
 def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
    val target = required(0, "a dep needs a package URL", clause)
@@ -40,10 +41,10 @@ def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
 }
 
 /**
- * A scheme-less URL, optionally carrying a `//module` selector. Scheme-less is an invariant of the
+ * A scheme-less URL, optionally carrying a `//package` selector. Scheme-less is an invariant of the
  * format, not merely of the canonical form `packageId` answers with: a written scheme is a spelling
  * the author expected to matter, and where the bytes come from is the consumer's configuration.
- * Refusing it here is what keeps `//` unambiguously the module selector.
+ * Refusing it here is what keeps `//` unambiguously the package selector.
  */
 def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageId = {
    checkSchemeless(target, clause)
@@ -51,38 +52,25 @@ def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageI
 }
 
 /**
- * The `dep` lines among `clauses` — how the root of a descriptor reads its base dependencies.
+ * The `dep` lines among `clauses` — how the top level of a descriptor reads the root package's
+ * dependencies.
  */
 def dependenciesIn(clauses: List[Clause]): {Throw[ClauseProblem]} List[Dependency] =
    clausesNamed("dep", clauses).map(dependencyOf)
 
 /**
- * The dependencies of the `test` blocks among `clauses`. A file may write more than one, and they
- * mean one scope between them.
- */
-def testDependenciesIn(clauses: List[Clause]): {Throw[ClauseProblem]} List[Dependency] =
-   clausesNamed("test", clauses).flatMap(dependenciesOf)
-
-/**
- * The `dep` lines of a block — an `artifact`'s dependencies, a `module`'s.
+ * The `dep` lines of a block — a `package`'s dependencies, read exactly as the top level's are.
  */
 def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] = dependenciesIn(clause.children)
 
-/**
- * The dependencies of the `test` blocks of a block, which is how a module declares what its own
- * suite needs.
- */
-def testDependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
-   testDependenciesIn(clause.children)
-
 private def siblingDependencyOf(
-   name: ModuleName,
+   name: PackageName,
    version: Option[Version],
    clause: Clause
 ): {Throw[ClauseProblem]} Dependency =
    foldOption(
       SiblingDependency(name),
-      _ -> raise(problemIn("a sibling module versions with its repository and carries no version", clause)),
+      _ -> raise(problemIn("a sibling package versions with its repository and carries no version", clause)),
       version
    )
 
