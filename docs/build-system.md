@@ -21,7 +21,10 @@ are gone.** A repository is a set of packages, every dependency is transitive, a
 platform layer and an executable are packages like any other — so the three non-transitivity
 rules the old model needed are consequences of the graph rather than rules, and the
 "platform" category that could not be stated on a spectrum is cut ("What this replaced" and
-"Platforms", below). Q1 keeps its answer for half its old reasons.
+"Platforms", below). Q1 keeps its answer for half its old reasons, and Q4 loses its special case. The
+layout follows the same move: `at` names a **package root**, with the sources and the compile-time
+overlay as fixed names under it, so the root package is the one at the repository root and "root"
+names a directory rather than a module that may or may not exist.
 
 **Where the implementation stands** (2026-09-15, 237 tests):
 
@@ -95,7 +98,7 @@ A library:
 dep github.com/eliot-lang/eliot//stdlib v1
 
 package test {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 ```
@@ -106,20 +109,20 @@ An application is the same file plus one package, and no new concept:
 dep github.com/eliot-lang/eliot//stdlib v1
 
 package hello {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm v1
   main Hello
 }
 
 package test {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 ```
 
 `eliot init` writes those lines; nobody types them. **There is one concept in the file** — a package: a
 directory of sources, the things it depends on, and an entry point if it is meant to be run. Top-level
-clauses are the default package, named `src`; `test` is a package that deps it and adds what it takes
+clauses are the root package, named `root`; `test` is a package that deps it and adds what it takes
 to run a suite; `hello` is a package that deps it and adds what it takes to run a program. Every
 dependency is transitive and none is scoped, so *where does this line go* has one answer — in the
 package whose sources need it.
@@ -147,8 +150,8 @@ their sources never import is an unused-dependency lint, and a closure with two 
 implementations of one name is refused with both named.
 
 Files in a repository: `eliot.pkg`, `eliot.lock` (tool-written, always committed, never edited), the
-wrapper and its pin file, and `.gitignore` for `target/`; directories `src/` and `test/`, and
-`src/compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
+wrapper and its pin file, and `.gitignore` for `target/`; directories `src/` and `test/src/`, and
+`compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
 once rather than committed, and the cache leaves the project directory is recorded as open, below.
 ## The core decision: a descriptor, not build-as-code
 
@@ -325,14 +328,14 @@ What remains, as of the 2026-09-15 revision:
   are (`at`, defaulting to the name), an export flag (dependents may dep an exported package;
   examples, applications and test fixtures are `internal`), its dependency list, an optional entry
   point, and the compiler plugin it ships if it ships one. A repository with no `package` block is one
-  package named `src` at `src/` — the zero-configuration common case, and what top-level clauses
-  describe. **A package may have no sources at all**: one that is only `dep` lines is a bill of
+  package named `root` at the repository root — the zero-configuration common case, and what top-level
+  clauses describe. **A package may have no sources at all**: one that is only `dep` lines is a bill of
   materials, and is how the toolchain is handed out (`//jvm-test`).
   **One root descriptor** — per-package descriptor files reintroduce Maven's parent-POM web and Go's
   nested-modules mess, and break the one-parse LSP story.
 - **Dependencies**: URL (+ optional `//package` selector into that repo) + minimum version.
   **Unscoped, and transitive without exception.** There is no base/test/artifact axis: `test` is a
-  package that deps `//src`, an executable is a package that deps `//src`, and a dependency reaches
+  package that deps `//root`, an executable is a package that deps `//root`, and a dependency reaches
   exactly what deps the package declaring it. The isolation the old scopes bought is the shape of the
   graph, since nothing deps a test package or an executable.
 - **Entry points**: a `main` on the package that is the executable. Everything else about producing one
@@ -382,25 +385,26 @@ the `eliot.paths` precedent this system retires.
 ### Clause reference
 
 ```
-dep github.com/x/foo v1.3                    -- a dependency on that repo's default package
+dep github.com/x/foo v1.3                    -- a dependency on that repo's root package
 dep github.com/eliot-lang/eliot//stdlib v1.2 -- package-selected
-dep //src                                    -- a sibling package of this repository
+dep //root                                   -- a sibling package of this repository
 
 package test {                               -- a package: a directory, dependencies, maybe a `main`
-  at test                                    -- its source directory (default: the package's name)
+  at test                                    -- its root directory (default: the package's name);
+                                             -- sources at test/src, overlay at test/compiler
   internal                                   -- may not be depended on from outside (default: exported)
-  dep //src                                  -- what it compiles against, transitively
+  dep //root                                 -- what it compiles against, transitively
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 
 package launcher {                           -- an executable is a package like any other
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm v1
   main eliot.build.Launcher                  -- the entry point; the rest comes from the closure
 }
 
 package lang {                               -- a layer, and a plugin-shipping package
-  at lang/eliot/src
+  at lang/eliot
   plugin eliot-compiler.zip {                -- a release asset of this repo, at this tag. `compiler` =
     compiler                                 -- this asset holds the compiler; `backend <word>` = it
   }                                          -- registers that compiler command word; neither = an
@@ -434,9 +438,10 @@ package lang {                               -- a layer, and a plugin-shipping p
   attiny85` and its like — come from the package that *knows* them, which is the chip's, not the
   application author's. A package may state backend parameters about itself for that reason, and the
   consumer may override one it disagrees with; neither writes the plugin's internal word.
-- `at` is the package's **directory**, relative to the repo root, defaulting to the package's name —
-  so `src`, `test` and a flat layer write none. It holds the package's sources, and its compile-time
-  overlay at `compiler/` if it has one ("Standard layout", below). It buys one thing: the package's *name is not
+- `at` is the package's **root directory**, relative to the repo root, defaulting to the package's
+  name — so `test` and a flat layer write none, and the root package is at `.`. Its sources are
+  `<at>/src` and its compile-time overlay `<at>/compiler`, both fixed names no descriptor spells
+  ("Standard layout", below). It buys one thing: the package's *name is not
   its path*. Names are half of package identity in a registry-less design (`URL//name`), so a repo that
   rearranges itself would otherwise break every dependent's descriptor — silently, since `compat-check`
   diffs exported signatures and cannot see a layout. The concrete case is the eliot repository, which is
@@ -464,7 +469,7 @@ dep github.com/eliot-lang/eliot//stdlib v1
 dep github.com/somelib/collections v1.3
 
 package test {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 ```
@@ -476,21 +481,21 @@ honest amount: one entry point per binary, and two binaries.
 dep github.com/somelib/sensor-api v2
 
 package controller-jvm {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm v1
   dep github.com/somelib/sensor-api-jvm v2
   main Controller
 }
 
 package controller-attiny {
-  dep //src
+  dep //root
   dep github.com/vendor/eliot-avr//attiny85 v1
   dep github.com/somelib/sensor-api-avr v2
   main Controller
 }
 
 package test {
-  dep //src
+  dep //root
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 ```
@@ -505,27 +510,28 @@ This repository, which is the case the model was re-derived from:
 dep github.com/robertbraeutigam/eliot//stdlib v0.2
 
 package launcher {
-  dep //src
+  dep //root
   dep github.com/robertbraeutigam/eliot//jvm v0.2
   main eliot.build.Launcher
 }
 
 package test {
-  dep //src
+  dep //root
   dep github.com/eliotlang/eliot-test v0.0
   dep github.com/robertbraeutigam/eliot//jvm v0.2
 }
 ```
 
-`//src` stays a library anyone can dep: no platform, no entry point, nothing chosen on a consumer's
-behalf. `launcher` is `//src` plus a platform plus a `main`, and it is a package precisely so that its
-`main` is not in `//src`'s closure — were it there, `test` would inherit it alongside the framework's
+`//root` stays a library anyone can dep: no platform, no entry point, nothing chosen on a consumer's
+behalf. `launcher` is `//root` plus a platform plus a `main`, and it is a package precisely so that its
+`main` is not in `//root`'s closure — were it there, `test` would inherit it alongside the framework's
 and the "exactly one `main`" rule would fail on the first real repository it met.
 
-The eliot repository itself: `package lang { at lang/eliot/src, plugin … }`, `package stdlib { at
-stdlib/eliot/src, dep //lang, plugin … }`, `package jvm { at jvm/eliot/src, dep //stdlib, plugin … }`,
-`package test { at test/eliot/src, dep //stdlib }` (the framework, a package here rather than a
-repository of its own, so the toolchain is one repository at one tag), `package jvm-test { dep //test,
+The eliot repository itself, whose layout this shape was chosen to leave alone: `package lang { at
+lang/eliot, plugin … }`, `package stdlib { at stdlib/eliot, dep //lang, plugin … }`, `package jvm { at
+jvm/eliot, dep //stdlib, plugin … }`, `package test { at test/eliot, dep //stdlib }` (the framework,
+a package here rather than a repository of its own, so the toolchain is one repository at one tag),
+`package jvm-test { dep //test,
 dep //jvm }` (no sources), `package examples { internal, dep //jvm }`.
 
 The lockfile uses the same clause style, machine-written: `lock <url> <tag> <commit> <tree-hash>` per
@@ -543,8 +549,9 @@ put together killed it.
 **The root was a ghost.** A repository with no `module` clauses had an anonymous root module at `src/`,
 and `dep github.com/x/foo` selected it; a repository with `module` clauses had none, and the identical
 line was an error. One spelling, two meanings, decided by the contents of a file on someone else's
-server, and the thing itself never named. Now every package has a name, `//src` included, and a
-repository either **is** a package or **contains** packages.
+server, and the thing itself never named. Now every package has a name and a root directory — the
+root package is called `root` and its directory is the repository's — and a repository either **is** a
+package or **contains** packages.
 
 **The normal project could not be referred to.** Every verb took a configuration, and for a library the
 only configuration was `test`. There was no way to ask for *the library as consumers see it* — which is
@@ -565,26 +572,32 @@ to classify, and no category to get wrong — it is the shape of the graph. `Des
 `testDependencies`, `artifacts` and `Artifact`; `Configuration` stops being a sum and becomes a package
 name; `test { … }` and `artifact x { … }` stop being grammar.
 
-## Standard layout: a package is two roots, one of them conditional
+## Standard layout: a package root, and two tracks under it
 
-**Amended 2026-09-15.** A package's `at` names its **directory** — `src/` for the default package,
-`test/` for the test package, `stdlib/eliot/src` for a layer of the eliot repository — and defaults to
-the package's own name. Two of the three conventional directories this section used to describe are
-now ordinary packages: `src/` is the default package and `test/` is the `test` package, so *when does
-this activate* and *does it ship to dependents* stop being semantics encoded in a directory name and
-become what they always were — whether anything depends on the package. `test/` never ships because
-nothing deps the `test` package, not because the tool knows the word.
-
-The third is not a package and cannot become one. **A package is two source roots**, and the second
-is the compile-time overlay:
+**Amended 2026-09-15.** A package's `at` names its **root directory** — the anchor everything about
+the package is relative to — and the two source roots under it are derived by fixed names that appear
+in no descriptor:
 
 | dir | what it is | runtime pool | compiler pool | exported |
 |---|---|---|---|---|
-| `<at>/` | the package's sources | yes | yes (borrowed) | unless `internal` |
+| `<at>/src/` | the package's sources | yes | yes (borrowed) | unless `internal` |
 | `<at>/compiler/` | the package's compile-time **overlay** | no | yes, as **override** files | with the package |
 
-**Why the overlay is not a package**, though everything else in the file became one — three facts a
-dependency edge cannot carry:
+`at` defaults to the package's own name, so `package test` is `test/src` and `test/compiler`. **The
+root package** — what a repository with no `package` clause is, and what top-level clauses describe —
+has the repository root as its package root, so its tracks are `./src` and `./compiler` and the
+descriptor sits beside them. That is the whole of what "root" means in this document now: a package
+root is a directory, the root package is the one whose directory is the repository's, and the word
+names something in both uses rather than a module that may or may not exist.
+
+Two of the three conventional directories this section used to describe are therefore ordinary
+packages: `src/` belongs to the root package and `test/src/` to the `test` package, so *when does this
+activate* and *does it ship to dependents* stop being semantics encoded in a directory name and become
+what they always were — whether anything depends on the package. `test` never ships because nothing
+deps it, not because the tool knows the word.
+
+**The third is not a package and cannot become one**, though everything else in the file became one
+— three facts a dependency edge cannot carry:
 
 - It **overrides** rather than adds. It redefines names the package's own sources already define, and
   two packages defining one name is the multiple-implementations error, not an override.
@@ -593,19 +606,28 @@ dependency edge cannot carry:
 - It **travels with** its package rather than being depended on. A consumer that deps `//stdlib` gets
   stdlib's overlay without naming it, because it is part of what stdlib *is*.
 
-So the overlay is a second root of the same node, and it lives **inside** the package's directory:
-`compiler/` is the one reserved name inside a source root, skipped when the compiler globs. That is a
-move from where this document had it an hour earlier — a *sibling* of the source directory, which is
-where the compiler derives it today — and the move is forced by `at` naming the source directory
-directly. Under the sibling rule `src/` and `test/` are both siblings of one `compiler/` and both claim
-it, which is not sharing but ambiguity: a `test` package wanting a checking-only instance of its own
-has nowhere to put it. And the sharing that rule was reproducing is already there for a better reason —
-`test` deps `//src`, and an overlay travels with its package, so `src/compiler/` reaches the test track
-through the dependency edge rather than through path adjacency. Adjacency was doing work the graph
-already does, and doing it wrong at the edges.
+So the overlay is a second root of the same node, and both roots hang off the package root as peers.
+Two other shapes were written down first and both were worse:
 
-The cost is one directory move in one repository: `stdlib/eliot/compiler` becomes
-`stdlib/eliot/src/compiler`. Neither this repository nor the test framework has an overlay at all.
+- **`at` names the source directory, overlay beside it** (`<at>/../compiler`). This is what the
+  compiler derives today and it was right while `at` named a container. With `at` naming the sources,
+  `src/` and `test/` are both siblings of one `compiler/` and both claim it — not sharing but
+  ambiguity, and a `test` package wanting a checking-only instance of its own has nowhere to put it.
+  The sharing it reproduced is already there for a better reason: `test` deps `//root`, and an overlay
+  travels with its package, so the root package's overlay reaches the test track through the
+  dependency edge. Adjacency was doing work the graph does.
+- **`at` names the source directory, overlay inside it** (`<at>/compiler`). Symmetry is wrong — one
+  track is the directory and the other is a child of it — and it reserves a name *inside* a source
+  tree, which the compiler must then exclude from its glob and which no Eliot module may be called.
+
+**The package root is the shape that keeps.** Both tracks are named the same way, nothing is reserved
+inside anyone's sources, and a third conventional directory later costs a name under the package root
+instead of a hole in the source tree. It is also why `at .` is safe for the root package: its sources
+are confined to `./src`, so the package at the repository root does not swallow the packages beside it.
+
+The cost is a file move in the two repositories that have a `test/`: `test/*.els` becomes
+`test/src/*.els` here and in the framework. The eliot repository, which is the one with an overlay,
+does not move at all — `stdlib/eliot/{src,compiler}` is already exactly `at stdlib/eliot`.
 
 **The overlay's export is its package's**, which retires the old "`compiler/` is *always* exported,
 even for an internal module" special case. Nothing can dep an `internal` package, so there is no
@@ -628,7 +650,7 @@ consumer's:
 
 - `src` must resolve against declared dependencies alone — which, since 2026-09-15, is also the whole
   of what stops a library exporting a platform layer;
-- the compile track (each package's sources + its `compiler/` across the dependency closure) must resolve **with no runtime
+- the compile track (each package's `src` + `compiler` across the dependency closure) must resolve **with no runtime
   platform layer present** — the existing self-sufficiency rule, machine-checked at the package
   boundary.
 ## Platforms: a spectrum the descriptor does not classify
