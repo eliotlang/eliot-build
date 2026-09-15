@@ -148,7 +148,7 @@ implementations of one name is refused with both named.
 
 Files in a repository: `eliot.pkg`, `eliot.lock` (tool-written, always committed, never edited), the
 wrapper and its pin file, and `.gitignore` for `target/`; directories `src/` and `test/`, and
-`compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
+`src/compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
 once rather than committed, and the cache leaves the project directory is recorded as open, below.
 ## The core decision: a descriptor, not build-as-code
 
@@ -434,8 +434,9 @@ package lang {                               -- a layer, and a plugin-shipping p
   attiny85` and its like — come from the package that *knows* them, which is the chip's, not the
   application author's. A package may state backend parameters about itself for that reason, and the
   consumer may override one it disagrees with; neither writes the plugin's internal word.
-- `at` is the package's **source directory**, relative to the repo root, defaulting to the package's
-  name — so `src`, `test` and a flat layer write none. It buys one thing: the package's *name is not
+- `at` is the package's **directory**, relative to the repo root, defaulting to the package's name —
+  so `src`, `test` and a flat layer write none. It holds the package's sources, and its compile-time
+  overlay at `compiler/` if it has one ("Standard layout", below). It buys one thing: the package's *name is not
   its path*. Names are half of package identity in a registry-less design (`URL//name`), so a repo that
   rearranges itself would otherwise break every dependent's descriptor — silently, since `compat-check`
   diffs exported signatures and cannot see a layout. The concrete case is the eliot repository, which is
@@ -563,31 +564,54 @@ platform layer never travels. The isolation is identical and there is nothing le
 to classify, and no category to get wrong — it is the shape of the graph. `Descriptor` loses
 `testDependencies`, `artifacts` and `Artifact`; `Configuration` stops being a sum and becomes a package
 name; `test { … }` and `artifact x { … }` stop being grammar.
-## Standard layout: a package is a directory, plus one overlay
 
-**Amended 2026-09-15.** A package's `at` names its **source directory** — `src/` for the default
-package, `test/` for the test package, `stdlib/eliot/src` for a layer of the eliot repository — and
-defaults to the package's own name. The three conventional directories this section used to describe
-are two ordinary packages and one overlay: `src/` is the default package's sources and `test/` is the
-`test` package's, so *when does this activate* and *does it ship to dependents* stop being semantics
-encoded in a directory name and become what they always were — whether anything depends on the
-package. `test/` never ships because nothing deps the `test` package, not because the tool knows the
-word.
+## Standard layout: a package is two roots, one of them conditional
 
-What a directory name still carries is the one track that is not a node in the graph:
+**Amended 2026-09-15.** A package's `at` names its **directory** — `src/` for the default package,
+`test/` for the test package, `stdlib/eliot/src` for a layer of the eliot repository — and defaults to
+the package's own name. Two of the three conventional directories this section used to describe are
+now ordinary packages: `src/` is the default package and `test/` is the `test` package, so *when does
+this activate* and *does it ship to dependents* stop being semantics encoded in a directory name and
+become what they always were — whether anything depends on the package. `test/` never ships because
+nothing deps the `test` package, not because the tool knows the word.
+
+The third is not a package and cannot become one. **A package is two source roots**, and the second
+is the compile-time overlay:
 
 | dir | what it is | runtime pool | compiler pool | exported |
 |---|---|---|---|---|
 | `<at>/` | the package's sources | yes | yes (borrowed) | unless `internal` |
-| `<at>/../compiler/` | the compile-time **overlay** of every source root beside it | no | yes, as **override** files | **yes** |
+| `<at>/compiler/` | the package's compile-time **overlay** | no | yes, as **override** files | with the package |
 
-The overlay is a sibling of the source directory rather than a package of its own, because it is not a
-separate node: it redefines names the sources already have, for the checker only, and it travels with
-whatever it sits beside. `src/` and `test/` therefore share one `compiler/` — it is the sibling of both
-— which is the behaviour the compiler already has, and the eliot repository's `stdlib/eliot/{src,
-compiler}` is the same shape one level down. This is also why the overlay **is exported** while the
-package flag governs the sources: a downstream program's checking needs your compile-time instances,
-exactly as stdlib's overlay serves every program today.
+**Why the overlay is not a package**, though everything else in the file became one — three facts a
+dependency edge cannot carry:
+
+- It **overrides** rather than adds. It redefines names the package's own sources already define, and
+  two packages defining one name is the multiple-implementations error, not an override.
+- It mounts into a **different pool**. `dep` says *this code is available to mine*; it has no way to
+  say *at check time only, never at run time*.
+- It **travels with** its package rather than being depended on. A consumer that deps `//stdlib` gets
+  stdlib's overlay without naming it, because it is part of what stdlib *is*.
+
+So the overlay is a second root of the same node, and it lives **inside** the package's directory:
+`compiler/` is the one reserved name inside a source root, skipped when the compiler globs. That is a
+move from where this document had it an hour earlier — a *sibling* of the source directory, which is
+where the compiler derives it today — and the move is forced by `at` naming the source directory
+directly. Under the sibling rule `src/` and `test/` are both siblings of one `compiler/` and both claim
+it, which is not sharing but ambiguity: a `test` package wanting a checking-only instance of its own
+has nowhere to put it. And the sharing that rule was reproducing is already there for a better reason —
+`test` deps `//src`, and an overlay travels with its package, so `src/compiler/` reaches the test track
+through the dependency edge rather than through path adjacency. Adjacency was doing work the graph
+already does, and doing it wrong at the edges.
+
+The cost is one directory move in one repository: `stdlib/eliot/compiler` becomes
+`stdlib/eliot/src/compiler`. Neither this repository nor the test framework has an overlay at all.
+
+**The overlay's export is its package's**, which retires the old "`compiler/` is *always* exported,
+even for an internal module" special case. Nothing can dep an `internal` package, so there is no
+consumer for its overlay to reach and nothing for the exception to mean. The reason the old rule
+existed — a downstream program's checking needs your compile-time instances, exactly as stdlib's
+overlay serves every program today — is satisfied by the overlay riding with an exported package.
 
 **The compiler–src borrow is kept, necessarily.** In Eliot any ordinary definition can appear in a
 type-level position, so the NbE checker routinely evaluates user `src` code; severing the borrow would
@@ -604,7 +628,7 @@ consumer's:
 
 - `src` must resolve against declared dependencies alone — which, since 2026-09-15, is also the whole
   of what stops a library exporting a platform layer;
-- the compile track (`src` + `compiler/` across the dependency closure) must resolve **with no runtime
+- the compile track (each package's sources + its `compiler/` across the dependency closure) must resolve **with no runtime
   platform layer present** — the existing self-sufficiency rule, machine-checked at the package
   boundary.
 ## Platforms: a spectrum the descriptor does not classify
