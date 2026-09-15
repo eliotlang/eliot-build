@@ -1,0 +1,117 @@
+# Publishing this repository is publishing one jar: `eliot-launcher.jar`, the tool `eliotw` fetches and
+# execs. Everything else a build needs comes from the dependency graph, so this is the one binary in the
+# system whose location is not derived from anything — which is exactly why it is pinned by hand in each
+# consumer's `.eliot-version` and why what is attached here has to be right.
+#
+# The jar is built by the build system, by the previous launcher. `./eliotw build launcher` reads this
+# tag's `eliot.pkg`, fetches the compiler this tag selected, and compiles `src` with it — so a release is
+# built by the toolchain its own descriptor names rather than by whatever this workflow happens to have
+# installed. The wrapper fetches the launcher `.eliot-version` pins, which for tag v0.<n> is v0.<n-1>:
+# the bootstrap chain is each release building the next one, and v0.1 was built by the working tree that
+# became it because there was nothing before it that could.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build and publish the launcher for.
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  launcher:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          # The whole history, so the tag object itself is here to be inspected below.
+          fetch-depth: 0
+
+      # A release is an annotated tag on a line branch. The resolver reads the peeled ref, which a
+      # lightweight tag does not have, so a lightweight tag is a release no package can ever select.
+      # Refuse it here rather than letting it fail at whoever depends on it.
+      - name: The tag is annotated
+        run: |
+          [ "$(git cat-file -t "$TAG")" = tag ] ||
+             { echo "::error::$TAG is a lightweight tag; a release must be annotated (git tag -a)."; exit 1; }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The launcher cache, not a build cache: `~/.cache/eliot` holds the jars `eliotw` has fetched, and
+      # `target/cache` holds this build's mirrors and plugin assets. Keying the first on the pin file is
+      # exact — a different pin is a different launcher — and the second on the descriptor is close
+      # enough, since that is the file that decides which tags get cloned and which assets get fetched.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/eliot
+          key: launcher-${{ hashFiles('.eliot-version') }}
+      - uses: actions/cache@v4
+        with:
+          path: target/cache
+          key: packages-${{ hashFiles('eliot.pkg') }}
+          restore-keys: packages-
+
+      # The suite, as the gate. A launcher published from a red commit is the tool every consumer of
+      # this tag builds with, and this workflow is the only thing that runs the suite before that
+      # happens. It is run through the build system itself, which makes the gate a second check that
+      # the thing being released works at all.
+      #
+      # Grepping the output rather than trusting the exit code, and that is not paranoia: `eliot build`
+      # reports the *compiler's* status, and the runner jar it produced reports success whether or not
+      # the cases passed — `eliot.test.Runner` does not register an exit code yet. When it does, this
+      # becomes a plain `java -jar target/Runner.jar`.
+      - name: The suite is green
+        run: |
+          mkdir -p out
+          ./eliotw build test
+          java -jar target/Runner.jar | tee out/suite.log
+          grep -q "all clear" out/suite.log ||
+             { echo "::error::the suite is not green"; exit 1; }
+
+      - name: The launcher
+        run: |
+          ./eliotw build launcher
+          mkdir -p out/release
+          cp target/Launcher.jar out/release/eliot-launcher.jar
+
+      # The sha256 in the notes, for whoever wants to check by hand. Nothing in the chain checks one —
+      # the pin carries no hash, and when `eliot.lock` lands it will record what it fetched rather than
+      # what it was promised — so this is the published record a lockfile entry can be read against.
+      - name: The notes
+        run: |
+          {
+            echo "The launcher \`eliotw\` fetches, built by the launcher before it."
+            echo
+            echo "| asset | sha256 |"
+            echo "| --- | --- |"
+            (cd out/release && sha256sum eliot-launcher.jar |
+               while read -r sum name; do echo "| \`$name\` | \`$sum\` |"; done)
+            echo
+            echo "A published asset is never replaced. A mistake in one is a new tag."
+          } > out/notes.md
+          cat out/notes.md
+
+      # `--verify-tag` so a mistyped manual run refuses rather than creating a tag. The upload path is
+      # for repeating a run that failed partway; it is not a way to replace an asset somebody may
+      # already have fetched, which is what the promise above rules out and a new tag is for.
+      - name: The release
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+             gh release edit "$TAG" --notes-file out/notes.md
+             gh release upload "$TAG" out/release/eliot-launcher.jar --clobber
+          else
+             gh release create "$TAG" --verify-tag --title "$TAG" --notes-file out/notes.md \
+                out/release/eliot-launcher.jar
+          fi

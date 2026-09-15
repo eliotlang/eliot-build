@@ -114,6 +114,19 @@ doubles writes `in mocked { … }` and they are bound by `mocked`'s own slot; a 
 *really* perform composes the alias with a written-out row, `{Console} Test`. No suite here needs
 that. There is no `pure` any more, no capture tag and no carrier.
 
+## Releasing
+
+A major version is a branch, a release is an **annotated** tag on it; the line is `v0`. To publish:
+fast-forward `v0` to the commit, `git tag -a v0.<n>` on it, push both. `.github/workflows/release.yml`
+then runs the suite through `./eliotw build test`, builds the jar with `./eliotw build launcher` and
+attaches it as `eliot-launcher.jar` with its sha256 in the notes — so each release is built by the
+launcher the *previous* release published, which is what `.eliot-version` pins. `v0.1` is the one
+exception and had to be: it was built by the working tree that became it, because nothing before it
+could build anything.
+
+Bump `.eliot-version` to the new tag on `master` after publishing. A published asset is never replaced —
+a mistake is a new tag.
+
 ## Committing
 
 **Commit and push automatically** once a change builds and the suite is green — do not wait to be
@@ -153,8 +166,10 @@ Every source root that should contribute tests must be passed: the framework's `
 
 There are two ways in. `./eliotw <verb> <configuration>` is the user's: the committed wrapper reads
 `.eliot-version`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill — but it runs the *published* launcher, never your
-working tree, which makes it the wrong tool for checking a change. `ELIOT_LAUNCHER_REPOSITORY` points
+it, so it needs no compiler checkout and no mill. As of `v0.1` that launcher has `build`, so
+`./eliotw build test` in a checkout holding nothing but the wrapper is a working build of this project
+— verified from an empty cache, 239 green. It still runs the *published* launcher and never your
+working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
 which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
 
