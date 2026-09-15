@@ -122,11 +122,11 @@ the style of the existing history.
 
 ## Building and running (compiler CLI)
 
-The build can now build *other* packages — `eliot build test` in `../eliot-test` fetches eliot `v0.1`'s
-three plugin assets and produces a working `Runner.jar` — but it cannot yet build **this** one: `src`
-performs `registerExitCode`, which the standard library grew after `v0.1` was tagged, so there is no
-published toolchain that compiles the launcher. Until that tag exists this project is built by the
-compiler checkout. Compilation is driven by a sibling checkout of the Eliot
+**The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
+eliot `v0.2`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
+suite — 239 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
+the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (see `eliot.paths` for its location — `/home/robert/personal/eliot`), whose `examples.run`
 Mill task auto-appends the `lang`/`stdlib`/`jvm` layer source roots. You pass this project's own
 roots, and the test framework's, as positional arguments:
@@ -174,8 +174,9 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test
 
 `build` is the one that exercises the whole stack, and it is the end-to-end check now that it exists:
 it resolves, checks out, fetches every plugin asset the selected versions ship, and runs the compiler
-over the roots itself. Run it in `../eliot-test` with `target/` deleted first, so the clone, the
-checkout and the download are all part of what is checked:
+over the roots itself. The strongest form of it is this repository building itself — `build launcher`
+then running the jar that came out — and the broader form is another project, with `target/` deleted
+first so the clone, the checkout and the download are all part of what is checked:
 
 ```bash
 cd /home/robert/personal/eliot-test
@@ -184,9 +185,10 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test   # m
 java -jar target/Runner.jar                                                 # must be green
 ```
 
-That repository's `eliot.pkg` must require eliot at `v0.1` or later for this to work at all — `v0.0`
-declares no `plugin` clauses, so there is no toolchain to find and `build` refuses with "nothing 'test'
-depends on ships a compiler". Two things to check while you are there: a deliberate syntax error in any
+A package's `eliot.pkg` must require eliot at `v0.1` or later for this to work at all — `v0.0` declares
+no `plugin` clauses, so there is no toolchain to find and `build` refuses with "nothing 'test' depends
+on ships a compiler". This repository requires `v0.2`, which is where `registerExitCode` arrives, and
+`../eliot-test` requires `v0.1`. Two things to check while you are there: a deliberate syntax error in any
 mounted source must make `build` exit 1 with the compiler's own diagnostics on the terminal, and
 `build nosuch` must exit 1 rather than printing a failure and exiting 0.
 

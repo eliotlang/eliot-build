@@ -1,4 +1,5 @@
--- The build tool as a package — the one whose descriptor the tool itself has to be able to read.
+-- The build tool as a package — the one whose descriptor the tool itself has to be able to read, and
+-- as of v0.2 of the toolchain the one it can build.
 -- One anonymous module: `src/` is the tool, `test/` is its suite, both at the repository root, which
 -- is what no `module` clause means.
 --
@@ -7,19 +8,32 @@
 -- repository's own descriptor says `module stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
+-- `v0.2` and not lower, everywhere: `src` performs `eliot.system.Process.registerExitCode`, which the
+-- standard library grew at that tag, and the `plugin` clauses that say where the compiler binaries are
+-- arrived at `v0.1`. A floor is a statement about what this code needs, and both halves of that are
+-- true here for once — the sources and the toolchain that compiles them are the same requirement.
+--
+-- The `launcher` artifact is what makes this repository self-hosting in the only sense that is
+-- available yet: `eliot build launcher` reads these lines, fetches the compiler this file selected and
+-- produces the jar that `eliotw` downloads. It names `//jvm` because a platform layer is declared per
+-- artifact rather than in base scope, and it needs no `backend <package>` — `//jvm` is the one plugin
+-- in its closure that registers a command word, which is exactly the case the "exactly one candidate"
+-- rule exists for.
+--
 -- Test scope is the framework plus a platform to run on, which is the shape every Eliot suite has:
 -- `eliot.test.Runner` needs a jvm to be an executable, and nothing in `src` does.
---
--- Not here yet, and now for one reason only: an `artifact` for the launcher jar. The mechanism arrived
--- — eliot's `v0.1` publishes a compiler plugin per layer and `eliot build` reads those clauses, fetches
--- the assets and runs the compiler — but `src` performs `registerExitCode`, which the standard library
--- grew *after* `v0.1` was tagged. So this package cannot yet be compiled by a toolchain it selects: the
--- floor moves to whichever tag carries that member, and the `artifact` clause lands with it. Until then
--- it is built the way `.claude/CLAUDE.md` describes, by the compiler's own Mill task.
 
-dep github.com/robertbraeutigam/eliot//stdlib v0.0
+dep github.com/robertbraeutigam/eliot//stdlib v0.2
+
+artifact launcher {
+  dep github.com/robertbraeutigam/eliot//jvm v0.2
+  backend {
+    kind exe-jar
+    main eliot.build.Launcher
+  }
+}
 
 test {
   dep github.com/eliotlang/eliot-test v0.0
-  dep github.com/robertbraeutigam/eliot//jvm v0.0
+  dep github.com/robertbraeutigam/eliot//jvm v0.2
 }

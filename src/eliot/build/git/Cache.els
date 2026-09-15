@@ -102,9 +102,21 @@ def anchorOf(root: Path, line: Line, repository: Repository): Cached[Option[Comm
  * version nobody tagged and a tag carrying no `eliot.pkg` are equally "there is no descriptor to
  * read", and a resolver that reached either has a dependency line to blame that this module cannot
  * see. `fileAt` reports both the same way, by answering nothing.
+ *
+ * **A miss fetches once and asks again, and that is what makes a raised minimum work at all.** Every
+ * other question here is answered from what is already on disk, deliberately — but a mirror is only as
+ * new as the last thing that fetched it, and the whole of what bumping a `dep` line does is name a tag
+ * that was published after this machine last looked. Without the second read, raising a minimum means
+ * "that version does not exist" until the user deletes their cache, which is a cache the tool cannot
+ * heal and an error that blames the wrong thing. The cost is one `git fetch` per package the closure
+ * genuinely cannot satisfy, paid only on the path that is about to fail anyway.
  */
 def descriptorTextAt(root: Path, version: Version, repository: Repository): Cached[Option[String]] =
-   ensuredMirror(root, repository).fileAt(AtVersion(version), descriptorFileName)
+   foldOption(
+      refetched(root, version, repository),
+      text -> Some(text),
+      ensuredMirror(root, repository).fileAt(AtVersion(version), descriptorFileName)
+   )
 
 /**
  * The sources of `repository` at `version`, on disk: the directory a compiler can be pointed at.
@@ -169,6 +181,13 @@ private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = 
  * directory yet.
  */
 private def missingDirectory(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
+
+/**
+ * `descriptorTextAt`'s second attempt: bring the mirror up to date and read once more. Separate so that
+ * the first read stays the one-liner it is, and so the fetch is unmistakably the exceptional path.
+ */
+private def refetched(root: Path, version: Version, repository: Repository): Cached[Option[String]] =
+   refreshed(root, repository).fileAt(AtVersion(version), descriptorFileName)
 
 private def under(root: Path, url: String): Path =
    split("/", url).foldLeft(root, segment -> directory -> directory / segment)

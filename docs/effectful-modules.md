@@ -1036,3 +1036,29 @@ diagnostics on the terminal, and the streams are inherited rather than captured 
 output is for the person who ran it. What is *not* closed is dogfooding: `src` performs
 `registerExitCode`, which `v0.1`'s standard library does not have, so this package still cannot be
 compiled by a toolchain it selects. That needs a tag, not a change.
+
+### 17.1 The loop closed, same day
+
+eliot `v0.2` is tagged and its assets published, which is what `src` had been waiting for:
+`registerExitCode` is in a released standard library. So the descriptor could say what it had been
+describing in a comment — floor at `v0.2`, and an `artifact launcher` naming `//jvm` and
+`main eliot.build.Launcher` — and then the thing worth doing happened. `build launcher` produced a
+launcher jar, and *that* jar ran `build test` and produced this project's 239 green cases. No mill, no
+compiler checkout, no path typed by anybody: the tool compiled itself with a toolchain its own
+dependency line selected.
+
+**One bug fell out of doing it, and it is the kind only a real bump finds.** Every question the cache
+answers is answered from the mirror on disk, deliberately — MVS never enumerates versions, and a
+resolver that refetched on every question would make an offline build impossible. But a mirror is only
+as new as the last thing that fetched it, and *bumping a `dep` line is precisely naming a tag published
+after this machine last looked*. So `dep …//stdlib v0.2` against a mirror cloned yesterday read no
+descriptor at `v0.2` and reported `github.com/robertbraeutigam/eliot publishes no v0.2` — a true
+statement about the cache and a false one about the world, with no way for the user to act on it except
+to delete a directory the tool never told them about.
+
+`descriptorTextAt` now fetches once and asks again when the first read misses. The policy is still
+"answer from disk", and the exception is narrow: the fetch happens only on the path that is otherwise
+about to fail, so an offline build of an unchanged graph still touches no network, and a raised minimum
+just works. The lesson is the smaller one this document keeps recording — a cache whose staleness is
+invisible to the thing it serves will eventually lie to it, and the place to spend a network round trip
+is the place where the alternative is a wrong answer.

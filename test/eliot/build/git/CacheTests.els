@@ -85,6 +85,21 @@ def testCases: Test = {
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
          shouldBe "<none>"
    }
+   "descriptorTextAt" should "fetch and ask again where the mirror has never heard of that version" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
+
+      wasCalledOnce("fetch")
+      wasCalledTimes(2, "fileAt v1.9:eliot.pkg")
+   }
+   "descriptorTextAt" should "fetch nothing for a version the mirror already holds" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)) with tableGit)
+
+      wasNeverCalled("fetch")
+   }
    "sourceDirectory" should "put a tree beside the mirror, named by the version it holds" in {
       show(sourceDirectory(cacheRoot, Version(Line(1), Some(2)), cached)) shouldBe "target/cache/github.com/x/foo@v1.2"
    }
