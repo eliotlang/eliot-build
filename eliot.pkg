@@ -10,10 +10,12 @@
 -- Test scope is the framework plus a platform to run on, which is the shape every Eliot suite has:
 -- `eliot.test.Runner` needs a jvm to be an executable, and nothing in `src` does.
 --
--- Not here yet: an `artifact` for the launcher jar. It would name a backend, and a backend is located
--- among the artifact's dependencies by the `plugin` clause each one ships — which the eliot repository
--- cannot write until its compiler plugins are published jars with coordinates to pin. Until then this
--- package is built the way `.claude/CLAUDE.md` describes, by the compiler's own Mill task.
+-- Not here yet, and now for one reason only: an `artifact` for the launcher jar. The mechanism arrived
+-- — eliot's `v0.1` publishes a compiler plugin per layer and `eliot build` reads those clauses, fetches
+-- the assets and runs the compiler — but `src` performs `registerExitCode`, which the standard library
+-- grew *after* `v0.1` was tagged. So this package cannot yet be compiled by a toolchain it selects: the
+-- floor moves to whichever tag carries that member, and the `artifact` clause lands with it. Until then
+-- it is built the way `.claude/CLAUDE.md` describes, by the compiler's own Mill task.
 
 dep github.com/robertbraeutigam/eliot//stdlib v0.0
 

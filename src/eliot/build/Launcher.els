@@ -7,11 +7,14 @@ import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
 import eliot.build.git.Git
 import eliot.build.git.ShellGit
+import eliot.build.assets.Assets
+import eliot.build.assets.ShellAssets
 import eliot.build.resolve.PackageSource
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.GitPackages
 import eliot.build.assemble.Assembly
+import eliot.build.assemble.Toolchain
 import eliot.build.Command
 
 /**
@@ -35,52 +38,96 @@ import eliot.build.Command
  * — which is why a platform check has to be a program with a `main` of its own. This is that program,
  * and what it costs to keep is running it.
  *
- * **Two verbs.** Both read the descriptor in the working directory and close one configuration over
- * the dependency graph; they differ in what they do with the answer. `eliot resolve <configuration>`
- * prints what was selected. `eliot roots <configuration>` goes one step further — it checks each
- * selected version out and prints the source directories that configuration compiles from, which is
- * the list a compiler is handed. The lockfile the resolution deserves, spawning the compiler over
- * those roots, and the rest of the verb set are the steps after these.
+ * **Three verbs, each one step further down the same road.** All of them read the descriptor in the
+ * working directory and close one configuration over the dependency graph; they differ in what they do
+ * with the answer. `eliot resolve <configuration>` prints what was selected. `eliot roots
+ * <configuration>` checks each selected version out and prints the source directories that
+ * configuration compiles from. `eliot build <configuration>` fetches the plugin assets those same
+ * versions ship and runs the compiler over those same roots — which is the point the tool stops
+ * describing a build and performs one. The lockfile the resolution deserves and the rest of the verb
+ * set are the steps after these.
+ *
+ * **What a build reports is the compiler's own output and the compiler's own exit code.** The
+ * subprocess inherits this program's streams rather than being captured, because a compiler's
+ * diagnostics are for the person who ran it and buffering them to re-print would only make them late;
+ * and its code is registered as this program's, so `eliot build test && …` means what a shell reads it
+ * as. That is `docs/effectful-modules.md` §16's one missing platform effect, which the standard
+ * library grew for this.
  */
 def main: {Console, Environment, FileSystem, Process} Unit =
-   answer(arguments, workingDirectory).foreach(printLine)
+   answer(arguments, workingDirectory, javaCommandName).foreach(printLine)
+
+/**
+ * The JVM a build runs the compiler on: the one `eliotw` picked, or whatever `java` means on the PATH.
+ *
+ * The wrapper has already decided this — it honours `JAVA_HOME` and refuses a broken one — and a build
+ * that then compiled on a *different* JVM than the launcher was started with would be a surprise
+ * nobody asked for. So the wrapper exports its choice and this reads it; started by hand with no
+ * variable set, `java` is the honest default and the same one the wrapper would have found.
+ */
+private def javaCommandName: {Environment} String = environmentVariable("ELIOT_JAVA") orElse "java"
 
 /**
  * What the tool prints for one invocation.
  *
- * The command line and the directory arrive as values rather than being read here, so everything
- * below `main` states what it performs and nothing below `main` states `Environment`.
+ * The command line, the directory and the JVM arrive as values rather than being read here, so
+ * everything below `main` states what it performs and nothing below `main` states `Environment`.
  */
-private def answer(commandLine: List[String], here: Path): {FileSystem, Process} List[String] =
-   foldOption(usage, request -> attempted(request, here), requested(commandLine))
+private def answer(commandLine: List[String], here: Path, java: String): {FileSystem, Process} List[String] =
+   foldOption(reporting(usage), request -> attempted(request, here, java), requested(commandLine))
+
+/**
+ * Lines that say the tool did not do what it was asked, and the exit code that says so to whatever
+ * asked.
+ *
+ * Every refusal goes through here, including the usage a command line the tool does not offer gets:
+ * `eliot roots test && …` running the second half after the first half printed a failure was
+ * `docs/effectful-modules.md` §16's open finding, and one register is the whole of it now that the
+ * standard library has somewhere to put a code. One rather than the channel's own number, because a
+ * shell asks whether this worked and nothing here is a program whose codes anybody enumerates.
+ */
+private def reporting(lines: List[String]): {Process} List[String] = {
+   registerExitCode(1)
+
+   lines
+}
 
 /**
  * What `request` answers, or the single line naming what refused.
  *
- * **Four channels meet here, and keeping them apart is the point.** A repository git said no to, a
- * cache directory that cannot be made, a descriptor that will not parse and a graph that will not
- * close are four different things for a user to do something about, so each is discharged separately
- * and reports as itself. This is the boundary the design said would carry four or five of them.
+ * **Six channels meet here, and keeping them apart is the point.** A repository git said no to, a
+ * release asset that would not download, a machine that will not run a program or make a directory, a
+ * descriptor that will not parse, a graph that will not close and a closure that describes nothing
+ * runnable are six different things for a user to do something about, so each is discharged separately
+ * and reports as itself. The design said this boundary would carry four or five; the two the build
+ * verb added are both about the half of a dependency that is not sources.
  *
- * Every one is spelled out, and has to be: the row names `Throw` four times, so nothing but the call
+ * Every one is spelled out, and has to be: the row names `Throw` six times, so nothing but the call
  * can say which of them a given `catch` is for.
  */
-private def attempted(request: Request, here: Path): {FileSystem, Process} List[String] =
+private def attempted(request: Request, here: Path, java: String): {FileSystem, Process} List[String] =
    catch[IoError, List[String]](
       catch[GitError, List[String]](
-         catch[DescriptorError, List[String]](
-            catch[ResolutionError, List[String]](
-               performed(request, here),
-               problem -> failed(
-                  "cannot resolve '" ++ show(requestedConfiguration(request)) ++ "'",
-                  show(problem)
-               )
+         catch[AssetError, List[String]](
+            catch[DescriptorError, List[String]](
+               catch[ResolutionError, List[String]](
+                  catch[ToolchainError, List[String]](
+                     performed(request, here, java),
+                     problem -> reporting(
+                        failed("cannot build '" ++ show(requestedConfiguration(request)) ++ "'", show(problem))
+                     )
+                  ),
+                  problem -> reporting(
+                     failed("cannot resolve '" ++ show(requestedConfiguration(request)) ++ "'", show(problem))
+                  )
+               ),
+               problem -> reporting(failed("malformed " ++ descriptorFileName, show(problem)))
             ),
-            problem -> failed("malformed " ++ descriptorFileName, show(problem))
+            problem -> reporting(failed("cannot fetch a plugin", show(problem)))
          ),
-         problem -> failed("git refused", show(problem))
+         problem -> reporting(failed("git refused", show(problem)))
       ),
-      problem -> failed("cannot reach the filesystem", show(problem))
+      problem -> reporting(failed("cannot reach this machine", show(problem)))
    )
 
 /**
@@ -104,11 +151,18 @@ private def attempted(request: Request, here: Path): {FileSystem, Process} List[
  */
 private def performed(
       request: Request,
-      here: Path
-   ): {FileSystem, Process, Throw[IoError], Throw[GitError], Throw[DescriptorError], Throw[ResolutionError]} List[String] = {
+      here: Path,
+      java: String
+   ): {
+      FileSystem, Process, Throw[IoError], Throw[GitError], Throw[AssetError], Throw[DescriptorError],
+      Throw[ResolutionError], Throw[ToolchainError]
+   } List[String] = {
    val descriptor = parseDescriptor(readLines(here / descriptorFileName))
 
-   provide(cacheRoot(here), rendered(request, descriptor, here) with gitPackages with shellGit)
+   provide(
+      cacheRoot(here),
+      rendered(request, descriptor, here, java) with gitPackages with shellGit with shellAssets
+   )
 }
 
 /**
@@ -122,10 +176,50 @@ private def performed(
 private def rendered(
    request: Request,
    descriptor: Descriptor,
-   here: Path
-): {PackageSource, Throw[ResolutionError]} List[String] = request match {
+   here: Path,
+   java: String
+): {
+   Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
+} List[String] = request match {
    case Resolve(configuration) -> report(configuration, resolve(configuration, descriptor))
    case Roots(configuration)   -> reportRoots(sourceRoots(configuration, Project(here, descriptor)))
+   case Build(configuration)   -> compiled(configuration, descriptor, here, java)
+}
+
+/**
+ * The build verb: one closure, read twice — once for what to compile and once for what to compile it
+ * with — then the assets on disk and the compiler over both.
+ *
+ * Twice from *one* resolution, which is why `rootsOf` takes one rather than making its own: the roots
+ * and the toolchain are two readings of the same selected versions, and two closures that merely ought
+ * to agree would be a build compiling one version's sources with another version's compiler.
+ *
+ * It answers no lines. Everything a build has to say the compiler already said on the streams it
+ * inherited, and a summary from the tool would only be a second opinion about work it did not do.
+ */
+private def compiled(
+      configuration: Configuration,
+      descriptor: Descriptor,
+      here: Path,
+      java: String
+   ): {
+      Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
+   } List[String] = {
+   val resolution = resolve(configuration, descriptor)
+   val toolchain = toolchainOf(configuration, descriptor, resolution)
+   val compilation = Compilation(
+      java,
+      toolchain.toolchainAssets.map(assetTree),
+      toolchain.backendWord,
+      compiledKind(configuration, descriptor),
+      compiledMain(configuration, descriptor),
+      rootsOf(configuration, Project(here, descriptor), resolution),
+      outputRoot(here)
+   )
+
+   registerExitCode(runInheritingIo(compilerCommand(compilation), here))
+
+   empty
 }
 
 /**
@@ -138,3 +232,10 @@ private def rendered(
  * the launcher holding it at all.
  */
 private def cacheRoot(here: Path): Path = here / "target" / "cache"
+
+/**
+ * Where a build puts what it produced: `target/`, with the cache a directory inside it, so everything
+ * this tool writes is under one name a `.gitignore` already has and `rm -rf target` is the whole of
+ * "start again".
+ */
+private def outputRoot(here: Path): Path = here / "target"

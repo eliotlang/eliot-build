@@ -44,6 +44,25 @@ def configuredDependencies(configuration: Configuration, descriptor: Descriptor)
    }
 
 /**
+ * The backend call `configuration` makes, absent where it makes none.
+ *
+ * Absent covers three different things and deliberately does not tell them apart: the test scope,
+ * which has no `artifact` clause to carry one; an artifact that declares no `backend`, which is the
+ * case the "exactly one candidate" rule exists for; and a configuration no descriptor declares, which
+ * the resolver has already refused by the time anybody asks this. All three mean the same thing to the
+ * caller — nothing here narrows what backend to call.
+ *
+ * ```eliot
+ * val backend = configuredBackend(ArtifactNamed("controller-jvm"), descriptor)
+ * ```
+ */
+def configuredBackend(configuration: Configuration, descriptor: Descriptor): Option[Backend] =
+   configuration match {
+      case TestScope           -> None
+      case ArtifactNamed(name) -> declaredBackend(name, descriptor)
+   }
+
+/**
  * The configuration `text` names — `show`'s inverse, and the one place a configuration is read back
  * from the word that spells it.
  *
@@ -65,6 +84,9 @@ private def artifactDependenciesOf(name: String, descriptor: Descriptor): Option
       found -> Some(descriptor.baseDependencies ++ found.artifactDependencies),
       artifactNamed(name, descriptor)
    )
+
+private def declaredBackend(name: String, descriptor: Descriptor): Option[Backend] =
+   foldOption(None, found -> found.artifactBackend, artifactNamed(name, descriptor))
 
 private def artifactNamed(name: String, descriptor: Descriptor): Option[Artifact] =
    descriptor.artifacts.find(artifact -> artifact.artifactName == name)

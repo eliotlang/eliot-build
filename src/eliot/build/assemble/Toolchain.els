@@ -1,0 +1,198 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.assets.Assets
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+
+/**
+ * What a resolution says to *run* with: the compiler a build uses, the backend it calls, and every
+ * plugin binary that has to be on disk before either happens.
+ *
+ * This is `eliot.build.assemble.Assembly`'s other half. A resolution is a set of versions; assembly
+ * turns it into the directories a compiler is pointed at, and this turns it into the compiler that is
+ * pointed at them. Both read the same closure and neither knows how a version got there, which is why
+ * they are one package and why both run on `{PackageSource}` alone.
+ *
+ * **The toolchain is discovered, never configured.** There is no toolchain directive anywhere in this
+ * system: a package requiring a newer eliot raises the minimum, MVS unifies it, and the tag that wins
+ * is the tag whose assets these are. So finding the compiler is reading the `plugin` clauses of the
+ * modules the closure already mounted — the one marked `compiler` holds it, one with a `backend` word
+ * answers to that word, and the rest are always-on contributors that simply come along.
+ *
+ * **Both refusals here are about a graph rather than a file.** Two packages claiming `compiler` is not
+ * something a descriptor reader can catch — each descriptor is read alone and the conflict exists only
+ * across a resolution — so it is raised here, which is where the whole closure is in view for the
+ * first time. That is `docs/build-system.md`'s Q3 answered by construction.
+ */
+
+/**
+ * Why a resolution does not describe something runnable. Each names the configuration or the assets it
+ * is about, because a toolchain a user cannot attribute to a dependency line is one they cannot fix.
+ */
+data ToolchainError =
+   NoCompiler(compilerlessConfiguration: Configuration) |
+   TwoCompilers(oneCompiler: Asset, otherCompiler: Asset) |
+   NoBackend(backendlessConfiguration: Configuration) |
+   TwoBackends(oneBackend: Asset, otherBackend: Asset)
+
+implement Show[ToolchainError] {
+   def show(value: ToolchainError): String = value match {
+      case NoCompiler(configuration) ->
+         "nothing '" ++ show(configuration) ++ "' depends on ships a compiler"
+      case TwoCompilers(one, other) ->
+         "both " ++ show(one) ++ " and " ++ show(other) ++ " claim to be the compiler"
+      case NoBackend(configuration) ->
+         "nothing '" ++ show(configuration) ++ "' depends on ships a backend"
+      case TwoBackends(one, other) ->
+         "both " ++ show(one) ++ " and " ++ show(other) ++ " ship a backend, so one has to be named"
+   }
+}
+
+/**
+ * One plugin a selected package ships, and the asset it is published as — the pair every question here
+ * is asked of, since the clause says what a plugin *is* and only the selection says where it comes
+ * from.
+ */
+data Shipped(shippedAsset: Asset, shippedPlugin: Plugin)
+
+/**
+ * A backend candidate: an asset, and the command word it answers to. A record rather than the plugin it
+ * came from, because a candidate is exactly a plugin that *has* a word — so the word is a field here
+ * and the absence has already been dealt with.
+ */
+data Backing(backingAsset: Asset, backingWord: String)
+
+/**
+ * A toolchain: the asset holding the compiler, the command word the backend answers to, and every
+ * asset the closure ships — the compiler's own among them.
+ *
+ * The assets are kept as one list rather than split into "the compiler's" and "the others" because
+ * what a launcher does with them today is one flat classpath. `docs/build-system.md`'s Q2 decided the
+ * eventual shape is a parent loader on the compiler asset with a child per plugin, and `compilerAsset`
+ * is exactly the fact that split needs; until then it says which asset `Main` is in.
+ */
+data Toolchain(compilerAsset: Asset, backendWord: String, toolchainAssets: List[Asset])
+
+/**
+ * What `configuration` builds with, given what it resolved to.
+ *
+ * The resolution is passed in rather than computed, because a build wants the roots and the toolchain
+ * of *one* closure — resolving twice would be two closures that merely ought to agree.
+ *
+ * ```eliot
+ * val toolchain = toolchainOf(TestScope, descriptor, resolve(TestScope, descriptor))
+ * ```
+ */
+def toolchainOf(
+      configuration: Configuration,
+      descriptor: Descriptor,
+      resolution: Resolution
+   ): {PackageSource, Throw[ResolutionError], Throw[ToolchainError]} Toolchain = {
+   val shipped = resolution.selections.flatMap(shippedBy)
+
+   Toolchain(
+      sole(
+         NoCompiler(configuration),
+         one -> other -> TwoCompilers(one, other),
+         entry -> entry.shippedAsset,
+         compilersIn(shipped)
+      ).shippedAsset,
+      sole(
+         NoBackend(configuration),
+         one -> other -> TwoBackends(one, other),
+         candidate -> candidate.backingAsset,
+         backendsIn(configuration, descriptor, shipped)
+      ).backingWord,
+      shipped.map(entry -> entry.shippedAsset)
+   )
+}
+
+/**
+ * Every plugin one selected package ships, paired with the asset it is published as.
+ *
+ * Of the modules the closure *mounted*, and only those: a plugin is a module's, so a module nobody
+ * selected ships nothing into this build, exactly as it contributes no sources. A selected version
+ * whose descriptor cannot be read back is `Unavailable` — the resolver's own error, the same fact
+ * under a different verb, which is what `eliot.build.assemble.Assembly` says about the same read.
+ */
+private def shippedBy(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Shipped] =
+   foldOption(
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      descriptor -> declaredBy(selection, descriptor),
+      descriptorAt(selection.selectedVersion, selection.selectedRepository)
+   )
+
+private def declaredBy(selection: Selection, descriptor: Descriptor): List[Shipped] =
+   descriptor.modules
+      .filter(module -> module.exported && mounts(module.moduleName, selection))
+      .flatMap(module -> module.modulePlugins.map(plugin -> Shipped(assetOf(selection, plugin), plugin)))
+
+private def assetOf(selection: Selection, plugin: Plugin): Asset =
+   Asset(selection.selectedRepository, selection.selectedVersion, plugin.pluginAsset)
+
+private def compilersIn(shipped: List[Shipped]): List[Shipped] =
+   shipped.filter(entry -> entry.shippedPlugin.compilerBase)
+
+/**
+ * The backend candidates, as the asset and the word it answers to.
+ *
+ * A plugin *is* a candidate exactly when it declares a word, which is the whole of Q1's decision: the
+ * provider says what it answers to, so `lang` and `stdlib` stop counting and the "exactly one
+ * candidate" rule an artifact leans on becomes true. Where the artifact named a package, only that
+ * package's are kept — identity from the consumer, mechanism from the provider, and neither side ever
+ * spells the other's half.
+ */
+private def backendsIn(
+   configuration: Configuration,
+   descriptor: Descriptor,
+   shipped: List[Shipped]
+): List[Backing] = {
+   val named = namedRepository(configuredBackend(configuration, descriptor))
+
+   shipped.flatMap(candidateOf).filter(candidate -> chosenBy(named, candidate.backingAsset))
+}
+
+/**
+ * One candidate, or none — a plugin that declares no word is not a backend, which is the whole of what
+ * the word's absence means.
+ */
+private def candidateOf(entry: Shipped): List[Backing] =
+   foldOption(
+      noCandidate,
+      word -> singleton(Backing(entry.shippedAsset, word)),
+      entry.shippedPlugin.pluginBackend
+   )
+
+private def noCandidate: List[Backing] = empty
+
+private def chosenBy(named: Option[Repository], asset: Asset): Bool =
+   foldOption(true, chosen -> asset.assetRepository == chosen, named)
+
+private def namedRepository(backend: Option[Backend]): Option[Repository] =
+   foldOption(None, chosen -> foldOption(None, named -> repositoryOf(named), chosen.backendPackage), backend)
+
+/**
+ * The one candidate, or which two of them made it a question.
+ *
+ * Reading the second element rather than counting, because the report a user needs is *which* two
+ * collided and a size says neither of them.
+ */
+private def sole[A](
+   absent: ToolchainError,
+   ambiguous: Asset => Asset => ToolchainError,
+   assetOf: A => Asset,
+   candidates: List[A]
+): {Throw[ToolchainError]} A =
+   foldOption(raise(absent), only -> settled(ambiguous, assetOf, only, candidates), candidates.head)
+
+private def settled[A](
+   ambiguous: Asset => Asset => ToolchainError,
+   assetOf: A => Asset,
+   only: A,
+   candidates: List[A]
+): {Throw[ToolchainError]} A =
+   foldOption(only, second -> raise(ambiguous(assetOf(only))(assetOf(second))), candidates.at(1))

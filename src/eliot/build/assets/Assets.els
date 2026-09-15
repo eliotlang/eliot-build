@@ -1,0 +1,99 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.git.Git
+
+/**
+ * A release asset of a package, and where a build gets one.
+ *
+ * This is the other half of what a `dep` line buys. A dependency names sources, and resolution decides
+ * which version of them; a package that ships a compiler plugin also publishes a *binary* of it as a
+ * release asset of that same repository at that same tag, and a build that is going to run the
+ * compiler has to have the binary on disk. So the vocabulary is one triple — repository, version,
+ * asset name — and the effect is one question asked of it.
+ *
+ * **There is no coordinate, and that is the design.** The location of an asset is derived from facts
+ * the consumer already holds: it has chosen a repository and a version, and the descriptor at that
+ * version named the file. Nothing in any descriptor changes when a version does, and sources and
+ * binary cannot skew, because they are the same tag (`docs/build-system.md`, "Compiler plugins").
+ * That is why `Asset` is built rather than parsed, and why no version of its own appears in it.
+ *
+ * **It is its own package, below `resolve` and beside `git`.** Fetching an asset is what the tool does
+ * *after* a resolution — the assets it wants are the ones the selected versions named — but nothing
+ * here knows what a resolution is: an asset is a triple, and whoever assembled it did the deciding.
+ * `eliot.build.git.Git` is imported for one thing only, the scheme, which `remoteOf` is the single
+ * place to decide.
+ */
+
+/**
+ * A release asset: the repository that published it, the version it was published at, and the file
+ * name the descriptor at that version gave it.
+ */
+data Asset(assetRepository: Repository, assetVersion: Version, assetName: String)
+
+/**
+ * Why an asset could not be had: the command that went after it, what it exited with, and what it said.
+ *
+ * The same shape as `GitError` and for the same reason — a fetch is a program this tool spawned, and
+ * the only report a user can act on is the one that program gave. A separate channel from git's
+ * because they fail for unrelated reasons and a user does unrelated things about them: a repository
+ * that is not there is a dependency line to fix, an asset that is not there is a publisher's release
+ * to chase.
+ */
+data AssetError(fetchCommand: String, fetchExitCode: Int, fetchDiagnostics: String)
+
+implement Show[AssetError] {
+   def show(value: AssetError): String =
+      "'" ++ value.fetchCommand ++ "' failed with exit code " ++ show(value.fetchExitCode) ++ ": " ++
+         value.fetchDiagnostics
+}
+
+implement Show[Asset] {
+   def show(value: Asset): String =
+      show(value.assetRepository) ++ "@" ++ show(value.assetVersion) ++ "/" ++ value.assetName
+}
+
+implement Eq[Asset] {
+   def equals(a: Asset, b: Asset): Bool =
+      a.assetRepository == b.assetRepository && a.assetVersion == b.assetVersion &&
+         a.assetName == b.assetName
+}
+
+/**
+ * Where a build's binaries come from: one question, asked of an asset the consumer has already
+ * identified.
+ *
+ * Declared as an effect for the reason `eliot.build.resolve.PackageSource` is one — what answers it is
+ * the run boundary's business, and a test binds a table instead of a network. The member declares no
+ * row: how an implementation fails is that implementation's statement, charged where it is bound, so
+ * nothing that merely *wants* a toolchain says anything about downloads.
+ */
+effect Assets {
+   /**
+    * The directory `asset`'s contents are unpacked into, as a directory that exists.
+    *
+    * A `Path` rather than an `Option[Path]`, exactly as `sourcesAt` is: the caller is asking about an
+    * asset a descriptor named, so there is no honest absence left — either the files are put somewhere
+    * or the implementation refuses through a channel of its own.
+    */
+   def assetTree(asset: Asset): Path
+}
+
+/**
+ * Where `asset` is published: one concatenation on the repository's canonical URL and the tag the
+ * consumer already selected.
+ *
+ * ```eliot
+ * val url = assetUrlOf(Asset(repositoryAt("github.com/e/eliot"), version, "eliot-jvm.zip"))
+ * ```
+ *
+ * The path is the forge default — correct on GitHub, Gitea, Forgejo and Codeberg, which is the big
+ * host plus essentially every self-hosted one. GitLab and sr.ht spell it differently and a bare git
+ * server has no releases at all; when per-host overrides come they are consumer-side configuration
+ * beside transports and mirrors, never package content, so a fork never inherits someone else's
+ * hosting.
+ */
+def assetUrlOf(asset: Asset): String =
+   remoteOf(asset.assetRepository).remoteUrl ++ "/releases/download/" ++ show(asset.assetVersion) ++
+      "/" ++ asset.assetName

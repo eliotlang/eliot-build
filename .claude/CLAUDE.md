@@ -14,9 +14,9 @@ meta-information.
 
 ## Architecture
 
-Two source roots, five packages each. `src/eliot/build/` is the tool, split by what a file is allowed
-to know — `assemble` → `resolve` → `git` → `format` → `model`, and `model` imports nothing of the tool
-(`docs/effectful-modules.md` §12, §13, §15):
+Two source roots, six packages each. `src/eliot/build/` is the tool, split by what a file is allowed
+to know — `assemble` → `resolve` → `assets` → `git` → `format` → `model`, and `model` imports nothing of
+the tool (`docs/effectful-modules.md` §12, §13, §15, §17):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
   line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; a
@@ -41,6 +41,12 @@ to know — `assemble` → `resolve` → `git` → `format` → `model`, and `mo
   (`shellGit`, the *named* implementation that spawns and alone decides which directory each command
   stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories and
   checking versions out beside them at `<url>@<tag>`, on `{Git, FileSystem}`).
+- **`assets/`** — the other half of what a `dep` line buys. `Assets` (`effect Assets` — one question,
+  `assetTree(asset)`, plus `Asset` itself, the repository/version/name triple a release asset *is*, and
+  `assetUrlOf`, the one concatenation its location is derived by) and `ShellAssets` (`shellAssets`, the
+  named implementation that spawns `curl`, falls back to `wget` where curl will not start, unpacks with
+  `unzip`, and caches the result at `<root>/assets/<url>@<tag>/<asset>`). It imports `git` for one thing
+  — `remoteOf`, the single place the scheme is decided — and knows nothing about resolutions.
 - **`resolve/`** — `PackageSource` (what the tool asks of somebody else's repository: a descriptor, a
   lineage anchor, and — since assembly — a checked-out tree), `GitPackages` (`gitPackages`, the
   named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
@@ -50,25 +56,32 @@ to know — `assemble` → `resolve` → `git` → `format` → `model`, and `mo
   `Resolution` (MVS itself: the closure over rounds, the merge of two minimums, the depth ceiling, and
   the module set a selection carries — the selector narrows the closure as well as the mount).
 - **`assemble/`** — `Assembly` (a resolution plus the standard layout become the source roots one
-  configuration compiles from; pure but for `{PackageSource}`, and it names no git).
+  configuration compiles from; pure but for `{PackageSource}`, and it names no git) and `Toolchain`
+  (the same closure read the other way: which asset is marked `compiler`, which word the backend
+  answers to, and every asset the mounted modules ship — `ToolchainError` is where two packages
+  claiming the marker is caught, because a descriptor reader sees one descriptor and the conflict only
+  exists across a resolution).
 
-Above the five, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
-the run boundary, the one place writing `with gitPackages with shellGit` and the `provide` that tells
-the source where mirrors live, and where the four failure channels are discharged separately and
-each reports as itself — and **`Command`**, the half that is about text rather than about running
+Above the six, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
+the run boundary, the one place writing `with gitPackages with shellGit with shellAssets` and the
+`provide` that tells
+the source where mirrors live, and where the six failure channels are discharged separately, each
+reporting as itself and every one of them registering a non-zero exit code — and **`Command`**, the
+half that is about text rather than about running
 (the `Request` sum a command line asks for, what a resolution and an assembly read as), split out
-because it is testable with no platform beneath it and the boundary never can be. Two verbs:
+because it is testable with no platform beneath it and the boundary never can be. Three verbs:
 `eliot resolve <configuration>` prints the version selected per package, `eliot roots <configuration>`
-checks each out and prints the source directories that configuration compiles from — handed to the
-compiler verbatim, those lines build the project. The lockfile, spawning the compiler (blocked on
-published plugin assets — the descriptor's side of that is done, `plugin <asset> { backend <word> |
-compiler }`) and the rest of the verb set are the steps after them.
+checks each out and prints the source directories that configuration compiles from, and `eliot build
+<configuration>` fetches the plugin assets those same versions ship and runs the compiler over those
+same roots — inheriting its streams and registering its exit code. The lockfile and the rest of the
+verb set are the steps after them.
 
-Neither `Git` nor `PackageSource` has a default: the run boundary in `Launcher` writes
-`with gitPackages with shellGit` once, and `ShellGit`/`GitPackages` are the two modules nothing but
-that boundary imports. `test/` mirrors
+Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
+`with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
+the three modules nothing but that boundary imports. `test/` mirrors
 the tree package for package, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
-this project's own two effects, which the framework cannot double. **Bind a named implementation with an
+this project's own effects, which the framework cannot double (`Assets` needs none: `Toolchain` names
+assets without fetching any, and `ShellAssets` is checked under `mocked` like `ShellGit`). **Bind a named implementation with an
 expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `with` binds the
 implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
 Everything else is mocked by `eliot.test.Mock`: a case declares nothing, arranges with
@@ -80,14 +93,15 @@ doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15 and §16 of it first**, and read them before touching `Git`,
-`Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
+`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15, §16 and §17 of it first**, and read them
+before touching `Git`, `Assets`, `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
 implementation actually does and what is now genuinely unchecked. §12, §13 and §15 are where the modules
 came from and what was deliberately left whole; §16 is what the packages under them cost to revise, what
-`eliotw` is allowed to know, and two findings recorded rather than fixed — a failed build exits 0, and
-what that operation's signature would even be.
+`eliotw` is allowed to know, and two findings recorded rather than fixed. §17 is the verb that
+compiles: the sixth package, the toolchain read off a closure, and the three compiler workarounds the
+build verb cost — one of which is why §16's "a failed build exits 0" is now closed.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
@@ -108,7 +122,11 @@ the style of the existing history.
 
 ## Building and running (compiler CLI)
 
-The build will eventually dogfood itself, but is not yet available. Compilation is driven by a sibling checkout of the Eliot
+The build can now build *other* packages — `eliot build test` in `../eliot-test` fetches eliot `v0.1`'s
+three plugin assets and produces a working `Runner.jar` — but it cannot yet build **this** one: `src`
+performs `registerExitCode`, which the standard library grew after `v0.1` was tagged, so there is no
+published toolchain that compiles the launcher. Until that tag exists this project is built by the
+compiler checkout. Compilation is driven by a sibling checkout of the Eliot
 compiler (see `eliot.paths` for its location — `/home/robert/personal/eliot`), whose `examples.run`
 Mill task auto-appends the `lang`/`stdlib`/`jvm` layer source roots. You pass this project's own
 roots, and the test framework's, as positional arguments:
@@ -151,17 +169,33 @@ cd /home/robert/personal/eliot
 cd <any project with an eliot.pkg>
 java -jar /home/robert/personal/eliot-build/target/Launcher.jar resolve test
 java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test
 ```
 
-`roots` is the one that exercises the whole stack, and its output *is* the compiler's argument list.
-The end-to-end check: run it in `../eliot-test` (delete `target/cache` first, so the clone and the
-checkout are part of what is checked) and pass every line it prints to the compiler as a positional
-source root. It cannot go through `examples.run`, which always appends the checkout's own layer roots
-and would mount each layer twice — drive `Main` directly with that task's classpath instead:
+`build` is the one that exercises the whole stack, and it is the end-to-end check now that it exists:
+it resolves, checks out, fetches every plugin asset the selected versions ship, and runs the compiler
+over the roots itself. Run it in `../eliot-test` with `target/` deleted first, so the clone, the
+checkout and the download are all part of what is checked:
 
 ```bash
 cd /home/robert/personal/eliot-test
-rm -rf target/cache
+rm -rf target
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test   # must exit 0
+java -jar target/Runner.jar                                                 # must be green
+```
+
+That repository's `eliot.pkg` must require eliot at `v0.1` or later for this to work at all — `v0.0`
+declares no `plugin` clauses, so there is no toolchain to find and `build` refuses with "nothing 'test'
+depends on ships a compiler". Two things to check while you are there: a deliberate syntax error in any
+mounted source must make `build` exit 1 with the compiler's own diagnostics on the terminal, and
+`build nosuch` must exit 1 rather than printing a failure and exiting 0.
+
+The older half of the check still works and is what to fall back on when `build` itself is what is
+suspect: `roots` prints the compiler's argument list, and passing those lines to `Main` by hand builds
+the same jar. It cannot go through `examples.run`, which always appends the checkout's own layer roots
+and would mount each layer twice — drive `Main` directly with that task's classpath instead:
+
+```bash
 ROOTS=$(java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test)
 CP=$(cd /home/robert/personal/eliot && ./mill show examples.runClasspath | python3 -c \
    'import sys,json,re; print(":".join(re.sub(r"^.*?@","",x) for x in json.load(sys.stdin)))')
@@ -182,9 +216,9 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
 
-What that means for a change: **do not read a green 205 as evidence the tool runs** — the suite and the
-launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `Assembly` or the
-boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
+What that means for a change: **do not read a green 237 as evidence the tool runs** — the suite and the
+launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Toolchain` or
+the boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the
 rest.
 

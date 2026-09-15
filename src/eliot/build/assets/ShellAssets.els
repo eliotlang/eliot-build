@@ -1,0 +1,139 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.assets.Assets
+
+/**
+ * The `Assets` that actually goes and gets one: it downloads the release asset with the tool the
+ * machine has and unpacks it beside the mirrors, once per asset per version.
+ *
+ * **Named, and deliberately not the default**, for the reason `eliot.build.git.ShellGit` gives: an
+ * implementation's clause rows are bound where the *name* is bound, so a test writing
+ * `assetTree(asset) with shellAssets` reaches the framework's process double and this implementation is
+ * checked at all. The launcher's run boundary writes the one `with shellAssets`, and an `{Assets}`
+ * reaching `main` without it is a compile error naming the effect.
+ *
+ * **It spawns rather than speaks HTTP, and that is not a stopgap in the way it looks.** Nothing in
+ * `eliot.system` opens a socket or reads a zip, so a download is `curl` and an unpacking is `unzip` —
+ * the same shape `eliot.build.git.ShellGit` has, where git is a program the user already has rather
+ * than a library this tool carries. `curl` first and `wget` where curl will not *start*, which is the
+ * pair `eliotw` already requires one of: the wrapper that fetched the launcher proved one of them is
+ * here, and this asks for them in the same order so that a machine which could bootstrap can also
+ * build. A refusal from either — a 404, a tag with no such asset — is an `AssetError` naming the
+ * command, never a fallback to the other tool.
+ *
+ * **What is cached is the unpacked directory**, under the same root the mirrors are in and keyed the
+ * same way: `<root>/assets/<url>@<tag>/<asset>`, so `ls` says which package, which version and which
+ * asset a pile of jars came from. Presence of the directory is proof it is whole, the way a mirror
+ * directory is proof a clone finished — and the archive is deleted once it is unpacked, because
+ * keeping it would double what the cache costs to hold a file nothing ever reads again. The hole that
+ * remains is an `unzip` killed outright rather than failing, which leaves a partial directory that
+ * looks present; that is `eliot.build.git.Cache`'s hole too, and it is the lockfile's hash that will
+ * eventually close both.
+ */
+implement shellAssets: Assets {
+   def assetTree(asset: Asset): {Process, FileSystem, Dep[Path], Throw[IoError], Throw[AssetError]} Path = {
+      val directory = assetDirectory(dependency, asset)
+      val absent = missingDirectory(isDirectory(directory), directory)
+
+      foldOption(directory, missing -> unpacked(dependency, asset, missing), absent)
+   }
+}
+
+/**
+ * Where `asset` is unpacked under `root`: beside the mirror of the repository that published it, under
+ * a name carrying the version, holding one directory per asset.
+ *
+ * Under `assets/` rather than beside the mirrors themselves, because `<url>@<tag>` is already where a
+ * *worktree* of that version goes and a build wants both at once.
+ */
+def assetDirectory(root: Path, asset: Asset): Path = versionDirectory(root, asset) / asset.assetName
+
+private def versionDirectory(root: Path, asset: Asset): Path =
+   under(root / "assets", asset.assetRepository.repositoryUrl ++ "@" ++ show(asset.assetVersion))
+
+private def under(root: Path, name: String): Path =
+   split("/", name).foldLeft(root, segment -> directory -> directory / segment)
+
+private def missingDirectory(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
+
+/**
+ * Fetch the archive and unpack it — the whole of what this implementation does that is not deciding
+ * where something goes.
+ *
+ * The archive is downloaded beside the directory it unpacks into rather than into it, so that the
+ * directory comes into existence only when `unzip` makes it and a half-finished fetch leaves nothing
+ * that later looks cached. It is deleted afterwards: the unpacked jars are what a classpath names, and
+ * a second copy of every one of them compressed is a cache that is twice the size for nothing.
+ */
+private def unpacked(
+      root: Path,
+      asset: Asset,
+      directory: Path
+   ): {Process, FileSystem, Throw[IoError], Throw[AssetError]} Path = {
+   val archive = versionDirectory(root, asset) / (asset.assetName ++ ".download")
+
+   createDirectories(versionDirectory(root, asset))
+   downloaded(assetUrlOf(asset), archive)
+   checked(unzipping(archive, directory))
+   delete(archive)
+
+   directory
+}
+
+/**
+ * `curl`, and `wget` where curl is not installed.
+ *
+ * The fallback is on curl failing to *start*, which is the one thing that says "this machine has the
+ * other tool". A curl that ran and refused has read the server's answer, and retrying that with a
+ * second downloader would turn one honest report into two confusing ones.
+ */
+private def downloaded(url: String, archive: Path): {Process, Throw[IoError], Throw[AssetError]} Unit =
+   catch[IoError, Unit](checked(curlFetching(url, archive)), _ -> checked(wgetFetching(url, archive)))
+
+/**
+ * `--fail` so that a forge answering "404" in HTML is an error rather than an archive full of HTML,
+ * and `--location` because a release asset is served as a redirect to storage.
+ */
+private def curlFetching(url: String, archive: Path): List[String] =
+   command("curl").withArgument("--fail").withArgument("--location").withArgument("--silent")
+      .withArgument("--show-error").withArgument("--output").withArgument(show(archive))
+      .withArgument(url)
+
+private def wgetFetching(url: String, archive: Path): List[String] =
+   command("wget").withArgument("--quiet").withArgument("--output-document").withArgument(show(archive))
+      .withArgument(url)
+
+/**
+ * `-o` because a directory that is there but partial is re-unpacked over rather than refused, and `-d`
+ * because `unzip` making the directory is what makes its existence mean "this finished".
+ */
+private def unzipping(archive: Path, directory: Path): List[String] =
+   command("unzip").withArgument("-q").withArgument("-o").withArgument(show(archive))
+      .withArgument("-d").withArgument(show(directory))
+
+/**
+ * Run `arguments` where this program stands, raising what they said if they refused.
+ *
+ * In `here` for `eliot.build.git.ShellGit`'s reason: a cache root may be relative — `target/cache` is
+ * the obvious thing for a caller to pass — and a command launched from inside the cache would resolve
+ * that same relative path a second time.
+ */
+private def checked(arguments: List[String]): {Process, Throw[IoError], Throw[AssetError]} Unit = {
+   val result = run(arguments, here)
+   val failure = failureOf(arguments, result)
+
+   foldOption(unit, error -> raise(error), failure)
+}
+
+private def here: Path = path(".")
+
+private def failureOf(arguments: List[String], result: ProcessResult): Option[AssetError] =
+   fold(
+      result.exitCode == 0,
+      None,
+      Some(AssetError(arguments.joined(" "), result.exitCode, result.standardError))
+   )

@@ -1,0 +1,178 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.assets.Assets
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.TablePackages
+import eliot.build.assemble.Toolchain
+
+/**
+ * What a closure says to run with: which asset is the compiler, which word calls the backend, and
+ * which binaries come along.
+ *
+ * Run against `eliot.build.resolve.TablePackages`, so every descriptor here is a string and nothing is
+ * fetched — the subject is what `plugin` clauses *mean* across a resolution, which is the one thing no
+ * descriptor reader can decide alone. The universe is the eliot repository's own shape, because it is
+ * the shape the question was invented for: a compiler asset in `lang`, a bare contributor in `stdlib`,
+ * a backend in `jvm`, and an `apidoc` backend nobody has selected.
+ */
+def testCases: Test = {
+   "toolchainOf" should "find the compiler in the asset whose plugin claims it" in {
+      toolchainFor(dependingOnJvm) shouldBe expectedEliotToolchain
+   }
+   "toolchainOf" should "call the backend by the word its provider registered, lang and stdlib not counting" in {
+      backendOf(dependingOnJvm) shouldBe "jvm"
+   }
+   "toolchainOf" should "carry the asset of every module the closure mounted, in the resolution's order" in {
+      assetsOf(dependingOnJvm) shouldBe expectedEliotAssets
+   }
+   "toolchainOf" should "leave out the asset of a module nobody selected" in {
+      assetsOf(dependingOnJvm).contains("eliot-apidoc.zip").shouldBeFalse
+   }
+   "toolchainOf" should "refuse a closure in which nothing ships a compiler" in {
+      toolchainFor("dep github.com/x/foo v1.2") shouldBe "nothing 'test' depends on ships a compiler"
+   }
+   "toolchainOf" should "refuse a closure in which two assets claim to be the compiler" in {
+      toolchainFor(dependingOnBothCompilers) shouldBe expectedCompilerConflict
+   }
+   "toolchainOf" should "refuse a closure that ships a compiler but no backend" in {
+      toolchainFor("dep github.com/e/eliot//stdlib v1.2")
+         shouldBe "nothing 'test' depends on ships a backend"
+   }
+   "toolchainOf" should "refuse two backends where the artifact named neither" in {
+      toolchainForArtifact("app", twoPlatforms("")) shouldBe expectedBackendConflict
+   }
+   "toolchainOf" should "call the backend of the package the artifact named" in {
+      backendForArtifact("app", twoPlatforms("backend github.com/a/avr\n  ")) shouldBe "avr"
+   }
+   "toolchainOf" should "keep the other platform's asset even when only one of them is called" in {
+      assetsForArtifact("app", twoPlatforms("backend github.com/a/avr\n  ")) shouldBe expectedTwoPlatformAssets
+   }
+}
+
+/**
+ * The eliot repository as its `v0.1` descriptor declares it: one asset per module, the compiler marker
+ * on `lang` because `eliotc` has no package of its own to ride in, and the backend word on `jvm`.
+ * `apidoc` is here as the module a dependency line has to name before any of it arrives.
+ */
+private def eliotModules: String =
+   "module lang {\n  plugin eliot-compiler.zip {\n    compiler\n  }\n}\n" ++
+      "module stdlib {\n  dep //lang\n  plugin eliot-stdlib.zip\n}\n" ++
+      "module jvm {\n  dep //stdlib\n  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}\n" ++
+      "module apidoc {\n  dep //lang\n  plugin eliot-apidoc.zip {\n    backend apidoc\n  }\n}"
+
+private def dependingOnJvm: String = "dep github.com/e/eliot//jvm v1.2"
+
+/**
+ * Both modules of a repository whose two assets each claim the marker — which no descriptor reader
+ * could refuse, since each descriptor is read alone and there is only one here.
+ */
+private def dependingOnBothCompilers: String =
+   "dep github.com/two/compilers//one v1.0\ndep github.com/two/compilers//other v1.0"
+
+/**
+ * Two repositories that each ship a backend, which is the situation an artifact's `backend <package>`
+ * exists to settle. The compiler comes from eliot, as it does in every closure.
+ */
+private def twoPlatforms(naming: String): String =
+   "artifact app {\n  dep github.com/e/eliot//jvm v1.2\n  dep github.com/a/avr//avr v1.0\n  " ++ naming ++ "}"
+
+private def expectedEliotToolchain: String =
+   "github.com/e/eliot@v1.2/eliot-compiler.zip jvm " ++ expectedEliotAssets
+
+private def expectedEliotAssets: String =
+   "github.com/e/eliot@v1.2/eliot-compiler.zip, github.com/e/eliot@v1.2/eliot-stdlib.zip, " ++
+      "github.com/e/eliot@v1.2/eliot-jvm.zip"
+
+/**
+ * Both platforms' assets, because a backend that was not called is still a package the closure mounted
+ * and still ships what it ships. Naming one decides which plugin the compiler is *told* to run, never
+ * what is on the classpath.
+ */
+private def expectedTwoPlatformAssets: String =
+   "github.com/a/avr@v1.0/avr.zip, github.com/e/eliot@v1.2/eliot-compiler.zip, " ++
+      "github.com/e/eliot@v1.2/eliot-stdlib.zip, github.com/e/eliot@v1.2/eliot-jvm.zip"
+
+private def expectedCompilerConflict: String =
+   "both github.com/two/compilers@v1.0/one.zip and github.com/two/compilers@v1.0/other.zip " ++
+      "claim to be the compiler"
+
+private def expectedBackendConflict: String =
+   "both github.com/a/avr@v1.0/avr.zip and github.com/e/eliot@v1.2/eliot-jvm.zip " ++
+      "ship a backend, so one has to be named"
+
+/**
+ * The whole toolchain on one line, or the one line naming what refused — so a case says what was found
+ * *and* in what order, the way `AssemblyTests` says what was mounted.
+ */
+private def toolchainFor(rootText: String): String = described(TestScope, rootText, shown)
+
+private def assetsOf(rootText: String): String = described(TestScope, rootText, shownAssets)
+
+private def backendOf(rootText: String): String = described(TestScope, rootText, shownBackend)
+
+private def toolchainForArtifact(name: String, rootText: String): String =
+   described(ArtifactNamed(name), rootText, shown)
+
+private def backendForArtifact(name: String, rootText: String): String =
+   described(ArtifactNamed(name), rootText, shownBackend)
+
+private def assetsForArtifact(name: String, rootText: String): String =
+   described(ArtifactNamed(name), rootText, shownAssets)
+
+/**
+ * Rendered *inside* the `against`, as every resolving case in this project is and for the reason
+ * `eliot.build.resolve.ResolutionTests` records: two `provide[Universe, _]` instantiations whose JVM
+ * descriptors agree get one native between them.
+ *
+ * `ToolchainError` is discharged in here too rather than travelling out, because `against` answers the
+ * resolver's channel alone and a toolchain refusal is a line a user reads, not a second `Either` for a
+ * test to unfold.
+ */
+private def described(
+   configuration: Configuration,
+   rootText: String,
+   rendering: Toolchain => String
+): String =
+   rendered(against(universe, catching(rendering, configuration, descriptorOf(rootText))))
+
+private def catching(
+   rendering: Toolchain => String,
+   configuration: Configuration,
+   descriptor: Descriptor
+): {PackageSource, Throw[ResolutionError]} String =
+   catch[ToolchainError, String](
+      rendering(toolchainOf(configuration, descriptor, resolve(configuration, descriptor))),
+      problem -> show(problem)
+   )
+
+private def rendered(outcome: Either[ResolutionError, String]): String =
+   foldEither(error -> show(error), found -> found, outcome)
+
+private def shown(toolchain: Toolchain): String =
+   show(toolchain.compilerAsset) ++ " " ++ toolchain.backendWord ++ " " ++ shownAssets(toolchain)
+
+private def shownAssets(toolchain: Toolchain): String = toolchain.toolchainAssets.map(show).joined(", ")
+
+private def shownBackend(toolchain: Toolchain): String = toolchain.backendWord
+
+private def universe: Universe =
+   universeOf(
+      published("github.com/e/eliot@v1.2", eliotModules,
+         published("github.com/a/avr@v1.0", "module avr {\n  plugin avr.zip {\n    backend avr\n  }\n}",
+            published("github.com/x/foo@v1.2", "",
+               published("github.com/two/compilers@v1.0", twoCompilerModules, empty)))),
+      empty
+   )
+
+private def twoCompilerModules: String =
+   "module one {\n  plugin one.zip {\n    compiler\n  }\n}\n" ++
+      "module other {\n  plugin other.zip {\n    compiler\n  }\n}"
+
+private def published(key: String, text: String, entries: List[Pair[String, String]]): List[Pair[String, String]] =
+   append(entries, Pair(key, text))

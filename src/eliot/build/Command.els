@@ -1,5 +1,7 @@
 import eliot.collection.List
 import eliot.file.Path
+import eliot.system.Process
+import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
@@ -25,13 +27,22 @@ import eliot.build.resolve.Selection
  * whatever runs next: one directory per line, unadorned, because the list is the compiler's `--path`
  * arguments and a shell is the only reader that matters. That the two verbs render differently is the
  * decision, not an oversight.
+ *
+ * **`eliot.system.Process` is imported for two pure list builders and nothing else.** A command line
+ * is text — `command("java").withArgument("-cp")` is the spelling this project already uses for one —
+ * and assembling the compiler's is exactly the kind of decision that belongs here rather than at a
+ * boundary that cannot be tested. Nothing in this module performs the effect; `build` spawns what this
+ * module wrote.
  */
 
 /**
- * What a command line asks the tool to do: name the versions of one configuration, or name the
- * directories it compiles from.
+ * What a command line asks the tool to do: name the versions of one configuration, name the
+ * directories it compiles from, or compile them.
  */
-data Request = Resolve(resolvedConfiguration: Configuration) | Roots(rootsConfiguration: Configuration)
+data Request =
+   Resolve(resolvedConfiguration: Configuration) |
+   Roots(rootsConfiguration: Configuration) |
+   Build(builtConfiguration: Configuration)
 
 /**
  * What `commandLine` asks for, absent where it asks for anything the tool does not offer.
@@ -58,6 +69,7 @@ def requested(commandLine: List[String]): Option[Request] = {
 def requestedConfiguration(request: Request): Configuration = request match {
    case Resolve(configuration) -> configuration
    case Roots(configuration)   -> configuration
+   case Build(configuration)   -> configuration
 }
 
 /**
@@ -82,6 +94,105 @@ def report(configuration: Configuration, resolution: Resolution): List[String] =
 def reportRoots(roots: List[Path]): List[String] = roots.map(show)
 
 /**
+ * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
+ * plugins were unpacked into, the backend word and the artifact kind that select what it produces, the
+ * module holding `main` where the artifact has one, the source roots, and where the result goes.
+ *
+ * A record rather than seven arguments, because every field here is decided somewhere else — the
+ * toolchain says the backend word, the resolution says the roots, the launcher says the JVM — and a
+ * record is what lets each of them be filled in by whoever knows it and read back by a test.
+ */
+data Compilation(
+   javaCommand: String,
+   toolchainClasspath: List[Path],
+   backendCommand: String,
+   artifactKind: String,
+   mainModule: Option[String],
+   compiledRoots: List[Path],
+   outputDirectory: Path
+)
+
+/**
+ * The compiler, spelled as a command line.
+ *
+ * **The order is the compiler's and it is not negotiable.** `-m` has to come immediately after the
+ * artifact kind and before the first source root, because the kind opens a subcommand scope that the
+ * first positional argument closes — an `-m` after a root is rejected as an unknown option. `-o`
+ * trails. That is a fact about the compiler's own argument parser, and writing it down here, once, is
+ * what keeps it out of the boundary.
+ *
+ * ```eliot
+ * val line = compilerCommand(Compilation("java", plugins, "jvm", "exe-jar", Some(testRunnerModule), roots, target))
+ * ```
+ */
+def compilerCommand(compilation: Compilation): List[String] =
+   (command(compilation.javaCommand)
+      .withArgument("-cp").withArgument(classpathOf(compilation.toolchainClasspath))
+      .withArgument(compilerMainClass)
+      .withArgument(compilation.backendCommand)
+      .withArgument(compilation.artifactKind)) ++
+      moduleArguments(compilation.mainModule) ++
+      compilation.compiledRoots.map(show) ++
+      (command("-o").withArgument(show(compilation.outputDirectory)))
+
+/**
+ * The compiler's entry point, by name.
+ *
+ * Transitional, and named here rather than discovered: an asset says it holds the compiler and nothing
+ * says which class in it to run, because until the compiler is self-hosted there is exactly one
+ * compiler and this is what it is called. When plugins become Eliot source in ordinary packages, this
+ * constant retires with the rest of the mechanism.
+ */
+def compilerMainClass: String = "com.vanillasource.eliot.eliotc.compiler.Main"
+
+/**
+ * Where a test configuration's `main` lives — in the framework, which is a dependency rather than
+ * anything the project being built wrote.
+ *
+ * Hard-coded deliberately, as `docs/build-system.md`'s Q4 leans: the alternative is a clause in the
+ * framework's own descriptor, and one constant with the reason attached is the cheaper thing to
+ * change when a second test framework exists to justify one.
+ */
+def testRunnerModule: String = "eliot.test.Runner"
+
+/**
+ * What a configuration produces when it says nothing else — a runnable jar, which is what both a test
+ * run and every artifact anybody has declared so far wants.
+ */
+def defaultArtifactKind: String = "exe-jar"
+
+/**
+ * What `configuration` asks the backend to produce — its `backend` block's `kind`, or a runnable jar
+ * where it says nothing and for the test scope, which has no block to say anything in.
+ */
+def compiledKind(configuration: Configuration, descriptor: Descriptor): String =
+   parameterOf("kind", configuration, descriptor) orElse defaultArtifactKind
+
+/**
+ * The module holding the `main` of `configuration`, absent for an artifact that names none.
+ *
+ * The test scope's is the framework's runner and is not the project's to state; an artifact's is its
+ * own `backend` parameter. That asymmetry is the whole of Q4: a test configuration's entry point lives
+ * in a dependency, so somebody has to know its name, and the test verb is the somebody.
+ */
+def compiledMain(configuration: Configuration, descriptor: Descriptor): Option[String] =
+   configuration match {
+      case TestScope        -> Some(testRunnerModule)
+      case ArtifactNamed(_) -> parameterOf("main", configuration, descriptor)
+   }
+
+/**
+ * A classpath the JVM expands itself: one wildcard entry per unpacked asset, so an asset's jars are
+ * named by the directory they are in rather than listed one by one.
+ *
+ * The separator is `:`, which is POSIX's. This tool spawns rather than shells out, so nothing expands
+ * the `*` on the way — the JVM reads it — but the separator is still a platform's and this is the one
+ * place it is written.
+ */
+def classpathOf(directories: List[Path]): String =
+   directories.map(directory -> show(directory) ++ "/*").joined(":")
+
+/**
  * One line for one failure, attributed to what could not be done.
  *
  * Nothing here abbreviates the problem: each error type renders itself and each names the package or
@@ -98,15 +209,45 @@ def usage: List[String] =
    singleton("usage: eliot <verb> <configuration>") ++
       singleton("   " ++ resolveVerb ++ "   the version selected for each package of the configuration") ++
       singleton("   " ++ rootsVerb ++ "     the source directories the configuration compiles from") ++
+      singleton("   " ++ buildVerb ++ "     compile those directories with the toolchain they select") ++
       singleton("   <configuration>   'test', or the name of an artifact declared in " ++ descriptorFileName)
 
+private def parameterOf(key: String, configuration: Configuration, descriptor: Descriptor): Option[String] =
+   foldOption(
+      None,
+      backend -> backend.backendParameters.lookupOption(key),
+      configuredBackend(configuration, descriptor)
+   )
+
+private def moduleArguments(module: Option[String]): List[String] =
+   foldOption(noArguments, name -> command("-m").withArgument(name), module)
+
+private def noArguments: List[String] = empty
+
+/**
+ * Written with `fold` rather than as the `if..else..else None` chain it obviously is, and the reason is
+ * a compiler finding rather than a preference: a complete `if..else` discharges an `Abort`, and
+ * `runAbort[Option[Request]]` erases to the same JVM descriptor as the `runAbort[Option[String]]` that
+ * `eliot.system.Environment` needs to read a variable. Two instantiations, one emitted native
+ * (`docs/effectful-modules.md` §11.3) — and what died was reading `ELIOT_JAVA`, in a module that never
+ * mentions one. `fold` introduces no `Abort`, so there is nothing to collide. Undo this once the
+ * compiler emits both.
+ */
 private def verbRequest(verb: String, configuration: Configuration): Option[Request] =
-   if(verb == resolveVerb) Some(Resolve(configuration))
-      else if(verb == rootsVerb) Some(Roots(configuration))
-      else None
+   fold(
+      verb == resolveVerb,
+      Some(Resolve(configuration)),
+      fold(
+         verb == rootsVerb,
+         Some(Roots(configuration)),
+         fold(verb == buildVerb, Some(Build(configuration)), None)
+      )
+   )
 
 private def resolveVerb: String = "resolve"
 
 private def rootsVerb: String = "roots"
+
+private def buildVerb: String = "build"
 
 private def selectionLine(selection: Selection): String = "   " ++ show(selection)

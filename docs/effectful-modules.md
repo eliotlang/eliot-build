@@ -954,3 +954,85 @@ publisher keeps, not a check a consumer runs. So the promise is written down and
 where an asset hash belongs was never in doubt: `eliot.lock`, tool-written, recorded on first fetch,
 beside every other one. The lesson is the doc's own subject in a different medium — a machine's fact
 had been put in a file a person maintains, and everything awkward downstream followed from that.
+
+## 17. Revisited, 2026-09-15 — the verb that compiles, and what it cost in workarounds
+
+Same compiler and framework as §16, plus one standard-library member: `eliot.system.Process` grew
+`registerExitCode`, which is §16's "one effect the platform does not have" answered, and answered the
+shape §16 guessed at rather than the `def exit(code: Int): A` it worried about. It *registers* — the
+code is stashed and the program carries straight on, the entry point reads it after `main` returns — so
+there is no uncatchable jump, nothing in flight is cut short, and the decision can sit where it is made
+while the summary below it still runs. 237 cases green, 31 of them new.
+
+**The tool builds now, and the thing that unblocked it was somebody else's CI.** eliot `v0.1` publishes
+one release asset per module that ships a compiler plugin, which is what the `plugin` clauses tagged in
+§16 had been describing to nobody. `eliot build <configuration>` is the verb that consumes them:
+resolve the closure once, read it twice — `Assembly` for the source roots, `Toolchain` for which asset
+is the compiler and which word calls the backend — fetch each asset, and spawn the compiler over both
+lists. Verified end to end in `../eliot-test`: three assets downloaded from GitHub, unpacked, and the
+framework's own 96 cases compiled into a runnable jar by a toolchain nothing configured.
+
+**A sixth package, and the boundary it drew is the interesting part.** `assets/` is `Assets` (an effect
+with one member, `assetTree(asset)`) and `ShellAssets` (curl, wget, unzip). It sits *below* `resolve`,
+not above it, and that is not where a first sketch would have put it: fetching an asset is obviously
+something a build does after resolving, so the package looked like it belonged with `assemble`. What
+decided it was the question the effect actually asks — an `Asset` is a repository, a version and a file
+name, and nothing about a closure. So the module that *chooses* assets is in `assemble` and the module
+that *gets* one knows only the triple, which is the same cut `git` already has against `resolve` and
+for the same reason. The one import upwards it does not make is the proof: `assets` names no
+`Selection`, no `Resolution` and no `Descriptor`.
+
+**It spawns rather than speaks HTTP, and that is a statement about the standard library rather than a
+stopgap.** Nothing in `eliot.system` opens a socket or reads a zip, so a download is `curl` and an
+unpacking is `unzip` — programs the machine has, exactly as `git` is. The wrapper already requires one
+of curl or wget to bootstrap at all, so `ShellAssets` asks for them in that order, and the fallback is
+specifically on curl failing to *start*: a downloader that ran and refused has read the server's answer,
+and retrying that with a second tool turns one honest report into two confusing ones. That decision is
+the one behaviour the suite cannot cover — a double that never spawns anything never fails to start
+anything.
+
+**Two errors that no descriptor reader could ever catch.** `ToolchainError` says a closure ships no
+compiler, two compilers, no backend or two backends. Every one of those is a fact about a *resolution*:
+each descriptor is read alone, and a second package claiming `compiler` is invisible until the whole
+closure is in view. So they are raised where that view first exists, which is also where
+`docs/build-system.md`'s Q1 and Q3 stop being questions — the provider's `backend <word>` is what makes
+a plugin a candidate, so `lang` and `stdlib` stop counting and "exactly one candidate" becomes true of
+every closure anybody has written.
+
+**Three compiler workarounds, all of them one bug wearing different hats**, and they cost more of this
+change than the design did. §11.3's finding — two monomorphized instantiations whose erased JVM
+descriptors agree get one native emitted between them — was hit twice more, and a third gap sits beside
+it:
+
+- `List[Pair[Asset, Plugin]]` died at run time on a missing
+  `foldLeft$Pair$Asset$Plugin$List$Pair$Asset$Plugin`. Fixed by replacing the pairs with named records
+  (`Shipped`, `Backing`), which is better code anyway and was the right shape to begin with — a pair
+  whose halves both need explaining is a record that has not been written yet.
+- Passing the data constructor `TwoCompilers` as a curried function value died on
+  `NoSuchMethodError: TwoCompilers()`. A constructor is a value in this language and is not emitted as
+  one; an explicit `one -> other -> TwoCompilers(one, other)` is the same thing spelled out.
+- `environmentVariable("ELIOT_JAVA") orElse "java"` died inside the *standard library's* own
+  `valueOrNone`, on a missing `runAbort$Option$String`. The colliding instantiation was
+  `runAbort[Option[Request]]`, emitted by `Command.verbRequest`'s `if..else..else None` — a complete
+  `if..else` discharges an `Abort`, and the two erase identically. Rewriting that one function with
+  `fold`, which introduces no `Abort`, made the launcher able to read an environment variable again.
+
+The third is the one worth staring at. A chain of `if..else` in one module silently deleted a standard
+library function's implementation from another, and what the program did was crash in code neither
+module's author wrote. Nothing about the failure points at the collision, and nothing about either site
+looks wrong. Whatever the fix in the compiler is, this is the argument for it.
+
+**`eliotw` learned exactly one new thing**, and it is the thing §16's rule predicts: `ELIOT_JAVA`, the
+JVM it already picked. The wrapper honours `JAVA_HOME` and refuses a broken one; a build that then
+compiled on whatever `java` means on the PATH would be a different JVM than the user pointed at,
+silently, and only for half the work. The launcher cannot find this out — there is nothing above it to
+ask — so the wrapper exports it, which is what "what it cannot do its job without" means applied in the
+other direction.
+
+**And §16's open finding is closed.** Every one of the six failure channels now registers a non-zero
+exit code before it reports, and so does the usage a command line the tool does not offer gets. `eliot
+build test && …` means what a shell reads it as, a failing compile exits 1 with the compiler's own
+diagnostics on the terminal, and the streams are inherited rather than captured because a compiler's
+output is for the person who ran it. What is *not* closed is dogfooding: `src` performs
+`registerExitCode`, which `v0.1`'s standard library does not have, so this package still cannot be
+compiled by a toolchain it selects. That needs a tag, not a change.

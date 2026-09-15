@@ -5,6 +5,7 @@ import eliot.test.Test
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Lineage
+import eliot.build.model.Descriptor
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
 import eliot.build.Command
@@ -24,8 +25,11 @@ def testCases: Test = {
    "requested" should "read the test scope by the word that spells it" in {
       described(requested(commandLine("resolve", "test"))) shouldBe "resolve test scope"
    }
-   "requested" should "tell the two verbs apart, and the configuration is the same argument" in {
+   "requested" should "tell the verbs apart, and the configuration is the same argument" in {
       described(requested(commandLine("roots", "test"))) shouldBe "roots test scope"
+   }
+   "requested" should "read the verb that actually compiles" in {
+      described(requested(commandLine("build", "controller-jvm"))) shouldBe "build artifact controller-jvm"
    }
    "requested" should "ask for nothing where the verb is not one the tool offers" in {
       described(requested(commandLine("fetch", "test"))) shouldBe "<none>"
@@ -65,6 +69,41 @@ def testCases: Test = {
       joined("/", reportRoots(empty)) shouldBe ""
    }
 
+   "compilerCommand" should "put -m between the artifact kind and the first source root" in {
+      joined(" ", compilerCommand(compilationOf(Some("eliot.test.Runner")))) shouldBe expectedCompilerCommand
+   }
+   "compilerCommand" should "leave -m out for an artifact that names no main module" in {
+      joined(" ", compilerCommand(compilationOf(None))) shouldBe expectedMainlessCommand
+   }
+   "compilerCommand" should "run the java it was given rather than one it decided" in {
+      joined(" ", compilerCommand(compilationOf(None))).startsWith("/opt/jdk/bin/java -cp").shouldBeTrue
+   }
+
+   "classpathOf" should "name each unpacked asset by a wildcard the jvm expands itself" in {
+      classpathOf(append(singleton(path("/cache/assets/a")), path("/cache/assets/b")))
+         shouldBe "/cache/assets/a/*:/cache/assets/b/*"
+   }
+   "classpathOf" should "answer nothing for a toolchain of no assets at all" in {
+      classpathOf(empty) shouldBe ""
+   }
+
+   "compiledMain" should "name the framework's runner for the test scope, which is nobody's descriptor to state" in {
+      describedMain(TestScope, emptyDescriptor) shouldBe "eliot.test.Runner"
+   }
+   "compiledMain" should "read an artifact's own main out of its backend block" in {
+      describedMain(ArtifactNamed("app"), withArtifact("main", "eliot.demo.App")) shouldBe "eliot.demo.App"
+   }
+   "compiledMain" should "answer absent for an artifact that names none" in {
+      describedMain(ArtifactNamed("app"), withArtifact("kind", "apidoc")) shouldBe "<none>"
+   }
+
+   "compiledKind" should "produce a runnable jar where nothing says otherwise" in {
+      compiledKind(TestScope, emptyDescriptor) shouldBe "exe-jar"
+   }
+   "compiledKind" should "produce what an artifact's backend block asked for" in {
+      compiledKind(ArtifactNamed("app"), withArtifact("kind", "apidoc")) shouldBe "apidoc"
+   }
+
    "failed" should "attribute the failure to what could not be done" in {
       joined("/", failed("git refused", "no such repository")) shouldBe "eliot: git refused: no such repository"
    }
@@ -78,7 +117,49 @@ private def expectedUsage: String =
    "usage: eliot <verb> <configuration>/" ++
       "   resolve   the version selected for each package of the configuration/" ++
       "   roots     the source directories the configuration compiles from/" ++
+      "   build     compile those directories with the toolchain they select/" ++
       "   <configuration>   'test', or the name of an artifact declared in eliot.pkg"
+
+/**
+ * The order is the compiler's own argument parser's: `-m` after the kind and before the first
+ * positional root, because the kind opens a subcommand scope that the first root closes.
+ */
+private def expectedCompilerCommand: String =
+   "/opt/jdk/bin/java -cp /cache/assets/eliot-compiler.zip/* " ++
+      "com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner " ++
+      "/project/src /project/test -o /project/target"
+
+private def expectedMainlessCommand: String =
+   "/opt/jdk/bin/java -cp /cache/assets/eliot-compiler.zip/* " ++
+      "com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar " ++
+      "/project/src /project/test -o /project/target"
+
+private def describedMain(configuration: Configuration, descriptor: Descriptor): String =
+   compiledMain(configuration, descriptor) orElse "<none>"
+
+private def compilationOf(main: Option[String]): Compilation =
+   Compilation(
+      "/opt/jdk/bin/java",
+      singleton(path("/cache/assets/eliot-compiler.zip")),
+      "jvm",
+      "exe-jar",
+      main,
+      append(singleton(path("/project/src")), path("/project/test")),
+      path("/project/target")
+   )
+
+/**
+ * A descriptor declaring one artifact whose backend carries one parameter — built rather than parsed,
+ * because what a `backend` block *spells* is `eliot.build.format.PackageFile`'s subject and nothing
+ * here is about it.
+ */
+private def withArtifact(key: String, value: String): Descriptor =
+   Descriptor(
+      empty,
+      empty,
+      empty,
+      singleton(Artifact("app", empty, Some(Backend(None, singleton(Pair(key, value))))))
+   )
 
 /**
  * `Show[Configuration]` renders `TestScope` and an artifact named "test" identically — they are one
@@ -91,6 +172,7 @@ private def described(request: Option[Request]): String =
 private def describe(request: Request): String = request match {
    case Resolve(configuration) -> "resolve " ++ describeConfiguration(configuration)
    case Roots(configuration)   -> "roots " ++ describeConfiguration(configuration)
+   case Build(configuration)   -> "build " ++ describeConfiguration(configuration)
 }
 
 private def describeConfiguration(configuration: Configuration): String = configuration match {

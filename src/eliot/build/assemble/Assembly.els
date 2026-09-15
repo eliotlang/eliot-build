@@ -59,8 +59,19 @@ def sourceRoots(
    configuration: Configuration,
    project: Project
 ): {PackageSource, Throw[ResolutionError]} List[Path] =
-   projectRoots(configuration, project) ++
-      resolve(configuration, project.projectDescriptor).selections.flatMap(mountedRoots)
+   rootsOf(configuration, project, resolve(configuration, project.projectDescriptor))
+
+/**
+ * `sourceRoots` against a closure somebody else already computed — what a caller wanting the
+ * *toolchain* as well as the roots uses, since both are readings of one resolution and resolving twice
+ * would be two closures that merely ought to agree.
+ */
+def rootsOf(
+   configuration: Configuration,
+   project: Project,
+   resolution: Resolution
+): {PackageSource, Throw[ResolutionError]} List[Path] =
+   projectRoots(configuration, project) ++ resolution.selections.flatMap(mountedRoots)
 
 /**
  * The roots of the package being built: `src/` of each of its modules, plus `test/` of each when the

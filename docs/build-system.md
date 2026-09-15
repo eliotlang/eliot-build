@@ -15,8 +15,10 @@ is reached through dependency-only modules** — a platform package is already a
 test side gets one, and a user's descriptor is two lines that `eliot init` writes ("What a user
 writes", below); Q1 is decided by it. Amended 2026-09-14: a tag push publishes its own plugin assets, so
 a release carries the sources and the compiler binaries built from them (below, "Compiler plugins").
+Amended 2026-09-15: **the verb that compiles exists** — `eliot build` fetches those assets and runs the
+compiler with them, and Q4 is decided the way it leaned.
 
-**Where the implementation stands** (2026-09-13, 202 tests):
+**Where the implementation stands** (2026-09-15, 237 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -29,9 +31,12 @@ a release carries the sources and the compiler binaries built from them (below, 
 | `Cache` | bare mirrors per package; tags, anchors, descriptors out of them | done |
 | `PackageSource` | the resolver's two questions, and the git-backed answer to them | done |
 | `Assembly` | a resolution and the standard layout become source roots | done |
-| `Launcher` | the `main`, the composition, the failure channels | two verbs: `resolve`, `roots` |
+| `Assets` | a release asset's location, and getting one onto disk | done |
+| `Toolchain` | which asset is the compiler, which word calls the backend | done |
+| `Launcher` | the `main`, the composition, the failure channels | three verbs: `resolve`, `roots`, `build` |
 | `Command` | what a command line asks for, what a resolution reads as | done for those verbs |
-| — | lockfile, spawning the compiler, the rest of the verb set, wrapper | not started |
+| `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
+| — | lockfile, the rest of the verb set | not started |
 
 **There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
 the descriptor where the user is standing, closes that configuration over the graph and prints what was
@@ -54,11 +59,19 @@ verbatim they build that project and its 96 cases pass. Nobody typed a path. Tha
 materialisation problem decided (`git worktree`) and the project-model query in everything but its
 JSON.
 
-What is still missing is the rest of a build. Nothing records what it resolved, so there is no
-lockfile. Nothing *spawns* the compiler — the roots are printed for a caller to pass on, because the
-plugin jars an artifact's `backend` would name are still unpublished (see "Compiler plugins"), so the
-verb that compiles has nothing to fetch yet. The compat-check verb and the plugin-jar closure are
-unstarted.
+**And as of 2026-09-15 it compiles.** `eliot build <configuration>` resolves the closure once and reads
+it twice — the source roots from `Assembly`, the toolchain from `Toolchain` — fetches every release
+asset the selected versions' `plugin` clauses name, and spawns the compiler over both lists, inheriting
+its streams and registering its exit code as the tool's own. Run in `../eliot-test` against a deleted
+`target/`, it clones the eliot mirror, checks `v0.1` out, downloads `eliot-compiler.zip`,
+`eliot-stdlib.zip` and `eliot-jvm.zip` from that tag's release, unpacks them, and produces a
+`Runner.jar` whose 96 cases pass. Nobody typed a path, a coordinate or a compiler version: the tag a
+`dep` line selected decided the sources *and* the binaries that compiled them.
+
+What is still missing: nothing records what it resolved, so there is no lockfile and no hash is ever
+checked (the design already says where both go). The verb set is three of its eventual size — no
+`test`, `run`, `get`, `init` or compat check — and the tool cannot yet build *itself*, because the
+launcher performs a standard-library member published after `v0.1` was tagged.
 
 ## What a user writes
 
@@ -523,7 +536,9 @@ plugin-shipping package's descriptor names the binary it ships. **Amended 2026-0
 release asset attached to the package's own tag, not a Maven coordinate.** What the descriptor carries
 is an asset *name* — no coordinate, no version, no URL, no transitive closure. **Tagged 2026-09-14**:
 the eliot repository's `v0.1` carries exactly the clauses below, one asset per module, and a consumer
-resolving that tag reads them.
+resolving that tag reads them. **Published and consumed 2026-09-15**: a tag-push workflow attaches the
+three assets to the release, and `eliot build <configuration>` fetches them and runs the compiler with
+them — end to end, from a `dep` line to a jar, with nothing about a toolchain configured anywhere.
 
 ```
 module lang {
@@ -588,6 +603,12 @@ does. Sources and binary cannot skew because they are the same tag.
   differ, so the eliot repository's split at `v0.1` is three statements — `eliot-compiler.zip` is
   eliotc's jar and lang's plus the fourteen third-party jars every module shares, `eliot-stdlib.zip` is
   one jar (every dependency it has is already in the base), and `eliot-jvm.zip` is one jar plus ASM.
+- **The consumer's side is `eliot.build.assets`**, which is one effect with one member: an `Asset` is a
+  repository, a version and a file name, and `assetTree` answers where its contents are on disk. The
+  implementation downloads with `curl` (or `wget`, where curl is not installed) and unpacks with
+  `unzip`, because nothing in `eliot.system` opens a socket or reads a zip — the same reason `git` is a
+  program this tool spawns rather than a library it carries. What is cached is the unpacked directory,
+  at `<cache>/assets/<url>@<tag>/<asset>`, beside the mirrors and keyed the same way.
 - **`ide/lsp/package.sh` is not the release mechanism**, though an earlier draft of this section implied
   it was. It is the *proof of shape*: it has assembled unmerged per-module jars since before this design
   existed, for the same `META-INF/services` reason. What it builds, though, is a runnable LSP server —
@@ -706,8 +727,12 @@ not in the project being built. Options: hard-code `eliot.test.Runner` in the te
 framework declare it (a `runner` clause, or an artifact consumers inherit); or make the project state it,
 which puts a dependency's internals in every consumer's descriptor.
 
-*Leaning: hard-code it now, as one named constant with the reason attached, and move it to a framework
-declaration when a second framework exists to justify the clause.* The framework is a module of the
+*Decided as the leaning said* (2026-09-15): `eliot.build.Command.testRunnerModule` is that constant,
+and the test scope is the one configuration whose `main` the tool supplies rather than reads. An
+artifact's own `main` comes from its `backend` block like every other parameter.
+
+*Leaning, as first written: hard-code it now, as one named constant with the reason attached, and move
+it to a framework declaration when a second framework exists to justify the clause.* The framework is a module of the
 toolchain repository now (`//test`, reached through `//jvm-test`), so the constant names something
 that releases with the launcher's own toolchain minimum rather than a foreign package's internals.
 

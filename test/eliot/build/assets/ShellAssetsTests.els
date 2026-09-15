@@ -1,0 +1,117 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.system.Process
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.test.Mock
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.assets.Assets
+import eliot.build.assets.ShellAssets
+
+/**
+ * Going and getting a release asset, with the network faked: what is downloaded, where it is unpacked,
+ * what is left behind, and which refusals are raised rather than answered.
+ *
+ * `shellAssets` is bound by a `with` written inside `mocked`'s body so that its clauses' `{Process}`
+ * and `{FileSystem}` resolve to the framework's doubles — which record the command, the directory it
+ * ran in, and every path touched, so a case can say "this was fetched once" and "this was not fetched
+ * at all" about the same code.
+ *
+ * **One behaviour is not covered and cannot be, here.** Falling back to `wget` happens when `curl`
+ * fails to *start*, and a double that never spawns anything never fails to start anything; the mock
+ * has no way to arrange it. What is covered is the decision that matters — a downloader that *ran* and
+ * refused is an `AssetError` rather than a reason to try the other one.
+ */
+def testCases: Test = {
+   "assetTree" should "download the asset from the tag the consumer already selected" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wasCalledOnce(expectedDownload)
+   }
+   "assetTree" should "unpack it into a directory named for the asset, beside the mirrors" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wasCalledOnce(expectedUnpacking)
+   }
+   "assetTree" should "answer the directory the jars were unpacked into" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
+   }
+   "assetTree" should "delete the archive, which nothing reads once it is unpacked" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wasCalledOnce("delete " ++ expectedTree ++ ".download")
+   }
+   "assetTree" should "make the directory the archive lands in, and let unzip make the one beside it" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wasCalledOnce("createDirectories target/cache/assets/github.com/e/eliot@v1.2")
+   }
+   "assetTree" should "fetch nothing at all for an asset this machine already unpacked" in mocked {
+      withDirectory(path(expectedTree))
+
+      answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
+
+      wasNeverCalled("curl")
+   }
+   "assetTree" should "raise what the downloader said about an asset that is not published" in mocked {
+      whenSpawning("curl", failing(22, "The requested URL returned error: 404"))
+
+      raising[AssetError](expectedRefusal, {
+         answered(rendered(assetTree(jvmAsset)) with shellAssets)
+         unit
+      })
+   }
+   "assetTree" should "raise what unzip said about an archive it could not open" in mocked {
+      whenSpawning("unzip", failing(9, "cannot find zipfile directory"))
+
+      raising[AssetError](expectedUnpackingRefusal, {
+         answered(rendered(assetTree(jvmAsset)) with shellAssets)
+         unit
+      })
+   }
+
+   "assetUrlOf" should "hang the asset off the repository's own releases, at its own tag" in {
+      assetUrlOf(jvmAsset) shouldBe "https://github.com/e/eliot/releases/download/v1.2/eliot-jvm.zip"
+   }
+
+   "assetDirectory" should "key an asset by repository, version and name, so ls says which is which" in {
+      show(assetDirectory(path("/cache"), jvmAsset))
+         shouldBe "/cache/assets/github.com/e/eliot@v1.2/eliot-jvm.zip"
+   }
+}
+
+private def jvmAsset: Asset =
+   Asset(repositoryAt("github.com/e/eliot"), Version(Line(1), Some(2)), "eliot-jvm.zip")
+
+private def expectedTree: String = "target/cache/assets/github.com/e/eliot@v1.2/eliot-jvm.zip"
+
+private def expectedDownload: String =
+   "curl --fail --location --silent --show-error --output " ++ expectedTree ++ ".download " ++
+      "https://github.com/e/eliot/releases/download/v1.2/eliot-jvm.zip"
+
+private def expectedUnpacking: String =
+   "unzip -q -o " ++ expectedTree ++ ".download -d " ++ expectedTree
+
+private def expectedRefusal: String =
+   "'" ++ expectedDownload ++ "' failed with exit code 22: The requested URL returned error: 404"
+
+private def expectedUnpackingRefusal: String =
+   "'" ++ expectedUnpacking ++ "' failed with exit code 9: cannot find zipfile directory"
+
+/**
+ * Rendered *inside* the `provide` rather than after it, for the reason `GitPackagesTests` records: two
+ * `provide[Path, _]` instantiations whose erased JVM descriptors agree get one native between them, and
+ * a `String` result is the one every suite here already uses.
+ */
+private def rendered(tree: Path): String = show(tree)
+
+/**
+ * The one thing the bound implementation asks for rather than takes: the root it caches under. A named
+ * implementation closes over nothing, so the cache root is an effect it reads and this is where the
+ * test answers it.
+ */
+private def answered(computation: {Dep[Path]} String): String = provide[Path, String](cacheRoot, computation)
+
+private def cacheRoot: Path = path("target/cache")

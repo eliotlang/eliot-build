@@ -115,6 +115,13 @@ if [ ! -f "$launcherJar" ]; then
    mv "$partialJar" "$launcherJar"
 fi
 
+# The JVM this script picked, handed on to the launcher, which spawns a compiler on one. This is the
+# whole of what the wrapper tells the tool about the machine, and it is here for the same reason
+# everything else is: the launcher cannot find it out. Honouring JAVA_HOME is a decision made above,
+# once, and a build that then compiled on whatever `java` happens to mean on the PATH would be a
+# different JVM than the one the user pointed at — silently, and only for half the work.
+export ELIOT_JAVA="$java"
+
 # ELIOT_OPTS is the way to reach the JVM the launcher runs on — heap, a proxy, an --add-opens. Split
 # on whitespace and not otherwise quoted, which is the honest limit of doing this in a shell: an
 # option carrying a space in it belongs in a JAVA_TOOL_OPTIONS the JVM parses itself.
