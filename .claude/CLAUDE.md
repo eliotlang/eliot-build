@@ -140,7 +140,7 @@ eliot `v0.2`'s three plugin assets and produces the launcher jar, and that jar b
 suite — 239 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
-compiler (see `eliot.paths` for its location — `/home/robert/personal/eliot`), whose `examples.run`
+compiler (`/home/robert/personal/eliot`), whose `examples.run`
 Mill task auto-appends the `lang`/`stdlib`/`jvm` layer source roots. You pass this project's own
 roots, and the test framework's, as positional arguments:
 
@@ -245,11 +245,21 @@ correct sources is the stale incremental cache — delete `target/.eliot-index-*
 get one native between them and the other dies at run time with `NoSuchMethodError`, so the suites
 render inside every `provide`.
 
-### `eliot.paths` — LSP only
+### `eliot.paths` is gone
 
-`eliot.paths` lists all source roots (this project's `src`/`test` plus the base/stdlib/jvm layer
-roots, and the `compiler`-pool overlays). **Only the IntelliJ LSP reads it** — in the IDE, "Run main"
-on `eliot.test.Runner` builds and runs with no arguments. The compiler CLI ignores `eliot.paths`
-entirely and requires every root as an explicit path argument; the `examples.run` task above supplies
-the layer roots, and you supply `src`/`test`. Keep `eliot.paths` in sync with the CLI invocation if
-you change either.
+It was the stopgap for exactly one thing — telling the IntelliJ LSP where every source root is, in a
+world with no build tool to ask. There is one now: `./eliotw roots test` prints the same list, derived
+from `eliot.pkg` rather than maintained by hand beside it, and a file that has to be kept in sync with
+something that can be computed is a file that is eventually wrong.
+
+The LSP has not learned to ask yet, so until it does it falls back to guessing roots and will not find
+the layers. Regenerating the stopgap is one line if the IDE needs it meanwhile:
+
+```bash
+./eliotw roots test | sed 's/^/runtime /' > eliot.paths
+```
+
+That loses the `compiler` overlay directive, which `eliot roots` deliberately does not print: the
+compile-time overlay is each source root's own sibling and the compiler derives it, so listing it is a
+second place for the two to disagree. `docs/build-system.md` ("IDE integration") is where the query that
+replaces all of this is designed.
