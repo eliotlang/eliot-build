@@ -9,6 +9,13 @@
 # depends on the previous one being able to read this tag's descriptor — which it could not, twice,
 # before this existed. The jar that is attached then has to build the suite itself before it is
 # published (stage 2): what ships is a launcher that is known to build the repository it came from.
+#
+# That is also why a release may be incompatible with the one before it — a new descriptor format, a
+# changed verb — and still be cut: nothing here runs a published launcher, so nothing here has to be
+# able to read this tag.
+#
+# Dispatched with no tag, it is a dry run of the branch it was dispatched on: every step but the
+# publishing one, which is how this workflow is checked without a release to show for it.
 
 name: release
 
@@ -18,8 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: An existing tag to build and publish the launcher for.
-        required: true
+        description: An existing tag to build and publish the launcher for. Empty for a dry run of the branch.
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -28,12 +36,13 @@ jobs:
   launcher:
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      # Empty on a dry run: a dispatch naming no tag.
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || github.ref }}
           # The whole history, so the tag object itself is here to be inspected below.
           fetch-depth: 0
 
@@ -41,6 +50,7 @@ jobs:
       # lightweight tag does not have, so a lightweight tag is a release no package can ever select.
       # Refuse it here rather than letting it fail at whoever depends on it.
       - name: The tag is annotated
+        if: env.TAG != ''
         run: |
           [ "$(git cat-file -t "$TAG")" = tag ] ||
              { echo "::error::$TAG is a lightweight tag; a release must be annotated (git tag -a)."; exit 1; }
@@ -110,6 +120,7 @@ jobs:
       # for repeating a run that failed partway; it is not a way to replace an asset somebody may
       # already have fetched, which is what the promise above rules out and a new tag is for.
       - name: The release
+        if: env.TAG != ''
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
              gh release edit "$TAG" --notes-file out/notes.md
