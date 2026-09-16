@@ -188,7 +188,7 @@ release anyone depends on, so the reader for them was deleted rather than kept. 
 dependencies is that their tags are spelled the current way, which is why this repository requires
 eliot `v0.4` and eliot-test `v0.2`, the first tags of each with `asset` clauses and `compiler` lines
 (and eliot's the first compiler with the `run` mode and a default backend). A launcher older than
-`v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16) and pinned.
+`v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16); `v0.4` is pinned.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
@@ -222,10 +222,9 @@ package root is `test/`.
 
 There are two ways in. `./eliotw <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. **The pinned launcher (`v0.3`) predates the verbless
-command line** and still wants `./eliotw build test` (and still has `resolve` and `roots`); from the
-first release after it, the spelling is `./eliotw test`. Either way, in a checkout holding nothing but
-the wrapper it builds and runs this project's suite. It still runs the *published* launcher and never your
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.4`) is the first with the
+verbless command line, so `./eliotw test` in a checkout holding nothing but the wrapper builds and runs
+this project's suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
 which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
@@ -274,14 +273,15 @@ resolves, checks out and builds exactly as it will against GitHub. `./bootstrap`
 a tag GitHub does not.
 
 The older half of the check is what to fall back on when the build itself is what is suspect, and it
-now needs the *published* `v0.3` launcher, the last with `roots` (`./eliotw roots test`, while the pin
-is `v0.3`): `roots` prints the compiler's argument list, and passing those lines to `Main` by hand
-builds the same jar. Once the pin moves past `v0.3` this fallback is gone until the project-model query
-exists. It cannot go through `examples.run`, which always appends the checkout's own layer roots
+needs the *published* `v0.3` launcher, the last with `roots` — no longer the pin, so fetch it by hand
+(`~/.cache/eliot/launcher/v0.3/eliot-launcher.jar` once any wrapper has run it, or the `v0.3` release
+asset); it reads this descriptor. `roots` prints the compiler's argument list, and passing those lines
+to `Main` by hand builds the same jar. When the descriptor format next changes this fallback is gone
+until the project-model query exists. It cannot go through `examples.run`, which always appends the checkout's own layer roots
 and would mount each layer twice — drive `Main` directly with that task's classpath instead:
 
 ```bash
-ROOTS=$(./eliotw roots test)                  # the pinned v0.3 launcher; the working tree's has no roots
+ROOTS=$(java -jar ~/.cache/eliot/launcher/v0.3/eliot-launcher.jar roots test)   # v0.3, the last with roots
 CP=$(cd /home/robert/personal/eliot && ./mill show examples.runClasspath | python3 -c \
    'import sys,json,re; print(":".join(re.sub(r"^.*?@","",x) for x in json.load(sys.stdin)))')
 java -cp "$CP" com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner \
@@ -318,15 +318,15 @@ render inside every `provide`.
 It was the stopgap for exactly one thing — telling the IntelliJ LSP where every source root is, in a
 world with no build tool to ask. `./eliotw roots test` printed the same list, derived from `eliot.pkg`
 rather than maintained by hand beside it, and a file that has to be kept in sync with something that
-can be computed is a file that is eventually wrong. `roots` was removed on 2026-09-16 and only the
-pinned `v0.3` launcher still has it.
+can be computed is a file that is eventually wrong. `roots` was removed on 2026-09-16 (launcher
+`v0.4`); only the `v0.3` launcher still has it.
 
 The LSP has not learned to ask yet, so until it does it falls back to guessing roots and will not find
-the layers. Regenerating the stopgap is one line if the IDE needs it meanwhile, as long as the pin
-is `v0.3`:
+the layers. Regenerating the stopgap is one line with the `v0.3` launcher if the IDE needs it
+meanwhile:
 
 ```bash
-./eliotw roots test | sed 's/^/runtime /' > eliot.paths
+java -jar ~/.cache/eliot/launcher/v0.3/eliot-launcher.jar roots test | sed 's/^/runtime /' > eliot.paths
 ```
 
 That loses the `compiler` overlay directive, which `eliot roots` deliberately does not print: the
