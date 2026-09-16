@@ -120,8 +120,9 @@ if [ ! -f "$stage0Jar" ] || [ "$(cat "$stampFile" 2> /dev/null)" != "$stamp" ]; 
    mkdir -p "$stage0Directory"
    rm -f "$stampFile"
    echo "bootstrap: compiling the launcher from this working tree with eliot $eliotTag" >&2
-   # The argument order is the compiler's own: `-m` straight after the artifact kind, the roots, then
-   # `-o`. `eliot.build.Command.compilerCommand` is where the tool writes the same thing down.
+   # The same invocation `eliot.pkg`'s `launcher` package writes as its `compiler` line, with the backend
+   # named: the mode and `-m` first, the roots, then `-o`. `eliot.build.Command.compilerCommand` is
+   # where the tool writes the same order down.
    # shellcheck disable=SC2086
    "$java" -cp "$classpath" "$compilerMainClass" jvm exe-jar -m "$launcherModule" \
       $roots -o "$stage0Directory" ||

@@ -29,24 +29,18 @@ jobs:
           key: packages-${{ hashFiles('eliot.pkg') }}
           restore-keys: packages-
 
-      # Grepping rather than trusting the runner's exit code, which it does not register yet.
+      # `build test` compiles the suite and runs it (`eliot-test//suite`'s `compiler run` line), and
+      # exits with the runner's code, so a failing case fails the step.
       - name: Stage 1 builds a green suite
-        run: |
-          mkdir -p out
-          ./bootstrap build test
-          java -jar target/Runner.jar | tee out/stage1.log
-          grep -q "all clear" out/stage1.log ||
-             { echo "::error::the suite is not green"; exit 1; }
+        run: ./bootstrap build test
 
       - name: Stage 1 builds the launcher
         run: |
           ./bootstrap build launcher
+          mkdir -p out
           cp target/Launcher.jar out/Launcher.jar
 
       - name: Stage 2 builds a green suite
         run: |
           rm -f target/Runner.jar
           java -jar out/Launcher.jar build test
-          java -jar target/Runner.jar | tee out/stage2.log
-          grep -q "all clear" out/stage2.log ||
-             { echo "::error::the launcher stage 1 built does not build a green suite"; exit 1; }

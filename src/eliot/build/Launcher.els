@@ -14,7 +14,7 @@ import eliot.build.model.PackageId
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.GitPackages
 import eliot.build.assemble.Assembly
-import eliot.build.assemble.Toolchain
+import eliot.build.assemble.Invocation
 import eliot.build.Command
 
 /**
@@ -43,15 +43,15 @@ import eliot.build.Command
  * with the answer. `eliot resolve <configuration>` prints what was selected. `eliot roots
  * <configuration>` checks each selected version out and prints the source directories that
  * configuration compiles from. `eliot build <configuration>` fetches the plugin assets those same
- * versions ship and runs the compiler over those same roots — which is the point the tool stops
- * describing a build and performs one. The lockfile the resolution deserves and the rest of the verb
+ * versions ship and runs the compiler over those same roots once per `compiler` line in the closure —
+ * which is the point the tool stops describing a build and performs one. The lockfile the resolution deserves and the rest of the verb
  * set are the steps after these.
  *
  * **What a build reports is the compiler's own output and the compiler's own exit code.** The
  * subprocess inherits this program's streams rather than being captured, because a compiler's
  * diagnostics are for the person who ran it and buffering them to re-print would only make them late;
- * and its code is registered as this program's, so `eliot build test && …` means what a shell reads it
- * as. That is `docs/effectful-modules.md` §16's one missing platform effect, which the standard
+ * and the first code that is not zero is registered as this program's, so `eliot build test && …`
+ * means what a shell reads it as — and a suite whose line runs it fails the build it is in. That is `docs/effectful-modules.md` §16's one missing platform effect, which the standard
  * library grew for this.
  */
 def main: {Console, Environment, FileSystem, Process} Unit =
@@ -98,7 +98,7 @@ private def reporting(lines: List[String]): {Process} List[String] = {
  * **Six channels meet here, and keeping them apart is the point.** A repository git said no to, a
  * release asset that would not download, a machine that will not run a program or make a directory, a
  * descriptor that will not parse, a graph that will not close and a closure that describes nothing
- * runnable are six different things for a user to do something about, so each is discharged separately
+ * to run are six different things for a user to do something about, so each is discharged separately
  * and reports as itself. The design said this boundary would carry four or five; the two the build
  * verb added are both about the half of a dependency that is not sources.
  *
@@ -111,7 +111,7 @@ private def attempted(request: Request, here: Path, java: String): {FileSystem, 
          catch[AssetError, List[String]](
             catch[DescriptorError, List[String]](
                catch[ResolutionError, List[String]](
-                  catch[ToolchainError, List[String]](
+                  catch[InvocationError, List[String]](
                      performed(request, here, java),
                      problem -> reporting(
                         failed("cannot build '" ++ show(requestedPackage(request)) ++ "'", show(problem))
@@ -155,7 +155,7 @@ private def performed(
       java: String
    ): {
       FileSystem, Process, Throw[IoError], Throw[GitError], Throw[AssetError], Throw[DescriptorError],
-      Throw[ResolutionError], Throw[ToolchainError]
+      Throw[ResolutionError], Throw[InvocationError]
    } List[String] = {
    val descriptor = parseDescriptor(readLines(here / descriptorFileName))
 
@@ -179,7 +179,7 @@ private def rendered(
    here: Path,
    java: String
 ): {
-   Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
+   Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError]
 } List[String] = request match {
    case Resolve(name) -> report(name, resolve(name, descriptor))
    case Roots(name)   -> reportRoots(sourceRoots(name, Project(here, descriptor)))
@@ -187,12 +187,15 @@ private def rendered(
 }
 
 /**
- * The build verb: one closure, read twice — once for what to compile and once for what to compile it
- * with — then the assets on disk and the compiler over both.
+ * The build verb: one closure, read twice — once for what to compile and once for what to run over
+ * it — then the assets on disk and the compiler once per line.
  *
  * Twice from *one* resolution, which is why `rootsOf` takes one rather than making its own: the roots
- * and the toolchain are two readings of the same selected versions, and two closures that merely ought
- * to agree would be a build compiling one version's sources with another version's compiler.
+ * and the invocation are two readings of the same selected versions, and two closures that merely
+ * ought to agree would be a build compiling one version's sources with another version's compiler.
+ *
+ * The lines run in order and the first that fails stops the rest; its code is the tool's. No line reads
+ * another's output, so the order is only which failure is reported first.
  *
  * It answers no lines. Everything a build has to say the compiler already said on the streams it
  * inherited, and a summary from the tool would only be a second opinion about work it did not do.
@@ -203,24 +206,28 @@ private def compiled(
       here: Path,
       java: String
    ): {
-      Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[ToolchainError]
+      Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError]
    } List[String] = {
    val resolution = resolve(name, descriptor)
-   val toolchain = toolchainOf(name, descriptor, resolution)
-   val compilation = Compilation(
-      java,
-      toolchain.toolchainAssets.map(assetTree),
-      toolchain.backendWord,
-      defaultArtifactKind,
-      toolchain.toolchainMain,
-      rootsOf(name, Project(here, descriptor), resolution),
-      outputRoot(here)
+   val invocation = invocationOf(name, descriptor, resolution)
+   val classpath = invocation.invocationAssets.map(assetTree)
+   val roots = rootsOf(name, Project(here, descriptor), resolution)
+   val exitCode = invocation.invocationLines.foldLeft(
+      0,
+      line -> code -> ranAfter(code, Compilation(java, classpath, line, roots, outputRoot(here)), here)
    )
 
-   registerExitCode(runInheritingIo(compilerCommand(compilation), here))
+   registerExitCode(exitCode)
 
    empty
 }
+
+/**
+ * One line's compiler, unless an earlier one already failed — in which case that failure is the answer
+ * and nothing more runs.
+ */
+private def ranAfter(previous: Int, compilation: Compilation, here: Path): {Process, Throw[IoError]} Int =
+   if(previous != 0) previous else runInheritingIo(compilerCommand(compilation), here)
 
 /**
  * Where this build caches the repositories it has looked at: under the project, beside everything else

@@ -76,7 +76,7 @@ def testCases: Test = {
       assembled(
          "root",
          rootPackage("dep github.com/e/eliot//apidoc v1.2"),
-         publishing("github.com/e/eliot@v1.2", "package apidoc {\n  plugin eliot-apidoc.zip {\n    backend apidoc\n  }\n}")
+         publishing("github.com/e/eliot@v1.2", "package apidoc {\n  asset eliot-apidoc.zip\n}")
       ) shouldBe "/project/src, /trees/github.com/e/eliot@v1.2/apidoc/src"
    }
    "sourceRoots" should "leave a package nobody selected out of the mount" in {

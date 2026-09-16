@@ -68,11 +68,15 @@ def testCases: Test = {
       joined("/", reportRoots(empty)) shouldBe ""
    }
 
-   "compilerCommand" should "put -m between the artifact kind and the first source root" in {
-      joined(" ", compilerCommand(compilationOf("eliot.test.Runner"))) shouldBe expectedCompilerCommand
+   "compilerCommand" should "put the line's words between the entry point and the first source root" in {
+      joined(" ", compilerCommand(compilationOf("run -m eliot.test.Runner"))) shouldBe expectedCompilerCommand
+   }
+   "compilerCommand" should "pass the line's words through untouched, whatever they say" in {
+      joined(" ", compilerCommand(compilationOf("jvm exe-jar --statistics -m App")))
+         .contains("compiler.Main jvm exe-jar --statistics -m App /project/src").shouldBeTrue
    }
    "compilerCommand" should "run the java it was given rather than one it decided" in {
-      joined(" ", compilerCommand(compilationOf("eliot.demo.App"))).startsWith("/opt/jdk/bin/java -cp")
+      joined(" ", compilerCommand(compilationOf("apidoc"))).startsWith("/opt/jdk/bin/java -cp")
          .shouldBeTrue
    }
 
@@ -82,10 +86,6 @@ def testCases: Test = {
    }
    "classpathOf" should "answer nothing for a toolchain of no assets at all" in {
       classpathOf(empty) shouldBe ""
-   }
-
-   "defaultArtifactKind" should "produce a runnable jar, which is what every backend so far emits" in {
-      defaultArtifactKind shouldBe "exe-jar"
    }
 
    "failed" should "attribute the failure to what could not be done" in {
@@ -101,25 +101,27 @@ private def expectedUsage: String =
    "usage: eliot <verb> <package>/" ++
       "   resolve   the version selected for each dependency of the package/" ++
       "   roots     the source directories the package compiles from/" ++
-      "   build     compile those directories with the toolchain they select/" ++
+      "   build     run every compiler line of the package's closure over them/" ++
       "   <package>   'root', 'test', or any package declared in eliot.pkg"
 
 /**
- * The order is the compiler's own argument parser's: `-m` after the kind and before the first
- * positional root, because the kind opens a subcommand scope that the first root closes.
+ * The order is the compiler's own argument parser's: the line's mode and its `-m` before the first
+ * positional root, because the mode opens a subcommand scope that the first root closes.
  */
 private def expectedCompilerCommand: String =
    "/opt/jdk/bin/java -cp /cache/assets/eliot-compiler.zip/* " ++
-      "com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner " ++
+      "com.vanillasource.eliot.eliotc.compiler.Main run -m eliot.test.Runner " ++
       "/project/src /project/test -o /project/target"
 
-private def compilationOf(main: String): Compilation =
+/**
+ * A compilation running the `compiler` line `line` — its words split at single spaces, the way the
+ * descriptor's reader hands them over.
+ */
+private def compilationOf(line: String): Compilation =
    Compilation(
       "/opt/jdk/bin/java",
       singleton(path("/cache/assets/eliot-compiler.zip")),
-      "jvm",
-      "exe-jar",
-      main,
+      split(" ", line),
       append(singleton(path("/project/src")), path("/project/test")),
       path("/project/target")
    )

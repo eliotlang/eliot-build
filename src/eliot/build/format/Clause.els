@@ -60,9 +60,9 @@ def childrenNamed(name: String, clause: Clause): List[Clause] = clausesNamed(nam
 /**
  * `clause` and its children rendered as an indented block, for diagnostics.
  *
- * Bounded to three levels of nesting — the depth the descriptor grammar actually reaches
- * (`module` › `plugin` › `jar`) — because a renderer that followed the tree to any depth would have
- * to recurse, which user code cannot do. Deeper children are elided rather than silently dropped.
+ * Bounded to three levels of nesting — past the depth the descriptor grammar reaches (`package` › its
+ * clauses) — because a renderer that followed the tree to any depth would have to recurse, which user
+ * code cannot do. Deeper children are elided rather than silently dropped.
  */
 def render(clause: Clause): String = renderTop(clause)
 
@@ -97,9 +97,13 @@ private def stepLine(line: String, state: ClauseState): ClauseState = {
 
 /**
  * Strip the comment and the surrounding blank space; a line with nothing left carries no clause.
+ *
+ * A comment is `--` followed by blank space or the end of the line — the trailing space appended here
+ * is what makes a bare `--` one — so a word that merely *starts* with two dashes is an argument. That
+ * is what lets a `compiler` line pass the compiler a `--flag`.
  */
 private def stepContent(line: String, state: ClauseState): ClauseState = {
-   val content = before("--", line).trim
+   val content = before("-- ", replace("\t", " ", line) ++ " ").trim
 
    fold(content == "", state, stepClause(content, state))
 }

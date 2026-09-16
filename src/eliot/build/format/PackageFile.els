@@ -20,8 +20,8 @@ import eliot.build.model.Descriptor
  * `eliot.build.format.DependencyClause` reads the `dep` line, which every `package` block reads the
  * same way. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
  * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
- * left here is the keywords themselves: `launcher`, `package`, `at`, `internal`, `main`, `plugin`, `compiler`,
- * `backend`, and which part of the model each of them feeds.
+ * left here is the keywords themselves: `launcher`, `package`, `at`, `internal`, `dep`, `compiler`, `asset`,
+ * and which part of the model each of them feeds.
  *
  * **A file is package blocks, and one line that is not about packages at all.** `launcher <tag>` pins
  * the launcher this repository's own developers build with, and `eliotw` is its only reader: it greps
@@ -32,7 +32,7 @@ import eliot.build.model.Descriptor
  * Every package is written out — the one standing at
  * the repository root too, `package root { at . … }` by convention — so a `dep` line has exactly one
  * place it can stand, the block of the package whose sources need it, and the file never carries a
- * clause whose scope a reader has to know. A `dep`, `main` or `plugin` at the top level is refused with
+ * clause whose scope a reader has to know. A `dep`, `compiler` or `asset` at the top level is refused with
  * the spelling it should have had, rather than as an unknown keyword: it is not a clause a newer
  * launcher would know, it is a clause that belongs somewhere. A package exists exactly when a block
  * declares it, and no name is special: `root` is what a package at `.` is usually called, and a
@@ -148,8 +148,8 @@ private def packageOf(clause: Clause): {Throw[ClauseProblem]} BuildPackage = {
       directoryOf(name, clause),
       isEmpty(clause.childrenNamed("internal")),
       dependenciesOf(clause),
-      mainOf(clause),
-      pluginsOf(clause)
+      compilerOf(clause),
+      clause.childrenNamed("asset").map(assetClause)
    )
 }
 
@@ -182,54 +182,43 @@ private def insideRepository(directory: String): Bool =
    !startsWith("/", directory) && !any(segment -> segment == "..", split("/", directory))
 
 /**
- * `main <module>` — the Eliot module holding the entry point, and the only thing a consumer states
- * about producing an executable. Which backend runs, which word it answers to and what it emits are
- * all read off the closure instead, from the packages that know those facts about themselves.
+ * `compiler <words…>` — what a build of any package whose closure holds this one runs: the compiler,
+ * once, with these words where the launcher does not put its own (`docs/build-system.md`, "What a
+ * build runs"). The words are passed through verbatim and interpreted by nobody but the compiler.
  *
- * A package declaring one is runnable; the framework declares its own, which is how a suite gets a
- * command without its author naming anybody's internals.
+ * **One per package.** Two lines in one block would be a task list with the names filed off — it
+ * would need an order, then a way to skip one, then a name to skip it by. A package that wants two
+ * things depends on two packages, and the refusal says so.
  */
-private def mainOf(clause: Clause): {Throw[ClauseProblem]} Option[String] =
-   clause.childrenNamed("main").foldLeft(None, child -> _ -> Some(mainClause(child)))
+private def compilerOf(clause: Clause): {Throw[ClauseProblem]} Option[List[String]] = {
+   val lines = clause.childrenNamed("compiler")
 
-private def mainClause(clause: Clause): {Throw[ClauseProblem]} String = {
-   val module = required(0, "a main needs the module holding it", clause)
-
-   atMostArguments(1, clause)
-   module
+   foldOption(unit, second -> raise(problemIn(oneCompilerLine, second)), lines.at(1))
+   foldOption(None, line -> Some(compilerClause(line)), lines.head)
 }
 
-private def pluginsOf(clause: Clause): {Throw[ClauseProblem]} List[Plugin] =
-   clause.childrenNamed("plugin").map(pluginClause)
-
-/**
- * `plugin <asset> { backend <word> | compiler }` — the name of a release asset of this package, and
- * the provider's two statements about it. No coordinate, no version, no URL and no hash: the asset
- * hangs off this repository at the tag the consumer already selected, and what a fetch of it is
- * *worth* is the lockfile's to record, since the asset is built after the tag exists.
- */
-private def pluginClause(clause: Clause): {Throw[ClauseProblem]} Plugin = {
-   val asset = required(0, "a plugin needs a release asset name", clause)
-
-   atMostArguments(1, clause)
-   knownChildren(pluginKeywords, clause)
-   Plugin(asset, backendWordOf(clause), !isEmpty(clause.childrenNamed("compiler")))
+private def compilerClause(clause: Clause): {Throw[ClauseProblem]} List[String] = {
+   required(0, "a compiler line needs the words it passes to the compiler", clause)
+   knownChildren(empty, clause)
+   clause.arguments
 }
 
-/**
- * `backend <word>` — the compiler command word this asset registers, which is what makes it a backend
- * candidate rather than an always-on contributor. The word is the *provider's* and nobody else ever
- * writes it: a consumer names dependencies and an entry point, and the one candidate in the closure
- * is what the backend is.
- */
-private def backendWordOf(clause: Clause): {Throw[ClauseProblem]} Option[String] =
-   clause.childrenNamed("backend").foldLeft(None, child -> _ -> Some(backendWordClause(child)))
+private def oneCompilerLine: String =
+   "a package carries one compiler line; a package that wants two things depends on two packages"
 
-private def backendWordClause(clause: Clause): {Throw[ClauseProblem]} String = {
-   val word = required(0, "a plugin's backend needs the command word it registers", clause)
+/**
+ * `asset <name>` — the name of a release asset of this package. No coordinate, no version, no URL and
+ * no hash: the asset hangs off this repository at the tag the consumer already selected, and what a
+ * fetch of it is *worth* is the lockfile's to record, since the asset is built after the tag exists.
+ * Nor any statement about what the asset is — the compiler tells its plugins apart, the launcher only
+ * puts them all on one classpath.
+ */
+private def assetClause(clause: Clause): {Throw[ClauseProblem]} String = {
+   val asset = required(0, "an asset needs a release asset name", clause)
 
    atMostArguments(1, clause)
-   word
+   knownChildren(empty, clause)
+   asset
 }
 
 /**
@@ -242,8 +231,6 @@ private def descriptorKeywords: List[String] = append(singleton("package"), "lau
  * The clauses that describe a package rather than declare one — what the top level refuses with the
  * block they belong in.
  */
-private def packageClauseKeywords: List[String] = append(append(append(empty, "dep"), "main"), "plugin")
+private def packageClauseKeywords: List[String] = append(append(append(empty, "dep"), "compiler"), "asset")
 
 private def packageKeywords: List[String] = append(append(packageClauseKeywords, "at"), "internal")
-
-private def pluginKeywords: List[String] = append(append(empty, "backend"), "compiler")

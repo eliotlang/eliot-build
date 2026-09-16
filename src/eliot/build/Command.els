@@ -95,66 +95,51 @@ def reportRoots(roots: List[Path]): List[String] = roots.map(show)
 
 /**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
- * plugins were unpacked into, the backend word and the artifact kind that select what it produces, the
- * module holding `main`, the source roots, and where the result goes.
+ * plugins were unpacked into, the words of the `compiler` line being run, the source roots, and where
+ * the result goes.
  *
- * A record rather than seven arguments, because every field here is decided somewhere else — the
- * toolchain says the backend word, the resolution says the roots, the launcher says the JVM — and a
- * record is what lets each of them be filled in by whoever knows it and read back by a test.
+ * A record rather than five arguments, because every field here is decided somewhere else — the
+ * closure says the line and the assets, the resolution says the roots, the launcher says the JVM — and
+ * a record is what lets each of them be filled in by whoever knows it and read back by a test.
  */
 data Compilation(
    javaCommand: String,
    toolchainClasspath: List[Path],
-   backendCommand: String,
-   artifactKind: String,
-   mainModule: String,
+   compilerArguments: List[String],
    compiledRoots: List[Path],
    outputDirectory: Path
 )
 
 /**
- * The compiler, spelled as a command line.
+ * The compiler, spelled as a command line: the launcher's part around the line's part.
  *
- * **The order is the compiler's and it is not negotiable.** `-m` has to come immediately after the
- * artifact kind and before the first source root, because the kind opens a subcommand scope that the
- * first positional argument closes — an `-m` after a root is rejected as an unknown option. `-o`
- * trails. That is a fact about the compiler's own argument parser, and writing it down here, once, is
- * what keeps it out of the boundary.
+ * **The line goes first and is not looked at.** Its words are the package's — `run -m
+ * eliot.test.Runner`, `exe-jar -m eliot.build.Launcher` — and a mode opens a subcommand scope that the
+ * first positional argument closes, so the roots come after every word of the line and `-o` trails.
+ * Nothing in a line is a placeholder: the launcher owns the invocation end to end, and the line is only
+ * the part of it that varies (`docs/build-system.md`, "What a build runs").
  *
  * ```eliot
- * val line = compilerCommand(Compilation("java", plugins, "jvm", "exe-jar", main, roots, target))
+ * val line = compilerCommand(Compilation("java", plugins, split(" ", "run -m Main"), roots, target))
  * ```
  */
 def compilerCommand(compilation: Compilation): List[String] =
    (command(compilation.javaCommand)
       .withArgument("-cp").withArgument(classpathOf(compilation.toolchainClasspath))
-      .withArgument(compilerMainClass)
-      .withArgument(compilation.backendCommand)
-      .withArgument(compilation.artifactKind)
-      .withArgument("-m").withArgument(compilation.mainModule)) ++
+      .withArgument(compilerMainClass)) ++
+      compilation.compilerArguments ++
       compilation.compiledRoots.map(show) ++
       (command("-o").withArgument(show(compilation.outputDirectory)))
 
 /**
  * The compiler's entry point, by name.
  *
- * Transitional, and named here rather than discovered: an asset says it holds the compiler and nothing
- * says which class in it to run, because until the compiler is self-hosted there is exactly one
- * compiler and this is what it is called. When plugins become Eliot source in ordinary packages, this
+ * Transitional, and named here rather than discovered: nothing says which asset holds the compiler or
+ * which class in it to run, because until the compiler is self-hosted there is exactly one compiler and
+ * this is what it is called. When plugins become Eliot source in ordinary packages, this
  * constant retires with the rest of the mechanism.
  */
 def compilerMainClass: String = "com.vanillasource.eliot.eliotc.compiler.Main"
-
-/**
- * What a build produces — a runnable jar, which is what every backend anybody has declared so far
- * emits.
- *
- * Transitional, and the one thing `docs/build-system.md` says should come off the closure that still
- * does not: the kind belongs to the platform package, which would declare it beside the command word
- * its plugin registers. No published tag carries such a clause, so this constant stands in until one
- * does — and no consumer writes a kind either way, which is the half of the design that matters.
- */
-def defaultArtifactKind: String = "exe-jar"
 
 /**
  * A classpath the JVM expands itself: one wildcard entry per unpacked asset, so an asset's jars are
@@ -184,7 +169,7 @@ def usage: List[String] =
    singleton("usage: eliot <verb> <package>") ++
       singleton("   " ++ resolveVerb ++ "   the version selected for each dependency of the package") ++
       singleton("   " ++ rootsVerb ++ "     the source directories the package compiles from") ++
-      singleton("   " ++ buildVerb ++ "     compile those directories with the toolchain they select") ++
+      singleton("   " ++ buildVerb ++ "     run every compiler line of the package's closure over them") ++
       singleton("   <package>   'root', 'test', or any package declared in " ++ descriptorFileName)
 
 /**

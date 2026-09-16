@@ -1,0 +1,117 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Descriptor
+import eliot.build.assets.Assets
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+
+/**
+ * What a resolution says to *run*: every plugin binary that goes on the compiler's classpath, and every
+ * `compiler` line the closure carries.
+ *
+ * This is `eliot.build.assemble.Assembly`'s other half. A resolution is a set of versions; assembly
+ * turns it into the directories a compiler is pointed at, and this turns it into the invocations that
+ * are pointed at them. Both read the same closure and neither knows how a version got there, which is
+ * why they are one package and why both run on `{PackageSource}` alone.
+ *
+ * **There are no roles any more** (`docs/build-system.md`, "What a build runs"). This module used to
+ * be `Toolchain`: it found the asset marked `compiler`, the one answering to a backend word and the one
+ * `main` in the closure, and refused six ways when a closure had none or two of any. Every one of those
+ * questions was the launcher composing a command line out of facts three packages held. A package now
+ * writes its line whole, so what is left is reading: every asset, every line, in canonical order.
+ *
+ * **Every line in the closure runs**, not one per verb and not one per build. That works because each
+ * line is whole — a suite's line compiles *and* runs, a docs line compiles with its own backend — and
+ * no line reads another's output, so the order is only fail-fast preference. The project's own opened
+ * packages come first, then the dependencies in the resolution's order, the same order `Assembly` lists
+ * roots in.
+ *
+ * **A closure with no line is refused**, because a build that runs nothing and exits 0 would read as a
+ * green suite to whoever asked. It is the one refusal here and it is about a graph rather than a file:
+ * a descriptor reader sees one descriptor, and whether *any* package in a closure carries a line is a
+ * question only a resolution can answer.
+ */
+
+/**
+ * Why a resolution describes nothing to run: no package in the closure carries a `compiler` line.
+ */
+data InvocationError = NothingToRun(idlePackage: PackageName)
+
+implement Show[InvocationError] {
+   def show(value: InvocationError): String = value match {
+      case NothingToRun(name) ->
+         "nothing in '" ++ show(name) ++ "' carries a compiler line, so there is nothing to run"
+   }
+}
+
+/**
+ * What building one package runs: the assets every invocation has on its classpath, and the words of
+ * each invocation, in the order they run.
+ *
+ * One classpath for all of them, because the closure is one: a line is a statement about *what to do*
+ * with the compiler the closure selected, never about a compiler of its own.
+ */
+data Invocation(invocationAssets: List[Asset], invocationLines: List[List[String]])
+
+/**
+ * What building `name` runs, given what it resolved to.
+ *
+ * The resolution is passed in rather than computed, because a build wants the roots and the invocation
+ * of *one* closure — resolving twice would be two closures that merely ought to agree.
+ *
+ * The lines are read off one list of packages, the project's and the mounted ones together, rather than
+ * by a second `flatMap` over the pairs: two `flatMap`s over `List[Pair[Selection, BuildPackage]]` with
+ * different result types get one emitted `foldLeft` between them, and the other dies at run time with
+ * `NoSuchMethodError` — the collision `docs/effectful-modules.md` §11.3 records, met again.
+ *
+ * ```eliot
+ * val invocation = invocationOf(name, descriptor, resolve(name, descriptor))
+ * ```
+ */
+def invocationOf(
+      name: PackageName,
+      descriptor: Descriptor,
+      resolution: Resolution
+   ): {PackageSource, Throw[ResolutionError], Throw[InvocationError]} Invocation = {
+   val mounted = resolution.selections.flatMap(mountedBy)
+   val lines = (projectPackages(name, descriptor) ++ mounted.map(second)).flatMap(compilerLine)
+
+   foldOption(raise(NothingToRun(name)), _ -> unit, lines.head)
+   Invocation(mounted.flatMap(assetsOf), lines)
+}
+
+/**
+ * The project's own packages this build opens — the invoked one and the siblings it reaches. Their
+ * lines run; their assets do not exist, since the project has no release to hang one off.
+ */
+private def projectPackages(name: PackageName, descriptor: Descriptor): List[BuildPackage] =
+   foldOption(empty, opened -> opened, configuredPackages(name, descriptor))
+
+/**
+ * The packages one selected dependency mounts, each paired with the selection it was mounted by — a
+ * package says which assets it ships and only the selection says where they come from.
+ *
+ * Of the packages the closure *mounted*, and only those: a package nobody selected ships nothing into
+ * this build and runs nothing in it, exactly as it contributes no sources. A selected version whose
+ * descriptor cannot be read back is `Unavailable` — the resolver's own error, the same fact under a
+ * different verb, which is what `eliot.build.assemble.Assembly` says about the same read.
+ */
+private def mountedBy(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Pair[Selection, BuildPackage]] =
+   foldOption(
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      descriptor -> mountedPackages(selection, descriptor).map(built -> Pair(selection, built)),
+      descriptorAt(selection.selectedVersion, selection.selectedRepository)
+   )
+
+private def mountedPackages(selection: Selection, descriptor: Descriptor): List[BuildPackage] =
+   descriptor.packages.filter(built -> built.exported && mounts(built.packageName, selection))
+
+private def assetsOf(entry: Pair[Selection, BuildPackage]): List[Asset] =
+   entry.second.packageAssets.map(asset ->
+      Asset(entry.first.selectedRepository, entry.first.selectedVersion, asset)
+   )
+
+private def compilerLine(built: BuildPackage): List[List[String]] =
+   foldOption(empty, words -> singleton(words), built.packageCompiler)

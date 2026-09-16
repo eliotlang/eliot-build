@@ -32,30 +32,8 @@ data Dependency =
    Requirement(requiredPackage: Package, minimumVersion: Version)
 
 /**
- * A compiler plugin a package ships: the name of a *release asset* of that package, plus what its
- * consumer's launcher has to know before it can run anything with it.
- *
- * The asset name is the whole location. A release asset hangs off the same repository at the same tag
- * the sources came from, so a consumer that has already chosen a version has already chosen the
- * binary — the URL is one concatenation on facts it holds, nothing in any descriptor changes when a
- * version does, and sources and plugin cannot skew. That is what a Maven coordinate could not do: it
- * gave a plugin a second identity, with a second version number to drift.
- *
- * Both fields are the *provider's* statements about mechanism, which is why they are here rather than
- * in whatever consumes the plugin. `pluginBackend` is the compiler command word the asset registers —
- * present exactly when the plugin is a backend candidate, absent when it is an always-on contributor,
- * which is what stops `lang` and `stdlib` counting as platforms. `compilerBase` marks the one asset
- * holding the compiler itself, which a launcher must know before it can name a `Main` or hang the
- * others off it.
- *
- * No hash, deliberately: an asset is built from the tagged tree *after* the tag exists, so no hash of
- * it can live in the commit that tag names. `eliot.lock` records one on first fetch.
- */
-data Plugin(pluginAsset: String, pluginBackend: Option[String], compilerBase: Bool)
-
-/**
- * A package: a directory of sources, what it compiles against, and an entry point if it is meant to
- * be run.
+ * A package: a directory of sources, what it compiles against, what a build of it runs, and the
+ * compiler plugins it ships.
  *
  * `exported` decides whether anything outside the repository may depend on it; examples, applications
  * and test fixtures are `internal`. It is not about what travels — a package's dependencies travel to
@@ -73,17 +51,26 @@ data Plugin(pluginAsset: String, pluginBackend: Option[String], compilerBase: Bo
  * object database and resolved against a checkout root that this model has never seen. Whoever
  * assembles sources owns that resolution, and owns the platform's path type with it.
  *
- * `packageMain` is the entry point, and the only thing a consumer states about producing an
- * executable. Everything else — which backend, which command word, which kind of artifact — is read
- * off the closure, from the packages that know those facts about themselves.
+ * `packageCompiler` is the package's one `compiler` line: the words a build passes to the compiler,
+ * verbatim, for every package whose closure holds this one (`docs/build-system.md`, "What a build
+ * runs"). A list of words and nothing the launcher interprets — no placeholder, no template — which is
+ * what keeps it inert data. Absent on a package that runs nothing, which is most of them.
+ *
+ * `packageAssets` are the names of the *release assets* of this package — compiler plugins — and the
+ * name is the whole location. A release asset hangs off the same repository at the same tag the
+ * sources came from, so a consumer that has already chosen a version has already chosen the binary,
+ * and sources and plugin cannot skew. Nothing says what an asset *is*: every asset in a closure goes
+ * on the compiler's classpath, and the compiler knows which of its plugins is which. No hash,
+ * deliberately: an asset is built from the tagged tree *after* the tag exists, so no hash of it can
+ * live in the commit that tag names. `eliot.lock` records one on first fetch.
  */
 data BuildPackage(
    packageName: PackageName,
    packageRoot: String,
    exported: Bool,
    packageDependencies: List[Dependency],
-   packageMain: Option[String],
-   packagePlugins: List[Plugin]
+   packageCompiler: Option[List[String]],
+   packageAssets: List[String]
 )
 
 /**

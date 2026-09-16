@@ -12,6 +12,12 @@ def testCases: Test = {
       parsed("-- the language itself\n\ndep github.com/x/foo v1.3  -- pinned low\n")
          shouldBe "dep github.com/x/foo v1.3"
    }
+   "parseClauses" should "keep a word that starts with two dashes, which is an argument and not a comment" in {
+      parsed("compiler run --statistics -m Main -- measured") shouldBe "compiler run --statistics -m Main"
+   }
+   "parseClauses" should "drop a line that is nothing but the comment marker" in {
+      parsed("--\ndep a v1\n   --") shouldBe "dep a v1"
+   }
    "parseClauses" should "collapse runs of whitespace between tokens" in {
       parsed("dep    github.com/x/foo\t v1.3") shouldBe "dep github.com/x/foo v1.3"
    }
@@ -28,8 +34,8 @@ def testCases: Test = {
          shouldBe "package one {\n  dep a v1\n}\npackage two {\n  dep b v2\n}"
    }
    "parseClauses" should "read a block written inline with comma-separated sub-clauses" in {
-      parsed("package app { at app/eliot, main Controller }")
-         shouldBe "package app {\n  at app/eliot\n  main Controller\n}"
+      parsed("package app { at app/eliot, compiler run -m Controller }")
+         shouldBe "package app {\n  at app/eliot\n  compiler run -m Controller\n}"
    }
    "parseClauses" should "read a keyword-only clause" in {
       parsed("package lang {\n   internal\n}") shouldBe "package lang {\n  internal\n}"

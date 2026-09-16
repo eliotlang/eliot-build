@@ -29,12 +29,12 @@ def testCases: Test = {
          "package controller-jvm {\n" ++
          "  dep //root\n" ++
          "  dep github.com/eliot-lang/eliot//jvm v1\n" ++
-         "  main Controller\n" ++
+         "  compiler exe-jar -m Controller\n" ++
          "}\n" ++
          "package controller-attiny {\n" ++
          "  dep //root\n" ++
          "  dep github.com/vendor/eliot-avr//attiny85 v1\n" ++
-         "  main Controller\n" ++
+         "  compiler flash -m Controller\n" ++
          "}"
       )
    }
@@ -51,19 +51,25 @@ def testCases: Test = {
       roundTrip(
          "package lang {\n" ++
          "  at lang/eliot\n" ++
-         "  plugin eliot-compiler.zip {\n    compiler\n  }\n}\n" ++
+         "  asset eliot-compiler.zip\n}\n" ++
          "package jvm {\n" ++
          "  at jvm/eliot\n" ++
          "  dep //stdlib\n" ++
-         "  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}\n" ++
+         "  asset eliot-jvm.zip\n}\n" ++
          "package examples {\n  internal\n  dep //jvm\n}"
       )
    }
-   "parseDescriptor" should "read a plugin that is neither a backend nor the compiler" in {
-      roundTrip("package contrib {\n  plugin eliot-contrib.zip\n}")
+   "parseDescriptor" should "read a package shipping more than one asset, in the order written" in {
+      roundTrip("package contrib {\n  asset eliot-contrib.zip\n  asset eliot-extra.zip\n}")
+   }
+   "parseDescriptor" should "read the test framework's shape: a package that is nothing but a line" in {
+      roundTrip("package suite {\n  dep //root\n  compiler run -m eliot.test.Runner\n}")
    }
    "parseDescriptor" should "let the root package itself be the executable" in {
-      roundTrip(inRoot("dep github.com/eliot-lang/eliot//jvm v1\n  main Hello"))
+      roundTrip(inRoot("dep github.com/eliot-lang/eliot//jvm v1\n  compiler exe-jar -m Hello"))
+   }
+   "parseDescriptor" should "keep a compiler line's words as written, flags and all" in {
+      roundTrip("package docs {\n  compiler apidoc --statistics\n}")
    }
    "parseDescriptor" should "canonicalize a dependency URL, so one package is one identity" in {
       parsed(inRoot("dep GitHub.com/x/foo.git//root v1")) shouldBe inRoot("dep github.com/x/foo//root v1")
@@ -126,8 +132,20 @@ def testCases: Test = {
    "parseDescriptor" should "refuse a dep outside a package block, naming the block it belongs in" in {
       parsed("dep github.com/x/foo//root v1") shouldBe belongsInside("dep", "dep github.com/x/foo//root v1")
    }
-   "parseDescriptor" should "refuse a main outside a package block the same way" in {
-      parsed("main Hello") shouldBe belongsInside("main", "main Hello")
+   "parseDescriptor" should "refuse a compiler line outside a package block the same way" in {
+      parsed("compiler run -m Hello") shouldBe belongsInside("compiler", "compiler run -m Hello")
+   }
+   "parseDescriptor" should "refuse an asset outside a package block the same way" in {
+      parsed("asset eliot-jvm.zip") shouldBe belongsInside("asset", "asset eliot-jvm.zip")
+   }
+   "parseDescriptor" should "refuse a retired 'main', which a compiler line says whole now" in {
+      parsed("package launcher {\n  main Hello\n}")
+         shouldBe "unknown clause 'main'; this descriptor may need a newer eliot in 'main Hello'"
+   }
+   "parseDescriptor" should "refuse a retired 'plugin', which is an asset now" in {
+      parsed("package jvm {\n  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}")
+         shouldBe ("unknown clause 'plugin'; this descriptor may need a newer eliot in " ++
+            "'plugin eliot-jvm.zip {\n  backend jvm\n}'")
    }
    "parseDescriptor" should "refuse a retired 'module' block in a descriptor written today" in {
       parsed("module lang {\n  dep //stdlib\n}")
@@ -191,19 +209,23 @@ def testCases: Test = {
       parsed(inRoot("dep github.com/x/foo//root v1 extra"))
          shouldBe "too many arguments in 'dep github.com/x/foo//root v1 extra'"
    }
-   "parseDescriptor" should "reject a main naming no module" in {
-      parsed("package launcher {\n  main\n}") shouldBe "a main needs the module holding it in 'main'"
+   "parseDescriptor" should "reject a compiler line with no words" in {
+      parsed("package launcher {\n  compiler\n}")
+         shouldBe "a compiler line needs the words it passes to the compiler in 'compiler'"
    }
-   "parseDescriptor" should "reject a plugin naming no asset" in {
-      parsed("package lang {\n  plugin\n}")
-         shouldBe "a plugin needs a release asset name in 'plugin'"
+   "parseDescriptor" should "refuse a second compiler line, since a package that wants two things is two packages" in {
+      parsed("package test {\n  compiler run -m A\n  compiler apidoc\n}")
+         shouldBe ("a package carries one compiler line; a package that wants two things depends on two " ++
+            "packages in 'compiler apidoc'")
    }
-   "parseDescriptor" should "reject a plugin backend that does not say which word it registers" in {
-      parsed("package jvm {\n  plugin eliot-jvm.zip {\n    backend\n  }\n}")
-         shouldBe "a plugin's backend needs the command word it registers in 'backend'"
+   "parseDescriptor" should "reject an asset naming nothing" in {
+      parsed("package lang {\n  asset\n}") shouldBe "an asset needs a release asset name in 'asset'"
    }
-   "parseDescriptor" should "reject the Maven-era jar pin, which the lockfile records now" in {
-      parsed("package lang {\n  plugin eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
+   "parseDescriptor" should "reject an asset naming two files, which is two clauses" in {
+      parsed("package lang {\n  asset a.zip b.zip\n}") shouldBe "too many arguments in 'asset a.zip b.zip'"
+   }
+   "parseDescriptor" should "reject anything under an asset, which says nothing about what it is" in {
+      parsed("package lang {\n  asset eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
          shouldBe ("unknown clause 'jar'; this descriptor may need a newer eliot in " ++
             "'jar c:d:2 sha256 9f2ca9b1'")
    }

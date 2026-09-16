@@ -32,10 +32,11 @@ the clause reference, below). Amended 2026-09-16: **there are no tasks and there
 package carries at most one `compiler <arguments>` line, `eliot <package>` runs the compiler once per
 line in the closure over the invoked package's roots, and a bill of materials composes a full build
 (suite, docs, style) by depending on the packages that carry the lines. `main`, `plugin`'s markers and
-the `build`/`run`/`test` verbs go with it ("What a build runs", below); nothing of it is implemented
-yet.
+the `build`/`run`/`test` verbs go with it ("What a build runs", below). Implemented the same day, all
+but the two root lists and the verb's name ("What was built", below): `eliot build test` compiles the
+suite *and runs it*, because the framework's `suite` package carries the line.
 
-**Where the implementation stands** (2026-09-15, 237 tests):
+**Where the implementation stands** (2026-09-16, 264 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -49,12 +50,13 @@ yet.
 | `PackageSource` | the resolver's two questions, and the git-backed answer to them | done |
 | `Assembly` | a resolution and the standard layout become source roots | done |
 | `Assets` | a release asset's location, and getting one onto disk | done |
-| `Toolchain` | which asset is the compiler, which word calls the backend | done |
-| `Launcher` | the `main`, the composition, the failure channels | three verbs: `resolve`, `roots`, `build` |
+| `Invocation` | every asset for the classpath, every `compiler` line in the closure | done |
+| `Launcher` | the `main`, the composition, the failure channels | three verbs: `resolve`, `roots`, `build` (one run per line) |
 | `Command` | what a command line asks for, what a resolution reads as | done for those verbs |
 | `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
 | — | lockfile | not started |
-| — | the `compiler` line: one verb, every line in the closure, two root lists | designed 2026-09-16, not started |
+| — | the `compiler` line: every line in the closure | done 2026-09-16 |
+| — | the two root lists, and `build` renamed to `eliot <package>` | not started |
 
 **There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
 the descriptor where the user is standing, closes that configuration over the graph and prints what was
@@ -237,9 +239,9 @@ in two spellings — and are not the same kind of thing.
 ### What it looks like
 
 ```
--- eliot-test: the framework's root package, which is what every suite deps
-package root {
-  dep github.com/robertbraeutigam/eliot//stdlib v0.3
+-- eliot-test: the framework is `root`; `suite` is what every suite deps
+package suite {
+  dep //root
   compiler run -m eliot.test.Runner              -- compile with this main, then run what came out
 }
 
@@ -259,8 +261,8 @@ package launcher {
 
 -- a conventions repository: a bill of materials that composes by depending, and carries no line
 package library {
-  dep github.com/eliotlang/eliot-test//root v0.1
-  dep github.com/robertbraeutigam/eliot//apidoc v0.3
+  dep github.com/eliotlang/eliot-test//suite v0.2
+  dep github.com/robertbraeutigam/eliot//apidoc v0.4
   dep github.com/eliotlang/eliot-style//root v0.1
 }
 
@@ -419,6 +421,37 @@ leaf-package discipline above exists to avoid without a mechanism.
 - **A line on a library root** is the one placement this design leaves the author to get right. If it
   turns out to be gotten wrong often, a lint at the author's build ("`root` carries a line every
   consumer will run") is the shape of the fix, never a scope.
+
+### What was built (2026-09-16)
+
+The launcher side is the design above with two deviations and two decisions it left open.
+
+- **The framework's line is on a `suite` package, not on `root`.** The example first put it on
+  eliot-test's root package, which is exactly the placement "What this asks of authors" warns about,
+  and eliot-test has the consumer that proves it: its `runner` package deps `//root` to ship the runner
+  as a jar, and would have *run* the suite instead. So `root` is the framework and nothing that runs,
+  `suite` is `dep //root` plus the line, `runner` carries `compiler exe-jar -m eliot.test.Runner`, and
+  a consumer's test package deps `eliot-test//suite` (eliot-test `v0.2`). The leaf discipline applied
+  to the framework itself.
+- **A comment is `-- ` (or a bare trailing `--`), not any `--`.** The grammar used to cut a line at the
+  first `--` anywhere, which would have swallowed every long flag on a line. A word that merely starts
+  with two dashes is an argument now.
+- **A closure with no line is refused** (`NothingToRun`), rather than compiling nothing and exiting 0:
+  `eliot build root` on a library would otherwise read as green. It is the one `InvocationError`; the
+  six `ToolchainError`s went with `Toolchain`.
+- **Lines run in canonical order and the first failure stops the rest** — the project's opened
+  packages first, then the dependencies in resolution order, the order `Assembly` lists roots in — and
+  its exit code is the tool's.
+
+The compiler side, in eliot `v0.4`: the jvm backend has a `run` mode (`exe-jar`, then `java -jar` on
+the result with the compiler's JVM and streams, exiting with the program's code), and a line whose
+first word is a mode rather than a backend is given the one backend accepting that mode
+(`Compiler.withDefaultBackend` — by mode rather than by "the only backend present", so an apidoc
+backend on the classpath does not make `run` ambiguous). eliot-test's runner registers exit code 1 when
+a case fails, which is what makes a red suite a red build.
+
+Still the design's and not the tool's: the two root lists (every root is still passed positionally,
+since the compiler has no flag between them yet) and renaming `build <package>` to `eliot <package>`.
 
 ## Distribution: git-native
 
@@ -625,7 +658,7 @@ package root {                               -- the library, at the repository r
   dep github.com/eliot-lang/eliot//stdlib v1.2
 }
 
-package test {                               -- a package: a directory, dependencies, maybe a `main`
+package test {                               -- a package: a directory, dependencies, maybe a line
   at test                                    -- its root directory (default: the package's name);
                                              -- sources at test/src, overlay at test/compiler
   internal                                   -- may not be depended on from outside (default: exported)
@@ -636,22 +669,20 @@ package test {                               -- a package: a directory, dependen
 package launcher {                           -- an executable is a package like any other
   dep //root
   dep github.com/eliot-lang/eliot//jvm v1
-  main eliot.build.Launcher                  -- the entry point; the rest comes from the closure
+  compiler exe-jar -m eliot.build.Launcher   -- what a build of any closure holding this runs; at most one
 }
 
 package lang {                               -- a layer, and a plugin-shipping package
   at lang/eliot
-  plugin eliot-compiler.zip {                -- a release asset of this repo, at this tag. `compiler` =
-    compiler                                 -- this asset holds the compiler; `backend <word>` = it
-  }                                          -- registers that compiler command word; neither = an
-}                                            -- always-on contributor
+  asset eliot-compiler.zip                   -- a release asset of this repo, at this tag, on the classpath
+}
 ```
 
 - **Every dependency is transitive, and there are no scopes.** A `dep` line means the same thing
   wherever it is written. A package's dependencies reach whatever depends on *that package* — and
   nothing depends on a `test` package or an executable, which is where the old model's three
   non-transitivity rules went.
-- **The top level holds package blocks and nothing else.** Every package is written out, and a `dep`, `main` or `plugin` standing outside a block is refused with the
+- **The top level holds package blocks and nothing else.** Every package is written out, and a `dep`, `compiler` or `asset` standing outside a block is refused with the
   spelling it should have had rather than as an unknown keyword. A free-standing line would read as
   file-wide, and nothing in this format is — there is no build-wide scope for it to belong to — which
   is exactly the confusion sbt's top level causes, and the one the first cut of this file reproduced

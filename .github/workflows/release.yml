@@ -5,9 +5,9 @@
 #
 # The jar is built by this tag's own source, bootstrapped. `./bootstrap` compiles the launcher from the
 # tag's `src` with the eliot toolchain its `eliot.pkg` names (stage 0), and that launcher then builds
-# the suite and the release jar (stage 1). No published launcher is in the chain, so a release never
-# depends on the previous one being able to read this tag's descriptor — which it could not, twice,
-# before this existed. The jar that is attached then has to build the suite itself before it is
+# and runs the suite and builds the release jar (stage 1). No published launcher is in the chain, so a
+# release never depends on the previous one being able to read this tag's descriptor — which it could
+# not, twice, before this existed. The jar that is attached then has to build the suite itself before it is
 # published (stage 2): what ships is a launcher that is known to build the repository it came from.
 #
 # That is also why a release may be incompatible with the one before it — a new descriptor format, a
@@ -72,19 +72,13 @@ jobs:
           key: packages-${{ hashFiles('eliot.pkg') }}
           restore-keys: packages-
 
-      # The suite, as the gate, built by the launcher this tag compiles to. A launcher published from a
-      # red commit is the tool every consumer of this tag builds with.
-      #
-      # Grepping the output rather than trusting the exit code: `eliot build` reports the *compiler's*
-      # status, and the runner jar it produced does not register an exit code yet. When it does, this
-      # becomes a plain `java -jar target/Runner.jar`.
+      # The suite, as the gate, built and run by the launcher this tag compiles to — `eliot-test//suite`'s
+      # `compiler run` line runs it, and a failing case fails the build. A launcher published from a red
+      # commit is the tool every consumer of this tag builds with.
       - name: The suite is green
         run: |
           mkdir -p out
           ./bootstrap build test
-          java -jar target/Runner.jar | tee out/suite.log
-          grep -q "all clear" out/suite.log ||
-             { echo "::error::the suite is not green"; exit 1; }
 
       - name: The launcher
         run: |
@@ -98,9 +92,6 @@ jobs:
         run: |
           rm -f target/Runner.jar
           java -jar out/release/eliot-launcher.jar build test
-          java -jar target/Runner.jar | tee out/stage2.log
-          grep -q "all clear" out/stage2.log ||
-             { echo "::error::the released launcher does not build a green suite"; exit 1; }
 
       - name: The notes
         run: |

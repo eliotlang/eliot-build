@@ -1,0 +1,156 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.assets.Assets
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.TablePackages
+import eliot.build.assemble.Invocation
+
+/**
+ * What a closure says to run: every asset on the classpath, and every `compiler` line, in the order
+ * they run.
+ *
+ * Run against `eliot.build.resolve.TablePackages`, so every descriptor here is a string and nothing is
+ * fetched — the subject is what `asset` and `compiler` clauses *mean* across a resolution, which no
+ * descriptor reader can decide alone. The universe is shaped like the real one: the eliot repository's
+ * layers each shipping an asset, the test framework's `suite` carrying the line that runs a suite, and
+ * an `apidoc` package carrying a line nobody here has selected.
+ */
+def testCases: Test = {
+   "invocationOf" should "run a suite by the line the framework's suite package carries" in {
+      linesFor("test", suiteDependingOnFramework) shouldBe "run -m eliot.test.Runner"
+   }
+   "invocationOf" should "run an executable by the line its own package carries" in {
+      linesFor("launcher", withLauncher) shouldBe "exe-jar -m App"
+   }
+   "invocationOf" should "run every line in the closure, the project's own first, then the resolution's order" in {
+      linesFor("test", suiteWithDocs) shouldBe "check --strict | apidoc | run -m eliot.test.Runner"
+   }
+   "invocationOf" should "not run the line of a package the closure did not reach" in {
+      linesFor("test", suiteDependingOnFramework).contains("apidoc").shouldBeFalse
+   }
+   "invocationOf" should "not run a sibling's line that the invoked package does not depend on" in {
+      linesFor("root", withLauncher) shouldBe expectedNothingToRun("root")
+   }
+   "invocationOf" should "put the asset of every package the closure mounted on the classpath, in order" in {
+      assetsFor("test", suiteDependingOnFramework) shouldBe expectedEliotAssets
+   }
+   "invocationOf" should "leave out the asset of a package nobody selected" in {
+      assetsFor("test", suiteDependingOnFramework).contains("eliot-apidoc.zip").shouldBeFalse
+   }
+   "invocationOf" should "refuse a closure in which no package carries a line" in {
+      linesFor("root", rootPackage("dep github.com/e/eliot//jvm v1.2")) shouldBe expectedNothingToRun("root")
+   }
+   "invocationOf" should "report the resolver's refusal as itself" in {
+      linesFor("nosuch", rootPackage("dep github.com/e/eliot//jvm v1.2"))
+         shouldBe "no package named 'nosuch'"
+   }
+}
+
+/**
+ * The eliot repository as its descriptor declares it: one asset per layer, and an `apidoc` package
+ * whose line is there to be *not* run by anyone who did not dep it.
+ */
+private def eliotPackages: String =
+   "package lang {\n  asset eliot-compiler.zip\n}\n" ++
+      "package stdlib {\n  dep //lang\n  asset eliot-stdlib.zip\n}\n" ++
+      "package jvm {\n  dep //stdlib\n  asset eliot-jvm.zip\n}\n" ++
+      "package apidoc {\n  dep //lang\n  asset eliot-apidoc.zip\n  compiler apidoc\n}"
+
+/**
+ * The test framework: the library, and the package a consumer's suite deps to have it run.
+ */
+private def frameworkPackages: String =
+   rootPackage("dep github.com/e/eliot//stdlib v1.2") ++
+      "\npackage suite {\n  dep //root\n  compiler run -m eliot.test.Runner\n}"
+
+/**
+ * A suite as the design has one: a package that deps the library beside it, the framework's `suite`
+ * and a platform, and carries no line of its own.
+ */
+private def suiteDependingOnFramework: String =
+   rootPackage("dep github.com/e/eliot//stdlib v1.2") ++
+      "\npackage test {\n  dep //root\n  dep github.com/e/eliot-test//suite v1.0\n" ++
+      "  dep github.com/e/eliot//jvm v1.2\n}"
+
+/**
+ * A suite that also wants the docs, and a check of its own — three lines from three packages.
+ */
+private def suiteWithDocs: String =
+   rootPackage("dep github.com/e/eliot//stdlib v1.2") ++
+      "\npackage test {\n  dep //root\n  dep github.com/e/eliot-test//suite v1.0\n" ++
+      "  dep github.com/e/eliot//jvm v1.2\n  dep github.com/e/eliot//apidoc v1.2\n  compiler check --strict\n}"
+
+/**
+ * A library and an executable beside it: the executable's line is the executable's, and the library
+ * does not inherit it by being depended on.
+ */
+private def withLauncher: String =
+   rootPackage("dep github.com/e/eliot//stdlib v1.2") ++
+      "\npackage launcher {\n  dep //root\n  dep github.com/e/eliot//jvm v1.2\n  compiler exe-jar -m App\n}"
+
+private def expectedEliotAssets: String =
+   "github.com/e/eliot@v1.2/eliot-compiler.zip, github.com/e/eliot@v1.2/eliot-stdlib.zip, " ++
+      "github.com/e/eliot@v1.2/eliot-jvm.zip"
+
+private def expectedNothingToRun(name: String): String =
+   "nothing in '" ++ name ++ "' carries a compiler line, so there is nothing to run"
+
+/**
+ * Every line on one line, words joined by spaces and lines by bars — or the one line naming what
+ * refused — so a case says what runs *and* in what order.
+ */
+private def linesFor(name: String, rootText: String): String =
+   described(PackageName(name), rootText, shownLines)
+
+private def assetsFor(name: String, rootText: String): String =
+   described(PackageName(name), rootText, shownAssets)
+
+/**
+ * Rendered *inside* the `against`, as every resolving case in this project is and for the reason
+ * `eliot.build.resolve.ResolutionTests` records: two `provide[Universe, _]` instantiations whose JVM
+ * descriptors agree get one native between them.
+ *
+ * `InvocationError` is discharged in here too rather than travelling out, because `against` answers
+ * the resolver's channel alone and a refusal here is a line a user reads, not a second `Either` for a
+ * test to unfold.
+ */
+private def described(
+   name: PackageName,
+   rootText: String,
+   rendering: Invocation => String
+): String =
+   rendered(against(universe, catching(rendering, name, descriptorOf(rootText))))
+
+private def catching(
+   rendering: Invocation => String,
+   name: PackageName,
+   descriptor: Descriptor
+): {PackageSource, Throw[ResolutionError]} String =
+   catch[InvocationError, String](
+      rendering(invocationOf(name, descriptor, resolve(name, descriptor))),
+      problem -> show(problem)
+   )
+
+private def rendered(outcome: Either[ResolutionError, String]): String =
+   foldEither(error -> show(error), found -> found, outcome)
+
+private def shownLines(invocation: Invocation): String =
+   invocation.invocationLines.map(line -> line.joined(" ")).joined(" | ")
+
+private def shownAssets(invocation: Invocation): String = invocation.invocationAssets.map(show).joined(", ")
+
+private def universe: Universe =
+   universeOf(
+      published("github.com/e/eliot@v1.2", eliotPackages,
+         published("github.com/e/eliot-test@v1.0", frameworkPackages, empty)),
+      empty
+   )
+
+private def published(key: String, text: String, entries: List[Pair[String, String]]): List[Pair[String, String]] =
+   append(entries, Pair(key, text))

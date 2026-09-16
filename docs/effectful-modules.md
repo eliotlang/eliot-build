@@ -1132,3 +1132,39 @@ What it asked of this repository's own descriptor: `dep github.com/eliotlang/eli
 and no `main` on `test` — eliot-test `v0.1`'s root package declares the runner about itself, and a
 second declaration would be the two-mains conflict `Toolchain` refuses.
 
+## 18. Revisited, 2026-09-16 — a line per package, and `Toolchain` gone
+
+Same compiler as §17 but for two additions in eliot `v0.4` (a `run` mode on the jvm backend, and a
+backend chosen by the mode a line starts with), and one in eliot-test `v0.2` (the runner registers exit
+code 1 on a failing case). 264 cases green. `docs/build-system.md`, "What a build runs" and "What was
+built", is the design; this is what it did to the modules.
+
+**`Toolchain` is gone, and `Invocation` is what was left of it.** Every question `Toolchain` answered —
+which asset holds the compiler, which word the backend answers to, which one `main` the closure has —
+was the launcher assembling a command line out of three packages' facts, and each needed a refusal for
+none and for two. A package now writes its `compiler` line whole, so what is left is *reading*: every
+asset of every mounted package for one classpath, and every line in the closure, in canonical order.
+Six error constructors became one (`NothingToRun`), and the `Launcher`'s sixth channel changed type
+without changing shape. The package cut held: `Invocation` is on `{PackageSource}` alone and names no
+git, exactly as `Toolchain` was.
+
+**The effect rows did not move.** A build now spawns the compiler once per line, and the loop is a
+`foldLeft` over the lines with the previous exit code as the accumulator — `if(previous != 0) previous
+else runInheritingIo(…)` — inside the same `{Process, Throw[IoError]}` the single spawn already
+declared. A lambda passed to `foldLeft` is an effect-transparent slot, so nothing had to be named.
+
+**One more instance of the §11.3 collision, found by the suite rather than the launcher.** `invocationOf`
+first read the lines with a second `flatMap` over the same `List[Pair[Selection, BuildPackage]]` the
+assets were read from, with a different result type. Both erase to one `foldLeft` native, one of them is
+emitted, and the other died at run time with `NoSuchMethodError` — in `InvocationTests`, which is what a
+suite rendering inside every `provide` is for. The fix reads the lines off a `List[BuildPackage]`
+instead, the instantiation the project's own packages already use. Same finding as §11.3, a new
+spelling of it: two instantiations of one *generic combinator* over one element type, not just two
+`provide`s.
+
+**Verified against tags that did not exist yet.** The change needs eliot `v0.4` and eliot-test `v0.2`
+before either can be published, and nothing in the tool can be pointed anywhere but GitHub. Git can:
+a `GIT_CONFIG_GLOBAL` with `insteadOf` rewrites to scratch clones carrying the tags, and the asset
+cache pre-filled from `scripts/package-assets.sh`, made `build test`, `build launcher`, a stage-2 build,
+a failing case (exit 1), a syntax error (exit 1, the compiler's diagnostics) and `./bootstrap` itself
+all run exactly as they will against GitHub (`.claude/CLAUDE.md` has the recipe).

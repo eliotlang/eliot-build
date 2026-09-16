@@ -22,10 +22,6 @@ import eliot.build.model.Descriptor
  * root, `package root { at . … }` by convention, writes its `at` because `.` is not what its name
  * would have said, exactly as for any package whose directory is not its name. A descriptor declaring
  * no packages writes nothing at all.
- *
- * Nesting is written by indenting a whole rendered block rather than by threading a depth through the
- * renderers, so a package's plugin sub-clauses end up two levels in without any renderer knowing how
- * deep it is.
  */
 
 /**
@@ -39,14 +35,14 @@ def renderDescriptor(descriptor: Descriptor): String = nonEmptyLines(descriptor.
 
 /**
  * Everything one package says, in the order a reader expects it: where it is, whether it is anyone
- * else's to name, what it depends on, what runs it, what it ships.
+ * else's to name, what it depends on, what a build of it runs, what it ships.
  */
 private def packageClauses(built: BuildPackage): List[String] =
    renderAt(built) ++
       renderInternal(built) ++
       built.packageDependencies.map(renderDependency) ++
-      renderMain(built) ++
-      built.packagePlugins.map(renderPlugin)
+      renderCompiler(built) ++
+      built.packageAssets.map(asset -> "asset " ++ asset)
 
 private def renderPackage(built: BuildPackage): String =
    "package " ++ show(built.packageName) ++ renderBlock(packageClauses(built))
@@ -66,21 +62,11 @@ private def renderAt(built: BuildPackage): List[String] =
 private def renderInternal(built: BuildPackage): List[String] =
    fold(built.exported, empty, singleton("internal"))
 
-private def renderMain(built: BuildPackage): List[String] =
-   foldOption(empty, module -> singleton("main " ++ module), built.packageMain)
-
-private def renderPlugin(plugin: Plugin): String =
-   "plugin " ++ plugin.pluginAsset ++ renderBlock(renderBackendWord(plugin) ++ renderCompiler(plugin))
-
-private def renderBackendWord(plugin: Plugin): List[String] =
-   foldOption(empty, word -> singleton("backend " ++ word), plugin.pluginBackend)
-
-private def renderCompiler(plugin: Plugin): List[String] =
-   fold(plugin.compilerBase, singleton("compiler"), empty)
+private def renderCompiler(built: BuildPackage): List[String] =
+   foldOption(empty, words -> singleton("compiler " ++ words.joined(" ")), built.packageCompiler)
 
 /**
- * A `{ … }` block holding `lines`, each indented one level. Nested blocks are indented by their own
- * renderer, so a plugin's sub-clauses end up two levels in.
+ * A `{ … }` block holding `lines`, each indented one level.
  */
 private def renderBlock(lines: List[String]): String =
    fold(isEmpty(lines), "", " {\n" ++ lines.map(indented).joined("\n") ++ "\n}")
