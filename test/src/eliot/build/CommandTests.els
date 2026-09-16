@@ -57,7 +57,7 @@ def testCases: Test = {
       ) shouldBe "app:/   github.com/x/bar v2.0/   github.com/x/foo v1.2"
    }
    "report" should "name a package that resolved to nothing at all" in {
-      joined("/", report(rootPackageName, Resolution(empty))) shouldBe "root:"
+      joined("/", report(PackageName("root"), Resolution(empty))) shouldBe "root:"
    }
 
    "reportRoots" should "print one root per line, unadorned, because the lines are arguments" in {
@@ -125,11 +125,6 @@ private def compilationOf(main: String): Compilation =
    )
 
 /**
- * A descriptor declaring one artifact whose backend carries one parameter — built rather than parsed,
- * because what a `backend` block *spells* is `eliot.build.format.PackageFile`'s subject and nothing
- * here is about it.
- */
-/**
  * A request renders as its verb and the package it is about, because a `Show[Request]` would have to
  * choose one of the three and there is nothing to choose: the verb is half of what was asked for.
  */
@@ -150,4 +145,4 @@ private def addSelection(selection: Selection, resolution: Resolution): Resoluti
    Resolution(append(resolution.selections, selection))
 
 private def selected(url: String, major: Int, minor: Int): Selection =
-   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(RootPackage))
+   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(PackageName("root")))

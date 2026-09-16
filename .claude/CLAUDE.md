@@ -20,25 +20,22 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
   line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; a
-  `PackageSelector` is `RootPackage` or `PackageSelected`, never an `Option[PackageName]`; `Package` is
-  the two together; `rootPackageName` is `root` and `selectorFor` is where the bare-URL and `//root`
-  spellings are made to agree; the `PackageId` sum is what a `dep` line spells, `Sibling` or `Foreign`,
-  never an empty-URL sentinel), `Lineage` (`Commit` and `sameAnchor` — a content hash is vocabulary
-  before it is git's, which is why the resolver imports no git at all), and `Descriptor` — **a list of
-  `BuildPackage` and nothing else**, since the scopes are gone, and a package exists exactly where a
-  block declares it, the root package included: a package is a root directory, deps, an
-  optional `main` and the plugins it ships, and a `Dependency` is a `SiblingDependency` or a
-  `Requirement` with a mandatory minimum.
+  `PackageName` is which package of one is wanted, and **no name is special** — `root` is only the
+  convention for a package at `.`; `Package` is the two together; the `PackageId` sum is what a `dep`
+  line spells, `Sibling` or `Foreign`, never an empty-URL sentinel; `packageId` aborts on a URL with no
+  `//name`, because a repository is a set of packages and names none of them), `Lineage` (`Commit` and
+  `sameAnchor` — a content hash is vocabulary before it is git's, which is why the resolver imports no
+  git at all), and `Descriptor` — **a list of `BuildPackage` and nothing else**: a package exists
+  exactly where a block declares it, and is a root directory, deps, an optional `main` and the plugins
+  it ships, and a `Dependency` is a `SiblingDependency` or a `Requirement` with a mandatory minimum.
 - **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser
   (`clausesNamed` asks of a file what `childrenNamed` asks of a block); `ClauseReader` is the checked
-  access to one clause and the `ClauseProblem` it complains with; `DependencyClause` is the `dep` line;
-  `PackageFile` owns the keywords, `DescriptorError` and `descriptorFileName`, is where the parser's and
-  the reader's error channels meet, and has **two entry points**: `parseDescriptor` is the format as
-  spelled today — package blocks and nothing else, `package root { at . … }` among them, a bare `dep`
-  at the top level refused with the spelling it should have had — and is what `Launcher` reads the
-  project's own file with; `parsePublishedDescriptor` is every spelling ever published (`module` as
-  `package`, a bare top level as the root package, `test`/`artifact` dropped) and is what `GitPackages`
-  reads a mirror's file with, because published tags spell those forms and a tag is never replaced;
+  access to one clause and the `ClauseProblem` it complains with; `DependencyClause` is the `dep` line
+  (`<url>//<package> <version>` or `//<package>`, the selector never optional); `PackageFile` owns the
+  keywords, `DescriptorError` and `descriptorFileName`, is where the parser's and the reader's error
+  channels meet, and has **one entry point**, `parseDescriptor`: package blocks and nothing else, a
+  `dep`/`main`/`plugin` at the top level refused with the block it belongs in. It reads the project's
+  own file and every mirror's alike — there is one spelling of the format and no older one is read;
   `DescriptorWriter` writes a descriptor back out, a block per package, and imports `model` alone.
 - **`git/`** — `Git` (`effect Git` — six operations over `Remote`, `Mirror`, `Worktree` and `Revision`,
   git's own vocabulary; a mirror is a bare `--mirror` clone, every *question* is answered from its object
@@ -144,7 +141,7 @@ test` in this working tree fails against the pin, and CI cannot cut `v0.2` the w
 release. Build it the way `v0.1` was built: `./mill examples.run jvm exe-jar -m eliot.build.Launcher
 <this repo>/src -o target` in the compiler checkout, then `java -jar target/Launcher.jar build test`
 and `build launcher` with the jar that came out, and attach that. From `v0.2` onward the loop closes
-again, because `v0.2`'s launcher reads every published spelling.
+again, for as long as the format holds still.
 
 Bump `.eliot-version` to the new tag on `master` after publishing. A published asset is never replaced —
 a mistake is a new tag.
@@ -157,18 +154,18 @@ the style of the existing history.
 
 ## Building and running (compiler CLI)
 
-**The launcher reads every published descriptor spelling out of a mirror**, which is what makes the
-2026-09-15 and 2026-09-16 format changes survivable: `module` is read as `package`, a bare top level as
-the root package, and `test`/`artifact` blocks are dropped. Published tags spell the old forms — eliot
-`v0.0`–`v0.2` and eliot-test `v0.0` all do — and a tag is never replaced, so `parsePublishedDescriptor`
-is load-bearing rather than politeness. The project's *own* descriptor is read strictly: package blocks
-only, `package root { at . … }` written out. What none of it does is work backwards: a launcher older
-than `v0.2` cannot read this repository's own descriptor, which is why `./eliotw` is broken here until
-`v0.2` is published (see "Releasing").
+**The launcher reads one descriptor format and no other**, mirrors included: package blocks, every
+`dep` naming a package. Nothing is compatible with the spellings from before 2026-09-16 (`module`
+blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
+release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
+dependencies is that their tags are spelled the current way, which is why this repository requires
+eliot `v0.3` and eliot-test `v0.1`, the first tags of each that are. A launcher older than `v0.2`
+cannot read this repository's own descriptor, which is why `./eliotw` is broken here until `v0.2` is
+published (see "Releasing").
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
-eliot `v0.2`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
-suite — 239 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+eliot `v0.3`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
+suite — 254 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -232,10 +229,9 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test   # m
 java -jar target/Runner.jar                                                 # must be green
 ```
 
-A package's `eliot.pkg` must require eliot at `v0.1` or later for this to work at all — `v0.0` declares
-no `plugin` clauses, so there is no toolchain to find and `build` refuses with "nothing 'test' depends
-on ships a compiler". This repository requires `v0.2`, which is where `registerExitCode` arrives, and
-`../eliot-test` requires `v0.1`. Two things to check while you are there: a deliberate syntax error in any
+A package's `eliot.pkg` must require eliot at `v0.3` or later for this to work at all — every earlier
+tag spells its layers as `module` blocks, which the launcher no longer reads. This repository and
+`../eliot-test` both require `v0.3`. Two things to check while you are there: a deliberate syntax error in any
 mounted source must make `build` exit 1 with the compiler's own diagnostics on the terminal, and
 `build nosuch` must exit 1 rather than printing a failure and exiting 0.
 
@@ -265,7 +261,7 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
 
-What that means for a change: **do not read a green 237 as evidence the tool runs** — the suite and the
+What that means for a change: **do not read a green suite as evidence the tool runs** — the suite and the
 launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Toolchain` or
 the boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the

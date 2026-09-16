@@ -1110,3 +1110,24 @@ Verified the way §17 says to: 254 cases through the compiler CLI; the locally b
 eliot-test's suite from a deleted `target/` (96 green) with eliot `v0.1` read out of a published tag
 by the lenient path and eliot-test's own descriptor read strictly; `build launcher` here, and the jar
 that came out building this suite; `build nosuch` exiting 1.
+
+### 17.3 One reading of the format, and no special name (2026-09-16)
+
+§17.2's second entry point lasted a day. `parsePublishedDescriptor` existed because eliot `v0.0`–`v0.2`
+and eliot-test `v0.0` spell the old forms and a tag is never replaced — but nothing depends on those
+tags except this repository and eliot-test, so the honest fix was new tags rather than a permanent
+second reader. eliot `v0.3` and eliot-test `v0.1` are spelled in package blocks, both repositories
+require them, and `PackageFile` is back to one entry point that `GitPackages` and `Launcher` share.
+
+The same cut took the root package's special status. It was special for exactly one reason: a `dep`
+with no `//name` had to mean *something*, and it meant the package called `root`. A dep now always
+names its package (`DependencyClause` refuses a bare URL, and `packageId` aborts on one), so
+`PackageSelector`, `RootPackage`, `rootPackageName` and `selectorFor` are gone: a `Package` is a
+repository and a `PackageName`, and `Selection.selectedPackages` is a list of names. `root` is what a
+package at `.` is conventionally called, and nothing in the tool knows it. A `test` child inside a
+package block, which `packageKeywords` still admitted and nothing read, is refused with the rest.
+
+What it asked of this repository's own descriptor: `dep github.com/eliotlang/eliot-test//root v0.1`,
+and no `main` on `test` — eliot-test `v0.1`'s root package declares the runner about itself, and a
+second declaration would be the two-mains conflict `Toolchain` refuses.
+

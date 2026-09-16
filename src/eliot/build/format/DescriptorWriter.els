@@ -18,10 +18,10 @@ import eliot.build.model.Descriptor
  * makes a descriptor inspectable, what makes the tool's own edits to one reviewable, and what lets a
  * reader's test assert on a rendering rather than on a shape.
  *
- * **Every package is a block, the root package included.** There is one spelling of a package, and
- * the root's is `package root { at . … }` — its `at` is written because `.` is not what its name would
- * have said, exactly as for any package whose directory is not its name. A descriptor declaring no
- * packages writes nothing at all.
+ * **Every package is a block.** There is one spelling of a package; one standing at the repository
+ * root, `package root { at . … }` by convention, writes its `at` because `.` is not what its name
+ * would have said, exactly as for any package whose directory is not its name. A descriptor declaring
+ * no packages writes nothing at all.
  *
  * Nesting is written by indenting a whole rendered block rather than by threading a depth through the
  * renderers, so a package's plugin sub-clauses end up two levels in without any renderer knowing how

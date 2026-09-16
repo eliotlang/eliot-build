@@ -13,7 +13,7 @@ def testCases: Test = {
          "package root {\n" ++
          "  at .\n" ++
          "  dep github.com/eliot-lang/eliot//stdlib v1\n" ++
-         "  dep github.com/somelib/collections v1.3\n" ++
+         "  dep github.com/somelib/collections//root v1.3\n" ++
          "}"
       )
    }
@@ -25,7 +25,7 @@ def testCases: Test = {
    }
    "parseDescriptor" should "read an application targeting two platforms" in {
       roundTrip(
-         inRoot("dep github.com/somelib/sensor-api v2") ++ "\n" ++
+         inRoot("dep github.com/somelib/sensor-api//root v2") ++ "\n" ++
          "package controller-jvm {\n" ++
          "  dep //root\n" ++
          "  dep github.com/eliot-lang/eliot//jvm v1\n" ++
@@ -66,7 +66,7 @@ def testCases: Test = {
       roundTrip(inRoot("dep github.com/eliot-lang/eliot//jvm v1\n  main Hello"))
    }
    "parseDescriptor" should "canonicalize a dependency URL, so one package is one identity" in {
-      parsed(inRoot("dep GitHub.com/x/foo.git v1")) shouldBe inRoot("dep github.com/x/foo v1")
+      parsed(inRoot("dep GitHub.com/x/foo.git//root v1")) shouldBe inRoot("dep github.com/x/foo//root v1")
    }
    "parseDescriptor" should "treat a package as exported unless it says otherwise" in {
       parsed("package lang {\n   dep //other\n}") shouldBe "package lang {\n  dep //other\n}"
@@ -78,7 +78,7 @@ def testCases: Test = {
       directoryOf("root", "package root {\n  at .\n}") shouldBe "."
    }
    "parseDescriptor" should "give a root package that writes no 'at' the directory its name spells, like any other" in {
-      directoryOf("root", "package root {\n  dep github.com/x/foo v1\n}") shouldBe "root"
+      directoryOf("root", "package root {\n  dep github.com/x/foo//root v1\n}") shouldBe "root"
    }
    "parseDescriptor" should "write the root package's 'at', which its name does not say" in {
       roundTrip("package root {\n  at .\n}")
@@ -106,8 +106,8 @@ def testCases: Test = {
    "parseDescriptor" should "declare no package at all for a file of comments alone" in {
       parsed("-- nothing to declare\n\n-- really") shouldBe ""
    }
-   "parseDescriptor" should "refuse a dep outside a package block, naming the spelling the root package has" in {
-      parsed("dep github.com/x/foo v1") shouldBe belongsInside("dep", "dep github.com/x/foo v1")
+   "parseDescriptor" should "refuse a dep outside a package block, naming the block it belongs in" in {
+      parsed("dep github.com/x/foo//root v1") shouldBe belongsInside("dep", "dep github.com/x/foo//root v1")
    }
    "parseDescriptor" should "refuse a main outside a package block the same way" in {
       parsed("main Hello") shouldBe belongsInside("main", "main Hello")
@@ -116,30 +116,16 @@ def testCases: Test = {
       parsed("module lang {\n  dep //stdlib\n}")
          shouldBe "unknown clause 'module'; this descriptor may need a newer eliot in 'module lang {\n  dep //stdlib\n}'"
    }
-   "parsePublishedDescriptor" should "read a root package spelled as the top level, as the first tags did" in {
-      published(
-         "dep github.com/x/eliot//lang v0.0\ndep github.com/x/eliot//stdlib v0.0\ntest {\n  dep github.com/x/eliot//jvm v0.0\n}"
-      ) shouldBe inRoot("dep github.com/x/eliot//lang v0.0\n  dep github.com/x/eliot//stdlib v0.0")
+   "parseDescriptor" should "refuse a retired 'test' block, which is a package like any other now" in {
+      parsed("test {\n  dep //root\n}")
+         shouldBe "unknown clause 'test'; this descriptor may need a newer eliot in 'test {\n  dep //root\n}'"
    }
-   "parsePublishedDescriptor" should "read a top-level main as the root package's, which is where it was declared" in {
-      published("dep github.com/x/jvm v1\nmain Hello") shouldBe inRoot("dep github.com/x/jvm v1\n  main Hello")
+   "parseDescriptor" should "refuse a 'test' clause inside a package, which nothing would read" in {
+      parsed("package root {\n  test\n}")
+         shouldBe "unknown clause 'test'; this descriptor may need a newer eliot in 'test'"
    }
-   "parsePublishedDescriptor" should "read a retired 'module' block as the package it always was" in {
-      published("module lang {\n  at lang/eliot\n  dep //stdlib\n}")
-         shouldBe "package lang {\n  at lang/eliot\n  dep //stdlib\n}"
-   }
-   "parsePublishedDescriptor" should "declare no root package for a file of blocks alone, as the layers' tags are" in {
-      published("module lang {\n  at lang/eliot\n}") shouldBe "package lang {\n  at lang/eliot\n}"
-   }
-   "parsePublishedDescriptor" should "drop a retired 'test' block, which never reached a consumer" in {
-      published("dep github.com/x/foo v1\ntest {\n  dep github.com/y/bar v2\n}") shouldBe inRoot("dep github.com/x/foo v1")
-   }
-   "parsePublishedDescriptor" should "drop a retired 'artifact' block, which nothing could ever depend on" in {
-      published("dep github.com/x/foo v1\nartifact hello {\n  backend {\n    kind exe-jar\n  }\n}")
-         shouldBe inRoot("dep github.com/x/foo v1")
-   }
-   "parsePublishedDescriptor" should "read the current spelling too, since a tag cut today is read tomorrow" in {
-      published(inRoot("dep github.com/x/foo v1")) shouldBe inRoot("dep github.com/x/foo v1")
+   "parseDescriptor" should "give no name a meaning: a package at the root may be called anything" in {
+      roundTrip("package core {\n  at .\n  dep github.com/x/foo//core v1\n}")
    }
    "parseDescriptor" should "reject an unknown top-level clause, pointing at the upgrade" in {
       parsed("registry https://example.com")
@@ -154,31 +140,39 @@ def testCases: Test = {
          shouldBe "a dependency URL carries no scheme in 'dep https://github.com/x/foo v1'"
    }
    "parseDescriptor" should "reject a version that is not a tag" in {
-      parsed(inRoot("dep github.com/x/foo 1.3"))
-         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo 1.3'"
+      parsed(inRoot("dep github.com/x/foo//root 1.3"))
+         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo//root 1.3'"
    }
    "parseDescriptor" should "reject a version range, which the model has no way to mean" in {
-      parsed(inRoot("dep github.com/x/foo >=v1.3"))
-         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo >=v1.3'"
+      parsed(inRoot("dep github.com/x/foo//root >=v1.3"))
+         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo//root >=v1.3'"
    }
    "parseDescriptor" should "reject a version carrying a third component" in {
-      parsed(inRoot("dep github.com/x/foo v1.2.3"))
-         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo v1.2.3'"
+      parsed(inRoot("dep github.com/x/foo//root v1.2.3"))
+         shouldBe "a version must be a tag like 'v1.3' in 'dep github.com/x/foo//root v1.2.3'"
+   }
+   "parseDescriptor" should "reject a dep naming a repository, which is a set of packages rather than one" in {
+      parsed(inRoot("dep github.com/x/foo v1"))
+         shouldBe "a dep names a package, as '<url>//<package>' or '//<package>' in 'dep github.com/x/foo v1'"
+   }
+   "parseDescriptor" should "reject a selector naming no package" in {
+      parsed(inRoot("dep github.com/x/foo// v1"))
+         shouldBe "a dep names a package, as '<url>//<package>' or '//<package>' in 'dep github.com/x/foo// v1'"
    }
    "parseDescriptor" should "reject a dep with no URL at all" in {
       parsed(inRoot("dep")) shouldBe "a dep needs a package URL in 'dep'"
    }
    "parseDescriptor" should "reject a foreign dependency that declares no minimum" in {
-      parsed(inRoot("dep github.com/x/foo"))
-         shouldBe "a foreign dependency needs a minimum version in 'dep github.com/x/foo'"
+      parsed(inRoot("dep github.com/x/foo//root"))
+         shouldBe "a foreign dependency needs a minimum version in 'dep github.com/x/foo//root'"
    }
    "parseDescriptor" should "reject a version on a sibling, which versions with its repository" in {
       parsed("package jvm {\n   dep //stdlib v1.2\n}")
          shouldBe "a sibling package versions with its repository and carries no version in 'dep //stdlib v1.2'"
    }
    "parseDescriptor" should "reject a dep carrying more than a URL and a version" in {
-      parsed(inRoot("dep github.com/x/foo v1 extra"))
-         shouldBe "too many arguments in 'dep github.com/x/foo v1 extra'"
+      parsed(inRoot("dep github.com/x/foo//root v1 extra"))
+         shouldBe "too many arguments in 'dep github.com/x/foo//root v1 extra'"
    }
    "parseDescriptor" should "reject a main naming no module" in {
       parsed("package launcher {\n  main\n}") shouldBe "a main needs the module holding it in 'main'"
@@ -218,16 +212,6 @@ private def parsed(text: String): String =
    )
 
 /**
- * The same, read as a mirror's descriptor is — in whatever form it was published in.
- */
-private def published(text: String): String =
-   foldEither(
-      error -> show(error),
-      descriptor -> renderDescriptor(descriptor),
-      runThrow[DescriptorError](parsePublishedDescriptor(split("\n", text)))
-   )
-
-/**
  * Where the package called `name` says it is — the one thing the rendering cannot show, since a
  * directory that is the package's name is written as the name alone.
  */
@@ -246,8 +230,8 @@ private def directoryOf(name: String, text: String): String =
 private def roundTrip(text: String): {Throw[AssertionError]} Unit = parsed(text) shouldBe text
 
 /**
- * A root package holding `clauses`, spelled the one way the root package is spelled — so a case about
- * a `dep` line says the line and not the block around it.
+ * A package at the repository root holding `clauses` — so a case about a `dep` line says the line and
+ * not the block around it.
  */
 private def inRoot(clauses: String): String = "package root {\n  at .\n  " ++ clauses ++ "\n}"
 
@@ -256,5 +240,6 @@ private def inRoot(clauses: String): String = "package root {\n  at .\n  " ++ cl
  * reads it that way is exactly what the author would go looking for.
  */
 private def belongsInside(keyword: String, clause: String): String =
-   "'" ++ keyword ++ "' belongs inside a package block; the root package is written 'package root { at . ... }' in '" ++
+   "'" ++ keyword ++ "' belongs inside a package block; a package at the repository root is written " ++
+      "'package root { at . ... }' in '" ++
       clause ++ "'"

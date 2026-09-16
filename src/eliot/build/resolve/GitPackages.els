@@ -49,7 +49,7 @@ implement gitPackages: PackageSource {
       ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
       val published = descriptorTextAt(dependency, version, target)
 
-      foldOption(None, text -> Some(parsePublishedDescriptor(split("\n", text))), published)
+      foldOption(None, text -> Some(parseDescriptor(split("\n", text))), published)
    }
 
    def anchorAt(

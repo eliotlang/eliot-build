@@ -2,8 +2,8 @@
 -- as of v0.2 of the toolchain the one it can build.
 --
 -- **Three packages, no scopes, every one of them written out.** `root` is the library at `src/`, which
--- is what a consumer would get and what `//root` names; it says `at .` because its directory is the
--- repository's own and its name would have said otherwise. `launcher` is that library plus a platform
+-- is what a consumer would get by naming `//root`; it says `at .` because its directory is the
+-- repository's own and its name would have said otherwise. The name is a convention and nothing more. `launcher` is that library plus a platform
 -- plus an entry point, and `test` is the suite at `test/src`. Nothing depends on either, so neither
 -- one's platform layer reaches anybody — the isolation the old `artifact` and `test` scopes were
 -- enforcing is the shape of the graph now (`docs/build-system.md`, "What this replaced, and why").
@@ -17,30 +17,26 @@
 -- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
--- `v0.2` and not lower, everywhere: `src` performs `eliot.system.Process.registerExitCode`, which the
--- standard library grew at that tag, and the `plugin` clauses that say where the compiler binaries are
--- arrived at `v0.1`. A floor is a statement about what this code needs, and both halves of that are
--- true here for once — the sources and the toolchain that compiles them are the same requirement.
+-- `v0.3` and not lower, everywhere: it is the first eliot tag whose own descriptor is spelled in
+-- `package` blocks, which is the only spelling this tool reads. The sources alone would need `v0.2`,
+-- where `eliot.system.Process.registerExitCode` arrived.
 --
--- `test` declares the framework's own entry point, which under this design is the framework's to
--- declare about itself. It is written here because `eliot-test v0.0` is the only tag that exists and
--- it predates the `main` clause; a published tag is never replaced, so the line moves out of this file
--- the day a tag carrying it can be depended on.
+-- `test` declares no `main`: `eliot-test v0.1`'s root package declares `eliot.test.Runner` about
+-- itself, and a suite gets it through the `dep`.
 
 package root {
   at .
-  dep github.com/robertbraeutigam/eliot//stdlib v0.2
+  dep github.com/robertbraeutigam/eliot//stdlib v0.3
 }
 
 package launcher {
   dep //root
-  dep github.com/robertbraeutigam/eliot//jvm v0.2
+  dep github.com/robertbraeutigam/eliot//jvm v0.3
   main eliot.build.Launcher
 }
 
 package test {
   dep //root
-  dep github.com/eliotlang/eliot-test v0.0
-  dep github.com/robertbraeutigam/eliot//jvm v0.2
-  main eliot.test.Runner
+  dep github.com/eliotlang/eliot-test//root v0.1
+  dep github.com/robertbraeutigam/eliot//jvm v0.3
 }

@@ -9,22 +9,22 @@ import eliot.build.model.Descriptor
  * What a `dep` line names.
  *
  * Every other clause of a descriptor is read at one place in the file, into one thing. `dep` is read
- * inside every `package` block — and, in a published descriptor, at the top level that once described
- * the root package — and every reading is the same reading, which is the whole of what dropping the
- * scopes bought. That is what makes it a module rather than a paragraph of
+ * inside every `package` block, and every reading is the same reading, which is the whole of what
+ * dropping the scopes bought. That is what makes it a module rather than a paragraph of
  * `eliot.build.format.PackageFile`: the one clause whose meaning more than one block reader has to
  * agree on, with the rules that are only about it in the same place.
  *
- * Those rules are three. A version token is a **git tag** and is parsed here rather than merely
- * inspected, because the model carries an ordered version from here on and a string never was one.
- * A URL is **scheme-less**, by invariant of the format rather than of the canonical form. And a
- * version is **required of a foreign package and refused of a sibling**, because a requirement with
+ * Those rules are four. A dependency names a **package**, never a bare repository: a repository is a
+ * set of packages, and a URL with no `//name` would leave the reader to guess which. A version token is
+ * a **git tag** and is parsed here rather than merely inspected, because the model carries an ordered
+ * version from here on and a string never was one. A URL is **scheme-less**, by invariant of the
+ * format rather than of the canonical form. And a version is **required of a foreign package and refused of a sibling**, because a requirement with
  * no floor is a question the resolver could not answer, while a sibling versions with the repository
  * that declared it.
  */
 
 /**
- * `dep <url> <version>` or `dep //package`. The version is required for a foreign package — a
+ * `dep <url>//<package> <version>` or `dep //<package>`. The version is required for a foreign package — a
  * requirement with no floor is a question the resolver could not answer — and forbidden for a sibling,
  * which cannot carry one: tags are repository-wide, so a sibling versions with its repository.
  */
@@ -41,27 +41,21 @@ def dependencyOf(clause: Clause): {Throw[ClauseProblem]} Dependency = {
 }
 
 /**
- * A scheme-less URL, optionally carrying a `//package` selector. Scheme-less is an invariant of the
- * format, not merely of the canonical form `packageId` answers with: a written scheme is a spelling
- * the author expected to matter, and where the bytes come from is the consumer's configuration.
- * Refusing it here is what keeps `//` unambiguously the package selector.
+ * A scheme-less URL carrying a `//package` selector, or the selector alone. Scheme-less is an
+ * invariant of the format, not merely of the canonical form `packageId` answers with: a written scheme
+ * is a spelling the author expected to matter, and where the bytes come from is the consumer's
+ * configuration. Refusing it here is what keeps `//` unambiguously the package selector.
  */
 def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageId = {
    checkSchemeless(target, clause)
-   packageId(target)
+   packageId(target) else raise(problemIn("a dep names a package, as '<url>//<package>' or '//<package>'", clause))
 }
-
-/**
- * The `dep` lines among `clauses` — a block's children, or the top level of a published descriptor
- * that spelled the root package there.
- */
-def dependenciesIn(clauses: List[Clause]): {Throw[ClauseProblem]} List[Dependency] =
-   clausesNamed("dep", clauses).map(dependencyOf)
 
 /**
  * The `dep` lines of a block — a `package`'s dependencies.
  */
-def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] = dependenciesIn(clause.children)
+def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] =
+   clausesNamed("dep", clause.children).map(dependencyOf)
 
 private def siblingDependencyOf(
    name: PackageName,

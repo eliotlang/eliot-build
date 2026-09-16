@@ -53,7 +53,7 @@ def testCases: Test = {
       toolchainFor(dependingOnFrameworkAndRunnable) shouldBe expectedMainConflict
    }
    "toolchainOf" should "refuse a closure in which nothing ships a compiler" in {
-      toolchainFor(rootPackage("dep github.com/x/foo v1.2\nmain Hello"))
+      toolchainFor(rootPackage("dep github.com/x/foo//root v1.2\nmain Hello"))
          shouldBe "nothing 'root' depends on ships a compiler"
    }
    "toolchainOf" should "refuse a closure in which two assets claim to be the compiler" in {
@@ -87,7 +87,7 @@ private def dependingOnJvm: String = rootPackage("dep github.com/e/eliot//jvm v1
  */
 private def suiteDependingOnFramework: String =
    rootPackage("dep github.com/e/eliot//jvm v1.2") ++
-      "\npackage test {\n  dep //root\n  dep github.com/e/eliot-test v1.0\n}"
+      "\npackage test {\n  dep //root\n  dep github.com/e/eliot-test//root v1.0\n}"
 
 private def suiteWithNoFramework: String =
    rootPackage("dep github.com/e/eliot//jvm v1.2") ++ "\npackage test {\n  dep //root\n}"
@@ -97,7 +97,7 @@ private def suiteWithNoFramework: String =
  * declares a `main` of its own, and a suite that then inherits it alongside the framework's.
  */
 private def dependingOnFrameworkAndRunnable: String =
-   rootPackage("dep github.com/e/eliot//jvm v1.2\ndep github.com/e/eliot-test v1.0\nmain Hello")
+   rootPackage("dep github.com/e/eliot//jvm v1.2\ndep github.com/e/eliot-test//root v1.0\nmain Hello")
 
 /**
  * Both packages of a repository whose two assets each claim the marker — which no descriptor reader
@@ -136,16 +136,16 @@ private def expectedMainConflict: String =
  * The whole toolchain on one line, or the one line naming what refused — so a case says what was found
  * *and* in what order, the way `AssemblyTests` says what was mounted.
  */
-private def toolchainFor(rootText: String): String = described(rootPackageName, rootText, shown)
+private def toolchainFor(rootText: String): String = described(PackageName("root"), rootText, shown)
 
 private def toolchainForName(name: String, rootText: String): String =
    described(PackageName(name), rootText, shown)
 
-private def assetsOf(rootText: String): String = described(rootPackageName, rootText, shownAssets)
+private def assetsOf(rootText: String): String = described(PackageName("root"), rootText, shownAssets)
 
-private def backendOf(rootText: String): String = described(rootPackageName, rootText, shownBackend)
+private def backendOf(rootText: String): String = described(PackageName("root"), rootText, shownBackend)
 
-private def mainOf(rootText: String): String = described(rootPackageName, rootText, shownMain)
+private def mainOf(rootText: String): String = described(PackageName("root"), rootText, shownMain)
 
 private def mainFor(name: String, rootText: String): String =
    described(PackageName(name), rootText, shownMain)

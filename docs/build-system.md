@@ -343,12 +343,13 @@ What remains, as of the 2026-09-15 revision:
   are (`at`, defaulting to the name), an export flag (dependents may dep an exported package;
   examples, applications and test fixtures are `internal`), its dependency list, an optional entry
   point, and the compiler plugin it ships if it ships one. A package exists exactly where a `package`
-  block declares it, the root package — `package root { at . … }`, the one a bare `dep` selects —
-  included. **A package may have no sources at all**: one that is only `dep` lines is a bill of
+  block declares it, and no name means anything to the tool — `package root { at . … }` is the
+  convention for the one at the repository root, and a dependent names it `//root` like any other. **A package may have no sources at all**: one that is only `dep` lines is a bill of
   materials, and is how the toolchain is handed out (`//jvm-test`).
   **One root descriptor** — per-package descriptor files reintroduce Maven's parent-POM web and Go's
   nested-modules mess, and break the one-parse LSP story.
-- **Dependencies**: URL (+ optional `//package` selector into that repo) + minimum version.
+- **Dependencies**: URL + `//package` selector into that repo + minimum version. The selector is not
+  optional: a repository is a set of packages, and a URL alone names none of them.
   **Unscoped, and transitive without exception.** There is no base/test/artifact axis: `test` is a
   package that deps `//root`, an executable is a package that deps `//root`, and a dependency reaches
   exactly what deps the package declaring it. The isolation the old scopes bought is the shape of the
@@ -389,8 +390,8 @@ the `eliot.paths` precedent this system retires.
    was already selected at; the invariant holds without exception.
 2. **Dependency URLs are scheme-less** (`github.com/x/foo`) — normalization by construction (no
    `https://` vs `ssh://` spellings to unify; transports are resolver config), and it frees `//`
-   unambiguously as the **package selector**: `github.com/eliot-lang/eliot//stdlib`. A bare
-   `//name` is a sibling package of this repo.
+   unambiguously as the **package selector**: `github.com/eliot-lang/eliot//stdlib`. Every foreign
+   dependency carries one, and a bare `//name` is a sibling package of this repo.
 3. **Comments are `--`**, like the language.
 4. A file is a sequence of clauses — `keyword args…`, optionally followed by a `{ … }` block of
    sub-clauses. That is the whole grammar. **Unknown clauses are fatal** with an upgrade hint
@@ -400,10 +401,10 @@ the `eliot.paths` precedent this system retires.
 ### Clause reference
 
 ```
-package root {                               -- the root package: what a bare `dep` on this repo selects
-  at .                                       -- at the repository root, which its name would not have said
-  dep github.com/x/foo v1.3                  -- a dependency on that repo's root package
-  dep github.com/eliot-lang/eliot//stdlib v1.2 -- package-selected
+package root {                               -- the library, at the repository root; `root` is a
+  at .                                       -- convention, and `.` is not what its name would have said
+  dep github.com/x/foo//root v1.3            -- a package of another repository, selector required
+  dep github.com/eliot-lang/eliot//stdlib v1.2
 }
 
 package test {                               -- a package: a directory, dependencies, maybe a `main`
@@ -432,19 +433,18 @@ package lang {                               -- a layer, and a plugin-shipping p
   wherever it is written. A package's dependencies reach whatever depends on *that package* — and
   nothing depends on a `test` package or an executable, which is where the old model's three
   non-transitivity rules went.
-- **The top level holds package blocks and nothing else.** Every package is written out, the root
-  package included, and a `dep`, `main` or `plugin` standing outside a block is refused with the
+- **The top level holds package blocks and nothing else.** Every package is written out, and a `dep`, `main` or `plugin` standing outside a block is refused with the
   spelling it should have had rather than as an unknown keyword. A free-standing line would read as
   file-wide, and nothing in this format is — there is no build-wide scope for it to belong to — which
   is exactly the confusion sbt's top level causes, and the one the first cut of this file reproduced
   (2026-09-16).
 - **A package exists exactly where a block declares it**, and that is what killed the ghost. The old
   model's root module was present when a repository declared no `module` clauses and absent when it
-  did, so one spelling of a bare dep meant two things depending on a remote file. Now the root package
-  is `package root { at . … }`, a bare repository dep selects the package called `root` and nothing
-  else, and `//root` in a sibling names a line the same file declares. A repository whose packages all
-  live in subdirectories declares no root package, and a bare dep on it names a package it does not
-  declare — a diagnostic the author's build owes, and not yet raised: today it mounts nothing.
+  did, so one spelling of a bare dep meant two things depending on a remote file. Now there is no bare
+  dep to spell: every `dep` names its package, a repository is only ever a set of them, and no name is
+  special — `//root` is a package called `root`, exactly as `//jvm` is one called `jvm`. A dep naming a
+  package its repository does not declare still mounts nothing — a diagnostic the author's build owes,
+  and not yet raised.
 - **A package need not have sources.** One that has none is a bill of materials: what it contributes is
   its `dep` lines, to whoever deps it. It is *not* a parent — it contributes dependencies only, never
   configuration and never a directory — which is what keeps it from being Maven's parent POM, rejected
@@ -563,15 +563,12 @@ resolved dependency per package, `lock-jar <url> <tag> <asset> <sha256>` for plu
 where a plugin's hash lives, since it cannot live in the tag that produced it (see "Compiler plugins").
 Its exact format is tool-owned output, not hand-polished here.
 
-**Retired keywords are read, not refused** — the one thing building this added to the design.
-`module`, `test` and `artifact` are what the format spelled before, and tags carrying them are
-published and immutable, so a resolver that could not read them could not resolve anything. `module`
-is read exactly as `package` is, which it turns out to be: its `at` meant the same directory holding
-the same `src/`, so the eliot repository's published layers mount unchanged. `test` and `artifact` are
-*dropped*, which loses nothing — neither ever reached a consumer, and a consumer's descriptor is the
-only one a retired keyword is ever met in. This is the reverse of the "unknown clauses are fatal" rule
-and does not weaken it: that rule is about a descriptor from the *future*, which a launcher must refuse
-rather than misread, and this is about one from the past, which it can read exactly.
+**Retired keywords are refused like any unknown one** (2026-09-16). `module`, `test`, `artifact`, a
+bare top level and a selector-less `dep` are what the format spelled before, and for a day the
+launcher read them out of mirrors, because eliot and eliot-test had tags spelled that way. None of it
+was a release anyone depends on, so the tags were superseded instead — eliot `v0.3` and eliot-test
+`v0.1` are the first spelled the current way — and the second reader was deleted. There is one reading
+of the format, and it is the same for the project's own file and every mirror's.
 
 **One thing this design asks for that the tool does not do yet**: the artifact kind. `docs` says it
 comes off the closure, from the platform package that knows what it emits, and no published tag

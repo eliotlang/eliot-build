@@ -80,11 +80,11 @@ def testCases: Test = {
       calls shouldBe "/cache/github.com/x/foo$ git show aaa1:eliot.pkg"
    }
    "fileAt" should "answer what that revision holds" in mocked {
-      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar v1.1"))
+      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar//root v1.1"))
 
       val shown = fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
 
-      (shown orElse "<none>") shouldBe "dep github.com/x/bar v1.1"
+      (shown orElse "<none>") shouldBe "dep github.com/x/bar//root v1.1"
    }
    "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked {
       whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))

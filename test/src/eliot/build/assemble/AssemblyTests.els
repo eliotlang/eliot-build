@@ -61,7 +61,7 @@ def testCases: Test = {
    "sourceRoots" should "mount a dependency's root package at its repository root" in {
       assembled(
          "root",
-         rootPackage("dep github.com/x/foo v1.2"),
+         rootPackage("dep github.com/x/foo//root v1.2"),
          publishing("github.com/x/foo@v1.2", rootPackage(""))
       ) shouldBe "/project/src, /trees/github.com/x/foo@v1.2/src"
    }
@@ -96,23 +96,23 @@ def testCases: Test = {
    "sourceRoots" should "never mount a dependency's suite, which nothing depends on" in {
       assembled(
          "root",
-         rootPackage("dep github.com/x/foo v1.2"),
+         rootPackage("dep github.com/x/foo//root v1.2"),
          publishing(
             "github.com/x/foo@v1.2",
-            rootPackage("") ++ "\npackage test {\n  dep github.com/x/tester v1.0\n}"
+            rootPackage("") ++ "\npackage test {\n  dep github.com/x/tester//root v1.0\n}"
          )
       ) shouldBe "/project/src, /trees/github.com/x/foo@v1.2/src"
    }
    "sourceRoots" should "mount every selected package, in the resolution's own order" in {
       assembled(
          "root",
-         rootPackage("dep github.com/x/foo v1.2"),
-         publishing("github.com/x/foo@v1.2", rootPackage("dep github.com/x/bar v1.1"))
+         rootPackage("dep github.com/x/foo//root v1.2"),
+         publishing("github.com/x/foo@v1.2", rootPackage("dep github.com/x/bar//root v1.1"))
             .published("github.com/x/bar@v1.1", rootPackage(""))
       ) shouldBe "/project/src, /trees/github.com/x/bar@v1.1/src, /trees/github.com/x/foo@v1.2/src"
    }
    "sourceRoots" should "report a selected version whose sources cannot be read back" in {
-      assembled("root", rootPackage("dep github.com/x/foo v1.2"), publishing("github.com/x/foo@v1.1", rootPackage("")))
+      assembled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.1", rootPackage("")))
          shouldBe "github.com/x/foo publishes no v1.2"
    }
    "sourceRoots" should "report a package no descriptor declares" in {

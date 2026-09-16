@@ -28,7 +28,7 @@ def testCases: Test = {
       withDirectory(mirrorPath)
 
       answered(rendered(descriptorAt(Version(Line(1), Some(2)), cached)) with gitPackages with tableGit)
-         shouldBe "package root {\n  at .\n  dep github.com/x/bar v1.1\n}"
+         shouldBe "package root {\n  at .\n  dep github.com/x/bar//root v1.1\n}"
    }
    "descriptorAt" should "answer nothing where the version publishes no descriptor" in mocked {
       withDirectory(mirrorPath)
@@ -69,7 +69,7 @@ private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>"
 private def mirrors: Mirrors =
    mirrorsOf(
       "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.2\nccc3\trefs/tags/v2.1\n",
-      singleton(Pair("v1.2:eliot.pkg", "package root {\n  at .\n  dep github.com/x/bar v1.1\n}"))
+      singleton(Pair("v1.2:eliot.pkg", "package root {\n  at .\n  dep github.com/x/bar//root v1.1\n}"))
    )
 
 private def cached: Repository = repositoryAt("github.com/x/foo")

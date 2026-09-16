@@ -77,7 +77,7 @@ def testCases: Test = {
       withDirectory(mirrorPath)
 
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)) with tableGit)
-         shouldBe "dep github.com/x/bar v1.1"
+         shouldBe "dep github.com/x/bar//root v1.1"
    }
    "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked {
       withDirectory(mirrorPath)
@@ -146,7 +146,7 @@ def testCases: Test = {
  * "clone on the first visit, not on the second" something these tests *observe* rather than seed. Getting
  * the clone target wrong would show up here as a second clone.
  */
-private def listed: Mirrors = mirrorsOf(listing, singleton(Pair("v1.2:eliot.pkg", "dep github.com/x/bar v1.1")))
+private def listed: Mirrors = mirrorsOf(listing, singleton(Pair("v1.2:eliot.pkg", "dep github.com/x/bar//root v1.1")))
 
 private def anchoredAt: Mirrors = mirrorsOf(anchored, empty)
 

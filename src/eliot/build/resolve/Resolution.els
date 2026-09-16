@@ -144,9 +144,9 @@ private def withDependenciesOf(
  *
  * **The selector narrows the closure, not only the mount.** `//stdlib` must not drag in what `//jvm`
  * depends on, which in one repository shipping a base layer and a platform layer is the difference
- * between a closure that resolves and one that mounts a platform nobody asked for. The bare `dep` line
- * is the same rule with the root package as its selector, which is why what used to be a separate list
- * of base dependencies is now this filter finding the package called `root`. `exported` still gates: a
+ * between a closure that resolves and one that mounts a platform nobody asked for. Every `dep` line
+ * carries a selector, so this filter is the whole rule: what used to be a separate list of base
+ * dependencies is a package like the others. `exported` still gates: a
  * package a dependent may not mount is one whose edges are none of the dependent's business either.
  */
 private def mountedDependencies(selection: Selection, descriptor: Descriptor): List[Dependency] =
@@ -195,7 +195,7 @@ private def withSibling(
    name: PackageName,
    state: ResolutionState
 ): ResolutionState =
-   foldOption(state, known -> wanting(selectorFor(name), known, state), ownerSelection(owner, state))
+   foldOption(state, known -> wanting(name, known, state), ownerSelection(owner, state))
 
 private def ownerSelection(owner: Option[Repository], state: ResolutionState): Option[Selection] =
    foldOption(
@@ -242,7 +242,7 @@ private def byLineage(target: Repository, minimum: Version, state: ResolutionSta
  */
 private def merged(
    known: Selection,
-   selector: PackageSelector,
+   selector: PackageName,
    minimum: Version,
    state: ResolutionState
 ): {Throw[ResolutionError]} ResolutionState = {
@@ -266,7 +266,7 @@ private def conflictBetween(known: Selection, minimum: Version): Option[Resoluti
  */
 private def upgraded(
    known: Selection,
-   selector: PackageSelector,
+   selector: PackageName,
    minimum: Version,
    state: ResolutionState
 ): ResolutionState =
@@ -285,7 +285,7 @@ private def upgraded(
  * `known` with one more package among the ones it wants — the sibling half of the same step `upgraded`
  * makes for a requirement, which is why both end in `replacedWhenGrown`.
  */
-private def wanting(selector: PackageSelector, known: Selection, state: ResolutionState): ResolutionState =
+private def wanting(selector: PackageName, known: Selection, state: ResolutionState): ResolutionState =
    replacedWhenGrown(
       known,
       Selection(
@@ -308,7 +308,7 @@ private def grew(known: Selection, next: Selection): Bool =
    known.selectedVersion != next.selectedVersion ||
       known.selectedPackages.size != next.selectedPackages.size
 
-private def withPackage(selector: PackageSelector, packages: List[PackageSelector]): List[PackageSelector] =
+private def withPackage(selector: PackageName, packages: List[PackageName]): List[PackageName] =
    fold(packages.any(known -> known == selector), packages, append(packages, selector))
 
 private def inserted(selection: Selection, state: ResolutionState): ResolutionState =

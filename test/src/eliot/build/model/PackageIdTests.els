@@ -5,63 +5,66 @@ import eliot.build.model.PackageId
 
 def testCases: Test = {
    "packageId" should "leave a package already written canonically alone" in {
-      canonical("github.com/x/foo") shouldBe "github.com/x/foo"
+      canonical("github.com/x/foo//core") shouldBe "github.com/x/foo//core"
    }
-   "packageId" should "keep a module selector apart from the repository it narrows" in {
+   "packageId" should "keep a package selector apart from the repository it narrows" in {
       canonical("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot//stdlib"
    }
-   "packageId" should "read a sibling module, which carries no URL" in {
+   "packageId" should "read a sibling package, which carries no URL" in {
       canonical("//stdlib") shouldBe "//stdlib"
    }
+   "packageId" should "identify nothing for a bare repository, which is a set of packages rather than one" in {
+      canonical("github.com/x/foo") shouldBe "<no package>"
+   }
+   "packageId" should "identify nothing for a selector naming no package" in {
+      canonical("github.com/x/foo//") shouldBe "<no package>"
+   }
+   "packageId" should "give no name a meaning of its own, 'root' included" in {
+      canonical("github.com/x/foo//root") shouldBe "github.com/x/foo//root"
+   }
    "packageId" should "lowercase the host, which is case-insensitive by specification" in {
-      canonical("GitHub.COM/x/foo") shouldBe "github.com/x/foo"
+      canonical("GitHub.COM/x/foo//core") shouldBe "github.com/x/foo//core"
    }
    "packageId" should "keep the path's case, which no remote promises to ignore" in {
-      canonical("github.com/Acme/Foo") shouldBe "github.com/Acme/Foo"
+      canonical("github.com/Acme/Foo//core") shouldBe "github.com/Acme/Foo//core"
    }
    "packageId" should "strip a '.git' suffix" in {
-      canonical("github.com/x/foo.git") shouldBe "github.com/x/foo"
-   }
-   "packageId" should "strip a trailing slash" in {
-      canonical("github.com/x/foo/") shouldBe "github.com/x/foo"
-   }
-   "packageId" should "strip a slash written behind the '.git'" in {
-      canonical("github.com/x/foo.git/") shouldBe "github.com/x/foo"
+      canonical("github.com/x/foo.git//core") shouldBe "github.com/x/foo//core"
    }
    "packageId" should "strip a scheme, which is a transport rather than an identity" in {
-      canonical("https://github.com/x/foo") shouldBe "github.com/x/foo"
+      canonical("https://github.com/x/foo//core") shouldBe "github.com/x/foo//core"
    }
-   "packageId" should "canonicalize the repository a selector narrows, not only a bare URL" in {
+   "packageId" should "canonicalize the repository a selector narrows" in {
       canonical("SSH://GitHub.com/x/foo.git//jvm") shouldBe "github.com/x/foo//jvm"
    }
    "PackageId" should "call every spelling of one package the same package" in {
-      same("https://GitHub.com/x/foo.git/", "github.com/x/foo") shouldBe "same"
+      same("https://GitHub.com/x/foo.git//core", "github.com/x/foo//core") shouldBe "same"
    }
-   "PackageId" should "tell two modules of one repository apart" in {
+   "PackageId" should "tell two packages of one repository apart" in {
       same("github.com/eliot-lang/eliot//stdlib", "github.com/eliot-lang/eliot//jvm") shouldBe "different"
    }
-   "PackageId" should "tell a whole repository from a module of it" in {
-      same("github.com/eliot-lang/eliot", "github.com/eliot-lang/eliot//jvm") shouldBe "different"
-   }
-   "PackageId" should "tell two packages of one host apart" in {
-      same("github.com/x/foo", "github.com/x/bar") shouldBe "different"
+   "PackageId" should "tell two repositories of one host apart" in {
+      same("github.com/x/foo//core", "github.com/x/bar//core") shouldBe "different"
    }
    "PackageId" should "order packages stably, so anything keyed by package has one line order" in {
-      sortedIds shouldBe "github.com/a/two github.com/b/one github.com/b/one//jvm"
+      sortedIds shouldBe "github.com/a/two//root github.com/b/one//core github.com/b/one//jvm"
    }
-   "repositoryOf" should "drop the module selector, since a tag versions the whole repository" in {
+   "repositoryOf" should "drop the package selector, since a tag versions the whole repository" in {
       canonicalRepository("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot"
    }
-   "repositoryOf" should "leave a package with no selector alone" in {
-      canonicalRepository("github.com/x/foo") shouldBe "github.com/x/foo"
-   }
-   "repositoryOf" should "answer nothing for a sibling, which is a module of whatever is being read" in {
+   "repositoryOf" should "answer nothing for a sibling, which is a package of whatever is being read" in {
       canonicalRepository("//stdlib") shouldBe "<sibling>"
    }
    "repositoryAt" should "canonicalize a repository URL the way a dependency line is" in {
       show(repositoryAt("https://GitHub.com/x/foo.git/")) shouldBe "github.com/x/foo"
    }
-   "PackageId" should "read a module of the repository being read as a sibling" in {
+   "repositoryAt" should "strip a trailing slash" in {
+      show(repositoryAt("github.com/x/foo/")) shouldBe "github.com/x/foo"
+   }
+   "repositoryAt" should "strip a slash written behind the '.git'" in {
+      show(repositoryAt("github.com/x/foo.git/")) shouldBe "github.com/x/foo"
+   }
+   "PackageId" should "read a package of the repository being read as a sibling" in {
       kindOfReference("//stdlib") shouldBe "sibling"
    }
    "PackageId" should "read a selector into a foreign repository as foreign" in {
@@ -71,16 +74,16 @@ def testCases: Test = {
 
 /**
  * The canonical form of the package `text` identifies — the spelling everything downstream compares,
- * writes and fetches with.
+ * writes and fetches with — or `<no package>` where it identifies none.
  */
-private def canonical(text: String): String = show(packageId(text))
+private def canonical(text: String): String = show(packageId(text)) else "<no package>"
 
 private def canonicalRepository(text: String): String =
-   foldOption("<sibling>", found -> show(found), repositoryOf(packageId(text)))
+   foldOption("<sibling>", found -> show(found), repositoryOf(idOf(text)))
 
-private def same(a: String, b: String): String = fold(packageId(a) == packageId(b), "same", "different")
+private def same(a: String, b: String): String = fold(idOf(a) == idOf(b), "same", "different")
 
-private def kindOfReference(text: String): String = packageId(text) match {
+private def kindOfReference(text: String): String = idOf(text) match {
    case Sibling(_) -> "sibling"
    case Foreign(_) -> "foreign"
 }
@@ -91,9 +94,15 @@ private def kindOfReference(text: String): String = packageId(text) match {
  */
 private def sortedIds: String = {
    val given = append(
-      append(append(empty, packageId("github.com/b/one//jvm")), packageId("github.com/a/two")),
-      packageId("github.com/b/one")
+      append(append(empty, idOf("github.com/b/one//jvm")), idOf("github.com/a/two//root")),
+      idOf("github.com/b/one//core")
    )
 
    given.sorted.joined(" ")
 }
+
+/**
+ * The package `text` identifies, for the cases that are about something other than whether it
+ * identifies one — which every text they pass does.
+ */
+private def idOf(text: String): PackageId = packageId(text) else Sibling(PackageName("<no package>"))

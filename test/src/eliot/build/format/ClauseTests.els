@@ -16,29 +16,29 @@ def testCases: Test = {
       parsed("dep    github.com/x/foo\t v1.3") shouldBe "dep github.com/x/foo v1.3"
    }
    "parseClauses" should "hang a block's lines under its keyword" in {
-      parsed("module lang {\n   internal\n   dep //other-module\n}")
-         shouldBe "module lang {\n  internal\n  dep //other-module\n}"
+      parsed("package lang {\n   internal\n   dep //other\n}")
+         shouldBe "package lang {\n  internal\n  dep //other\n}"
    }
    "parseClauses" should "nest a block inside a block" in {
-      parsed("module lang {\n   plugin com.vanillasource:eliot-lang:0.5.0 {\n      jar org.ow2.asm:asm:9.9 sha256 9f2c\n   }\n}")
-         shouldBe "module lang {\n  plugin com.vanillasource:eliot-lang:0.5.0 {\n    jar org.ow2.asm:asm:9.9 sha256 9f2c\n  }\n}"
+      parsed("package jvm {\n   plugin eliot-jvm.zip {\n      backend jvm\n   }\n}")
+         shouldBe "package jvm {\n  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}"
    }
    "parseClauses" should "keep sibling blocks apart" in {
-      parsed("artifact one {\n   dep a v1\n}\nartifact two {\n   dep b v2\n}")
-         shouldBe "artifact one {\n  dep a v1\n}\nartifact two {\n  dep b v2\n}"
+      parsed("package one {\n   dep a v1\n}\npackage two {\n   dep b v2\n}")
+         shouldBe "package one {\n  dep a v1\n}\npackage two {\n  dep b v2\n}"
    }
    "parseClauses" should "read a block written inline with comma-separated sub-clauses" in {
-      parsed("backend { kind exe-jar, main Controller }")
-         shouldBe "backend {\n  kind exe-jar\n  main Controller\n}"
+      parsed("package app { at app/eliot, main Controller }")
+         shouldBe "package app {\n  at app/eliot\n  main Controller\n}"
    }
    "parseClauses" should "read a keyword-only clause" in {
-      parsed("module lang {\n   internal\n}") shouldBe "module lang {\n  internal\n}"
+      parsed("package lang {\n   internal\n}") shouldBe "package lang {\n  internal\n}"
    }
    "parseClauses" should "report an unmatched closing brace, with its line" in {
       parsed("dep a v1\n}") shouldBe "line 2: unmatched '}' in '}'"
    }
    "parseClauses" should "report a block that is never closed" in {
-      parsed("module lang {\n   dep a v1") shouldBe "line 2: unclosed '{' in ''"
+      parsed("package lang {\n   dep a v1") shouldBe "line 2: unclosed '{' in ''"
    }
    "parseClauses" should "report a block opened without a keyword" in {
       parsed("{\n}") shouldBe "line 1: a block needs a keyword in '{'"
@@ -53,7 +53,7 @@ def testCases: Test = {
       argumentOf(1, "dep github.com/x/foo") shouldBe "<absent>"
    }
    "childrenNamed" should "select the children carrying one keyword" in {
-      depNames("module lang {\n   internal\n   dep a v1\n   dep b v2\n}") shouldBe "a,b"
+      depNames("package lang {\n   internal\n   dep a v1\n   dep b v2\n}") shouldBe "a,b"
    }
 }
 

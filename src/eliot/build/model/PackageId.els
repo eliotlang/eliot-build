@@ -15,12 +15,13 @@
  * type answers the offline half of that question; the lineage half belongs to the resolver, which is
  * the part holding a remote.
  *
- * A `//name` selector narrows a repository to one of the packages inside it. It is part of the
+ * A `//name` selector names one of the packages inside a repository, and it is never optional: a
+ * repository is not a package, so a URL alone names nothing a build could mount. It is part of the
  * identity — `…/eliot//stdlib` and `…/eliot//jvm` are different dependencies — but not of the
  * *repository*, which is what git fetches and what tags version: packages of one repository version
  * together, since a tag is repository-wide. That is why there are four types here rather than one:
- * a `Repository` is what is cloned, tagged, cached and selected; a `PackageSelector` is which package
- * of one is wanted; a `Package` is the two together; a `PackageId` is what a `dep` line spells, which
+ * a `Repository` is what is cloned, tagged, cached and selected; a `PackageName` is which package of
+ * one is wanted; a `Package` is the two together; a `PackageId` is what a `dep` line spells, which
  * may also be a *sibling* — a package of the repository being read, with no URL and no version of its
  * own.
  */
@@ -37,19 +38,9 @@ data Repository(repositoryUrl: String)
 data PackageName(packageNameText: String)
 
 /**
- * Which package of a repository is wanted: the one a `//name` selector names, or the repository's
- * *root package*, which is what a `dep` line carrying no selector means.
- *
- * A sum rather than an `Option[PackageName]` because the root package is a package — the one whose
- * directory is the repository's own, declared like any other — rather than the absence of one, and
- * because what is mounted is a *set* of these, which an `Option` would make unreadable at every use.
- */
-data PackageSelector = RootPackage | PackageSelected(selectorName: PackageName)
-
-/**
  * A foreign package a dependency refers to: a repository and the one package of it wanted.
  */
-data Package(packageRepository: Repository, selectedPackage: PackageSelector)
+data Package(packageRepository: Repository, selectedPackage: PackageName)
 
 /**
  * What a `dep` line, or a `backend` clause, names: a package of the repository being read
@@ -60,26 +51,8 @@ data Package(packageRepository: Repository, selectedPackage: PackageSelector)
 data PackageId = Sibling(siblingPackage: PackageName) | Foreign(foreignPackage: Package)
 
 /**
- * The name of the **root package**: the one whose directory is the repository's own, declared as
- * `package root { at . … }` and selected by a `dep` line carrying no selector.
- *
- * It is a name like any other, and that is the point — the root stopped being an anonymous module
- * that may or may not exist and became a package declared in the file like the rest, spelled `//root`
- * when a sibling names it. Because it has both a name and an empty selector, the two spellings have to
- * agree: `selectorFor` is where they are made to, so `//root` and a bare URL cannot resolve to two
- * packages.
- */
-def rootPackageName: PackageName = PackageName("root")
-
-/**
- * The selector that selects the package called `name` — `RootPackage` for the root package's own
- * name, since a bare `dep` line already spells that one with no selector at all.
- */
-def selectorFor(name: PackageName): PackageSelector =
-   fold(name == rootPackageName, RootPackage, PackageSelected(name))
-
-/**
- * The package `text` identifies, in canonical form.
+ * The package `text` identifies, in canonical form — aborting where it identifies none, which is what
+ * a URL with no `//name` selector is.
  *
  * ```eliot
  * val stdlib = packageId("github.com/eliot-lang/eliot//stdlib")
@@ -90,15 +63,12 @@ def selectorFor(name: PackageName): PackageSelector =
  * lowercase host. The *path* keeps its case, because only the host is case-insensitive by
  * specification — lowercasing `github.com/Acme/Foo` would invent an identity no remote answers to.
  */
-def packageId(text: String): PackageId = {
+def packageId(text: String): {Abort} PackageId = {
    val body = withoutScheme(text)
    val url = before("//", body)
+   val name = orAbort(selectorOf(body))
 
-   foldOption(
-      Foreign(Package(Repository(canonicalUrl(url)), RootPackage)),
-      name -> fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), selectorFor(name)))),
-      selectorOf(body)
-   )
+   fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), name)))
 }
 
 /**
@@ -145,25 +115,10 @@ implement Compare[PackageName] {
 }
 
 /**
- * A selector spells itself as a `dep` line carries it — which is nothing at all for the root package,
- * so that appending it to a URL gives the package back.
- */
-implement Show[PackageSelector] {
-   def show(value: PackageSelector): String = value match {
-      case RootPackage           -> ""
-      case PackageSelected(name) -> "//" ++ show(name)
-   }
-}
-
-implement Eq[PackageSelector] {
-   def equals(a: PackageSelector, b: PackageSelector): Bool = show(a) == show(b)
-}
-
-/**
  * The canonical spelling, which is also what a descriptor is written back out as.
  */
 implement Show[Package] {
-   def show(value: Package): String = show(value.packageRepository) ++ show(value.selectedPackage)
+   def show(value: Package): String = show(value.packageRepository) ++ "//" ++ show(value.selectedPackage)
 }
 
 /**
@@ -196,8 +151,12 @@ implement Compare[PackageId] {
 
 private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)
 
+/**
+ * The name after the `//`, where there is one and it is not empty — `…/foo//` selects no more than
+ * `…/foo` does.
+ */
 private def selectorOf(body: String): Option[PackageName] =
-   fold(contains("//", body), Some(PackageName(after("//", body))), None)
+   fold(isEmpty(after("//", body)), None, Some(PackageName(after("//", body))))
 
 /**
  * The suffixes are stripped outermost first, so a URL wearing both (`…/foo.git/`) loses both.
