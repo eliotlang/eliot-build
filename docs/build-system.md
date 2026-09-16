@@ -28,7 +28,12 @@ names a directory rather than a module that may or may not exist. Amended 2026-0
 is written out, the root package included** — `package root { at . … }` — so the top level of the file
 is package blocks and nothing else, a package exists exactly where a block declares it, and what was
 published in the earlier spelling is read by a separate, lenient entry point ("What a user writes" and
-the clause reference, below).
+the clause reference, below). Amended 2026-09-16: **there are no tasks and there is one verb** — a
+package carries at most one `compiler <arguments>` line, `eliot <package>` runs the compiler once per
+line in the closure over the invoked package's roots, and a bill of materials composes a full build
+(suite, docs, style) by depending on the packages that carry the lines. `main`, `plugin`'s markers and
+the `build`/`run`/`test` verbs go with it ("What a build runs", below); nothing of it is implemented
+yet.
 
 **Where the implementation stands** (2026-09-15, 237 tests):
 
@@ -48,7 +53,8 @@ the clause reference, below).
 | `Launcher` | the `main`, the composition, the failure channels | three verbs: `resolve`, `roots`, `build` |
 | `Command` | what a command line asks for, what a resolution reads as | done for those verbs |
 | `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
-| — | lockfile, the rest of the verb set | not started |
+| — | lockfile | not started |
+| — | the `compiler` line: one verb, every line in the closure, two root lists | designed 2026-09-16, not started |
 
 **There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
 the descriptor where the user is standing, closes that configuration over the graph and prints what was
@@ -146,7 +152,9 @@ What a user never writes: a backend, a command word, an artifact kind, or a plat
 `main Hello` is the whole of what they state about producing an executable, and the rest is read off
 the closure they already declared (below, "Platforms"). A suite does not even state that much — the
 framework declares `main eliot.test.Runner` about itself, so depending on it is how the command
-arrives.
+arrives. (Amended 2026-09-16: `main Hello` becomes the line `compiler exe-jar -m Hello`, and the suite
+still writes nothing — the framework's *line* arrives with the `dep`, as its `main` did. "What a build
+runs", below.)
 
 Each toolchain line is a **dependency-only package** of the eliot repository that carries the rest
 transitively: `//jvm` depends on `//stdlib` on `//lang`, so a package naming the platform has the whole
@@ -202,6 +210,215 @@ There is no `upload` verb. What "upload" means is what *run* means on that platf
 platform-neutral; the platform's backend plugin supplies the meaning of `run` (and `test` —
 hardware-in-the-loop later). Precedent: embedded Rust never got `cargo flash`; it got
 `runner = probe-rs` under an unchanged `cargo run`.
+
+**Amended 2026-09-16: the verb set is one verb**, and the paragraph above is now a statement about the
+backend's `run` mode rather than about a verb of the tool. What replaces `build/run/test` is below.
+
+## What a build runs: one compiler line per package, and no tasks (2026-09-16)
+
+Records the design discussion of 2026-09-16. The question it settles is the one every build tool
+answers with a second concept: how does a build do more than compile — generate the API docs, run a
+style check, run the suite — and how does a project say which of those it wants? Maven answers with
+lifecycle phases and plugin bindings, Mill and sbt with tasks, Gradle with a task graph, Bazel with
+rules and targets. Each is a second namespace beside the packages, with its own ordering, its own
+inheritance and its own way of being wrong. **This design has none, and the decision is that it never
+gets one.** The package is the only unit, and what a package *does* is one line in its block:
+
+```
+compiler <arguments…>
+```
+
+`eliot <package>` resolves the closure, checks the selected versions out, fetches every asset they
+ship, and then runs the compiler **once per `compiler` line in the closure**, with that line's
+arguments, over the invoked package's roots. That is the whole verb, and it is the only one that
+builds. `resolve` and `roots` remain as *questions* about the model — they are the project-model query
+in two spellings — and are not the same kind of thing.
+
+### What it looks like
+
+```
+-- eliot-test: the framework's root package, which is what every suite deps
+package root {
+  dep github.com/robertbraeutigam/eliot//stdlib v0.3
+  compiler run -m eliot.test.Runner              -- compile with this main, then run what came out
+}
+
+-- eliot: apidoc is a package now, and the line is why it can be
+package apidoc {
+  at apidoc/eliot
+  asset eliot-apidoc.zip
+  compiler apidoc
+}
+
+-- eliot-build: the executable
+package launcher {
+  dep //root
+  dep github.com/robertbraeutigam/eliot//jvm v0.3
+  compiler exe-jar -m eliot.build.Launcher
+}
+
+-- a conventions repository: a bill of materials that composes by depending, and carries no line
+package library {
+  dep github.com/eliotlang/eliot-test//root v0.1
+  dep github.com/robertbraeutigam/eliot//apidoc v0.3
+  dep github.com/eliotlang/eliot-style//root v0.1
+}
+
+-- a consumer: `eliot test` runs the suite, generates the docs and checks the style
+package test {
+  dep //root
+  dep github.com/eliotlang/eliot-conventions//library v0.1
+  dep github.com/robertbraeutigam/eliot//jvm v0.3
+}
+```
+
+`eliot test` runs three compiler invocations because three packages in the closure carry a line. The
+consumer wrote none of them. That is the "inherit a full build by depending on it" that a Maven parent
+POM or a Gradle convention plugin is for, obtained with no inheritance mechanism at all: the bom is a
+package with `dep` lines and nothing else — exactly the bill-of-materials shape `//jvm-test` already
+had — and composition is the dependency graph. **A package that wants both apidoc and tests depends on
+both; a package that wants only the docs is a different package** (`package docs { dep //root  dep
+eliot//apidoc }`). What to run is chosen by naming a package, never by naming a task.
+
+### What the launcher adds, and what it never substitutes
+
+The launcher composes the whole command line, which is what `Command.compilerCommand` does today; the
+package's arguments go where `jvm exe-jar -m X` is hard-coded now, and the rest is appended by the
+launcher exactly as it already is:
+
+```
+java -cp <every asset in the closure> …compiler.Main  <the line's arguments>  <current roots> --dependency <dependency roots>  -o target
+```
+
+Nothing in a line is a placeholder. There is no `${roots}`, no `${target}`, no environment contract
+and no template language, because the launcher owns the invocation end to end and the line is only
+the part of it that varies. That is what makes the line inert data in the sense the core decision
+requires — it is a list of words the launcher passes through verbatim and interprets none of — and it
+is why a package cannot write anything the launcher would have to *evaluate*.
+
+**Current sources against dependency sources.** A line is a template applied to the invoked package,
+so apidoc must know which roots to document and a style check which to check, and "the invoked
+package's `src`" is the wrong answer: `package docs { dep //root  dep eliot//apidoc }` has no sources
+of its own and exists to document the library. The rule is **current = every root under the project's
+repository, siblings included; dependency = every root under the cache.** The resolver already draws
+that line — `Configuration` closes sibling edges within one descriptor separately from the foreign
+requirements it places on the graph — so this is a second list out of `Assembly` rather than a new
+concept, and the compiler receives both with a flag between them. The compiler compiles everything
+and a plugin asks whether a root is current; the compiler itself can cap warnings from dependency
+roots the way every compiler does (javac's `-sourcepath` against `-classpath`, rustc's `--cap-lints`
+on dependencies). Whether the flag is `--dependency` or a `--` separator is the compiler's call. The
+same two lists are what `eliot roots` prints and what the IDE query returns, since an IDE indexes
+project and library sources differently anyway — the split is the project model, not a compiler
+quirk.
+
+**One `target/` for the project**, shared by every line and every invoked package, as now. The
+incremental cache is the point of running everything in one place; `Runner.jar` and `docs/` do not
+collide; and a line's output belongs to the package that was invoked, never to the package that
+declared the line.
+
+### What leaves the descriptor, and the tool
+
+- **`main`** is gone. It was the one thing a consumer stated about producing an executable, and the
+  reason it had to be a clause the tool understood was that the tool composed the command line from
+  three packages — the compiler from `lang`, the command word from `jvm`, the main from wherever it
+  was declared — and needed a rule for each part. Now the line is written whole by the package that
+  knows it: the framework writes `-m eliot.test.Runner` on its own line, the application writes `-m
+  Hello` on its own. `TwoMains` has nothing to detect.
+- **`plugin … { compiler | backend <word> }`** becomes plain **`asset <name>`**. Every asset in the
+  closure goes on the classpath; the compiler decides among backends by the word it was given, and
+  where no word is given, by the one backend jar present. Q1 (which word) is answered by the line, Q3
+  (which asset holds the compiler) by there being no need to know — `compilerMainClass` stays as the
+  one transitional constant, exactly as now, and the `compiler` marker it replaced is the name this
+  clause reuses. Q4 was already answered by the framework declaring its own `main`; it now declares
+  its own line, which is the same answer with the special case that made it a question gone twice.
+- **`Toolchain`** goes entirely — the three roles, the six `ToolchainError`s, `Backing`, `Shipped`.
+  What remains of `assemble/` is computing the two root lists and the classpath, and collecting the
+  lines of the closure in canonical order.
+- **`build`, `run` and `test`** as verbs go, and "delegated verbs" with them: what `run` means on a
+  platform is what it meant before — `java -jar` on jvm, flash + reset + monitor on an MCU — but it is
+  now a **mode of the backend**, invoked by the word on a line, and not something the tool dispatches.
+
+What a user writes for an application is one line more than before (`compiler exe-jar -m Hello`
+where `main Hello` stood), and what it exposes is the compiler's mode word, which the previous design
+hid. What a user writes for a suite is still nothing — the framework's line arrives with the `dep`.
+Whether `exe-jar` needs writing at all is the compiler's business: a default mode of "produce the
+executable for the one backend present" would make the application's line `compiler -m Hello`, and no
+decision here depends on it.
+
+### Why exactly this shape
+
+**One compiler line, not a generic `run <command>`.** A generic command was the first draft, and it
+is what Cargo's `build.rs` is: one program per package, executed under a fixed environment contract.
+It was cut for the reason `build.rs` is the standing example of — a transitive `dep` line could make
+a build execute anything, and "opening a project runs no project code" (the core decision) would have
+been kept only by the letter. With `compiler`, the only thing ever executed is the compiler with the
+closure's plugins on its classpath; plugins are already arbitrary code the user trusts by depending on
+them, and this adds no second kind. It also says what customisation *is*: everything is a compiler
+plugin — apidoc is a backend, a style check is a pass, source generation is a pass contributing
+`SourceMount`s, flashing a chip is the backend's `run` — and the tool never grows an extension
+mechanism of its own beside the one the compiler already has. Precedent: Go, where `go build` runs the
+compiler and nothing else and what varies is which packages you import; this is the same stance with
+plugins instead of a fixed compiler, which is the version Go could not have.
+
+**One line per package, not several.** Several lines in one block is a task list with the names filed
+off — it would need an order, and then a way to skip one, and then a name to skip it by. A package that
+wants two things depends on two packages, and the graph is the only composition there is.
+
+**Every line in the closure runs, not exactly one.** The earlier draft bound one line per verb and let
+the closure supply it, which reintroduced verbs and was cut. Running every line works because **each
+line is whole**: the suite's line compiles *and* runs, the docs' line compiles with its own backend,
+and no line consumes another's output. The launcher may run them in canonical order because the order
+is only fail-fast preference. The moment a line needed another line's artifact the graph of lines
+would need declared inputs and outputs — a task graph — so the rule is that it never does, and the
+line's shape gives it no way to say so. This is Nix's constraint (one builder per derivation, no
+builder reads another's build directory) and Nix builds the world under it.
+
+**What this asks of authors, and does not check.** A line runs for every package whose closure holds
+it, so a line on a *library's root package* runs for every consumer. That is right for source
+generation — consumers need it — and wrong for conventions, since nobody wants the standard
+library's style check in their build. The discipline is the one the graph already teaches: lines live
+on leaf packages — `test`, `launcher`, `docs` — that nothing depends on, exactly where `main` lived
+and for the reason `launcher` is a package rather than a clause on `root`. A conventions bom is depped
+by the leaf, never by the library. Maven separates `<parent>` from `<dependency>` because letting build
+behaviour flow along runtime edges is wrong; here nothing flows along an edge but sources, assets and
+lines, and the author's job is to put the line where its consumers are the ones who want it.
+
+**`run` is a compiler mode.** "Compile, then execute the jar" was the one place two steps were needed,
+and it is the reason the first draft's lines were shell commands. A backend that runs what it just
+produced removes the chain: the jvm backend's `run` is `java -jar` on its own output, an MCU backend's
+is flash-and-monitor. That is the "no `upload` verb" paragraph above, kept whole and moved one level
+down — the platform still supplies the meaning of *run*; it just does so as a word on a line rather
+than as a verb the tool delegates.
+
+**The compiler's command line is now part of the compatibility line.** A bom's `compiler` line is read
+with whatever compiler MVS selects, which may be newer than the one the bom was written against. So the
+CLI the compiler exposes is a `v0`-line promise on the same footing as the standard library's API,
+and a mode word or a flag is renamed the way a public function is. The compiler has not had to keep
+that promise before; it is the one new obligation this design creates, and it is the right place for
+it, since the alternative is a template layer in the launcher that would have had to keep it instead.
+
+### Parallels
+
+Nix: one builder command per derivation, all of them against one store, dependencies' builders run
+once and cached, `stdenv` a package you depend on to inherit a whole build — composition by
+dependency, no tasks. Cargo: fixed verbs, one `build.rs` per package under a fixed contract, and the
+lesson about what a dependency may execute. Debian's `dh`: a package's whole build is one line, and
+what the line does is inherited from what the package depends on. Go: the compiler is the only thing
+that runs. The anti-parallel is every tool that let build configuration travel along runtime
+dependency edges, which is what parent POMs and convention plugins are workarounds for — and what the
+leaf-package discipline above exists to avoid without a mechanism.
+
+### Open
+
+- **Target-peculiar parameters.** The clause reference says a chip package states what it knows
+  (`mcu attiny85`) and the consumer may override. There is no such clause any more, and the leaning is
+  that there never needed to be one: the chip package ships the plugin that knows the chip, so the fact
+  is content of a plugin rather than a line of any descriptor. Undecided until a chip package exists.
+- **The flag between the two root lists**, and whether the compiler defaults a mode — both the
+  compiler's, recorded here only so the launcher's side is known to be waiting on them.
+- **A line on a library root** is the one placement this design leaves the author to get right. If it
+  turns out to be gotten wrong often, a lint at the author's build ("`root` carries a line every
+  consumer will run") is the shape of the fix, never a scope.
 
 ## Distribution: git-native
 
@@ -455,7 +672,9 @@ package lang {                               -- a layer, and a plugin-shipping p
   a library, and two is an error naming both. The framework declares its own (`main eliot.test.Runner`
   on the eliot-test package), so a user's `test` package declares nothing and inherits the command by
   depending on it — a package describing *itself*, which is the same side of the identity/mechanism
-  split as `plugin`, and not a dependency configuring its consumer.
+  split as `plugin`, and not a dependency configuring its consumer. **Amended 2026-09-16: `main` is
+  replaced by the `compiler <arguments>` line** — the package that knows the entry point writes `-m`
+  on its own line, and the "exactly one" rule has nothing left to count ("What a build runs").
 - **Everything else about the invocation is read off the closure**, which is why `backend { … }` and
   `kind` are gone from this reference. The compiler command word comes from the one `plugin` in the
   closure that declares one (Q1); the artifact kind and any parameters peculiar to a target — `mcu
@@ -481,7 +700,9 @@ package lang {                               -- a layer, and a plugin-shipping p
   `compiler` says it is the base asset — the one holding the compiler itself, and the parent loader
   everything else hangs off (Q3). An asset declaring neither is an always-on contributor. The hash is
   not here: an asset is built from the tagged tree *after* the tag exists, so `eliot.lock` records one
-  on first fetch.
+  on first fetch. **Amended 2026-09-16: the clause becomes plain `asset <name>`**, with neither
+  sub-clause — every asset in the closure is on the classpath, and which word the compiler answers to
+  is on the `compiler` line of whoever calls it ("What a build runs").
 - Packages of one repository version together (tags are repo-wide): selector lines into the same repo
   at different minimums simply both feed MVS. Per-package versioning does not exist.
 ### Examples
@@ -860,7 +1081,10 @@ and the answer. Q1 was decided by the bill-of-materials amendment; Q2 and Q3 wer
 2026-09-14, which is what let the descriptor stop speaking Maven — `Plugin(pluginAsset, pluginBackend,
 compilerBase)` is the model now, and `plugin <asset> { backend <word> | compiler }` the clause. Q4 is
 still a leaning, and it is the one the descriptor does not have to carry: where `eliot test` finds its
-main module is the test verb's business, and the test verb is unwritten.
+main module is the test verb's business, and the test verb is unwritten. **All four are overtaken on
+2026-09-16** by the `compiler` line ("What a build runs"): Q1's word is on the line, Q3's marker is
+unnecessary once every asset is on the classpath, Q4's `main` is the framework's line, and Q2 is the
+only one still standing, because it was never about the descriptor.
 
 **Q1. Which plugin is the backend, and what word selects it.** The rule above ("Platforms") says an
 a package need not name its backend when its closure offers exactly one candidate. That never held:
@@ -1264,4 +1488,6 @@ twice.)*
   outgrows lockfile-verified mirrors.
 - **Plugin classpath isolation** — one classpath or one classloader per plugin; see Q2 of
   "Compiler plugins", which records what the compiler's own API makes possible.
-- **On-target `run`/`test` mechanics** — the delegated-verb contract for MCU backends.
+- **On-target `run` mechanics** — what an MCU backend's `run` mode does (flash, reset, monitor). Since
+  2026-09-16 this is a mode word on a `compiler` line and a contract of the backend alone; nothing in
+  the tool delegates it.
