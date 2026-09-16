@@ -192,7 +192,7 @@ dependencies is that their tags are spelled the current way, which is why this r
 eliot `v0.5` and eliot-test `v0.2`. `v0.4` and `v0.2` are the first tags of each with `asset` clauses
 and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
 `v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow. A
-launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16); `v0.4` is pinned.
+launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` and `v0.4` are published (2026-09-16); `v0.5` is pinned, the first whose usage lists the declared packages.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
@@ -226,8 +226,8 @@ package root is `test/`.
 
 There are two ways in. `./eliotw <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.4`) is the first with the
-verbless command line, so `./eliotw test` in a checkout holding nothing but the wrapper builds and runs
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.5`; `v0.4` was the first with the
+verbless command line), so `./eliotw test` in a checkout holding nothing but the wrapper builds and runs
 this project's suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
