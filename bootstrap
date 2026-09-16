@@ -1,12 +1,12 @@
 #!/bin/sh
 #
-# The build tool, built from this working tree and then run: `./bootstrap build test` is `./eliotw build
-# test` with the launcher this checkout's `src` compiles to in place of the published one.
+# The build tool, built from this working tree and then run: `./bootstrap test` is `./eliotw test` with
+# the launcher this checkout's `src` compiles to in place of the published one.
 #
 # Two stages, the way a self-hosting compiler bootstraps. Stage 0 is this script: it compiles the
 # launcher *without reading `eliot.pkg`'s structure*, from a closure written down here — eliot's three
 # plugin assets and its `lang`, `stdlib` and `jvm` layer sources, at one tag. Stage 1 is the launcher that
-# comes out, and it does everything else, `build launcher` included. Nothing in the chain is a launcher
+# comes out, and it does everything else, `launcher` included. Nothing in the chain is a launcher
 # somebody published, so a change to the descriptor format cannot leave this repository unable to build
 # itself — which is what `v0.1` and `v0.2` both had to be cut by hand around.
 #

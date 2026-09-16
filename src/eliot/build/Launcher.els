@@ -38,19 +38,17 @@ import eliot.build.Command
  * — which is why a platform check has to be a program with a `main` of its own. This is that program,
  * and what it costs to keep is running it.
  *
- * **Three verbs, each one step further down the same road.** All of them read the descriptor in the
- * working directory and close one configuration over the dependency graph; they differ in what they do
- * with the answer. `eliot resolve <configuration>` prints what was selected. `eliot roots
- * <configuration>` checks each selected version out and prints the source directories that
- * configuration compiles from. `eliot build <configuration>` fetches the plugin assets those same
- * versions ship and runs the compiler over those same roots once per `compiler` line in the closure —
- * which is the point the tool stops describing a build and performs one. The lockfile the resolution deserves and the rest of the verb
- * set are the steps after these.
+ * **One argument, and it is a package.** `eliot <package>` reads the descriptor in the working
+ * directory, closes that package over the dependency graph, checks each selected version out, fetches
+ * the plugin assets those versions ship and runs the compiler over the package's roots once per
+ * `compiler` line in the closure. What that amounts to is the lines' business — `eliot test` compiles
+ * this project's suite and runs it, `eliot launcher` builds the jar — so the tool has nothing to name
+ * a verb after. The lockfile the resolution deserves is the step after this.
  *
  * **What a build reports is the compiler's own output and the compiler's own exit code.** The
  * subprocess inherits this program's streams rather than being captured, because a compiler's
  * diagnostics are for the person who ran it and buffering them to re-print would only make them late;
- * and the first code that is not zero is registered as this program's, so `eliot build test && …`
+ * and the first code that is not zero is registered as this program's, so `eliot test && …`
  * means what a shell reads it as — and a suite whose line runs it fails the build it is in. That is `docs/effectful-modules.md` §16's one missing platform effect, which the standard
  * library grew for this.
  */
@@ -74,14 +72,14 @@ private def javaCommandName: {Environment} String = environmentVariable("ELIOT_J
  * everything below `main` states what it performs and nothing below `main` states `Environment`.
  */
 private def answer(commandLine: List[String], here: Path, java: String): {FileSystem, Process} List[String] =
-   foldOption(reporting(usage), request -> attempted(request, here, java), requested(commandLine))
+   foldOption(reporting(usage), name -> attempted(name, here, java), requested(commandLine))
 
 /**
  * Lines that say the tool did not do what it was asked, and the exit code that says so to whatever
  * asked.
  *
  * Every refusal goes through here, including the usage a command line the tool does not offer gets:
- * `eliot roots test && …` running the second half after the first half printed a failure was
+ * `eliot test && …` running the second half after the first half printed a failure was
  * `docs/effectful-modules.md` §16's open finding, and one register is the whole of it now that the
  * standard library has somewhere to put a code. One rather than the channel's own number, because a
  * shell asks whether this worked and nothing here is a program whose codes anybody enumerates.
@@ -93,32 +91,32 @@ private def reporting(lines: List[String]): {Process} List[String] = {
 }
 
 /**
- * What `request` answers, or the single line naming what refused.
+ * What building `name` answers, or the single line naming what refused.
  *
  * **Six channels meet here, and keeping them apart is the point.** A repository git said no to, a
  * release asset that would not download, a machine that will not run a program or make a directory, a
  * descriptor that will not parse, a graph that will not close and a closure that describes nothing
  * to run are six different things for a user to do something about, so each is discharged separately
  * and reports as itself. The design said this boundary would carry four or five; the two the build
- * verb added are both about the half of a dependency that is not sources.
+ * build added are both about the half of a dependency that is not sources.
  *
  * Every one is spelled out, and has to be: the row names `Throw` six times, so nothing but the call
  * can say which of them a given `catch` is for.
  */
-private def attempted(request: Request, here: Path, java: String): {FileSystem, Process} List[String] =
+private def attempted(name: PackageName, here: Path, java: String): {FileSystem, Process} List[String] =
    catch[IoError, List[String]](
       catch[GitError, List[String]](
          catch[AssetError, List[String]](
             catch[DescriptorError, List[String]](
                catch[ResolutionError, List[String]](
                   catch[InvocationError, List[String]](
-                     performed(request, here, java),
+                     performed(name, here, java),
                      problem -> reporting(
-                        failed("cannot build '" ++ show(requestedPackage(request)) ++ "'", show(problem))
+                        failed("cannot build '" ++ show(name) ++ "'", show(problem))
                      )
                   ),
                   problem -> reporting(
-                     failed("cannot resolve '" ++ show(requestedPackage(request)) ++ "'", show(problem))
+                     failed("cannot resolve '" ++ show(name) ++ "'", show(problem))
                   )
                ),
                problem -> reporting(failed("malformed " ++ descriptorFileName, show(problem)))
@@ -131,8 +129,8 @@ private def attempted(request: Request, here: Path, java: String): {FileSystem, 
    )
 
 /**
- * The whole of the tool, composed: read the descriptor where the user is standing, and run what was
- * asked for against the packages the cache can reach.
+ * The whole of the tool, composed: read the descriptor where the user is standing, and build the
+ * package that was named against the packages the cache can reach.
  *
  * `with gitPackages with shellGit` is that composition. The inner binding answers what the tool asks
  * of a package — a descriptor, an anchor, a tree — out of the mirror cache; the outer one gives that
@@ -145,12 +143,12 @@ private def attempted(request: Request, here: Path, java: String): {FileSystem, 
  * the one place that answers, because where a build caches what it fetched is a property of the machine
  * it runs on rather than of anything the resolver knows.
  *
- * Both verbs are rendered *inside* it, so there is one `provide[Path, List[String]]` rather than one
- * per verb — the composition is written once, and two instantiations whose JVM descriptors agree are
- * the compiler finding in `docs/effectful-modules.md` §11.3 that this would walk into.
+ * The build runs *inside* it, and there is one `provide[Path, List[String]]` in the program — two
+ * instantiations whose JVM descriptors agree are the compiler finding in `docs/effectful-modules.md`
+ * §11.3, which a second `provide` of the same shape would walk into.
  */
 private def performed(
-      request: Request,
+      name: PackageName,
       here: Path,
       java: String
    ): {
@@ -161,33 +159,12 @@ private def performed(
 
    provide(
       cacheRoot(here),
-      rendered(request, descriptor, here, java) with gitPackages with shellGit with shellAssets
+      compiled(name, descriptor, here, java) with gitPackages with shellGit with shellAssets
    )
 }
 
 /**
- * What each verb is, against a source that answers: `resolve` closes the graph and reports it,
- * `roots` assembles what that closure compiles from and lists it.
- *
- * The only place the two differ, and it is four lines — which is the shape a fixed verb set should
- * have, since everything a verb shares with its siblings is above it and everything it needs beneath
- * it is an effect.
- */
-private def rendered(
-   request: Request,
-   descriptor: Descriptor,
-   here: Path,
-   java: String
-): {
-   Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError]
-} List[String] = request match {
-   case Resolve(name) -> report(name, resolve(name, descriptor))
-   case Roots(name)   -> reportRoots(sourceRoots(name, Project(here, descriptor)))
-   case Build(name)   -> compiled(name, descriptor, here, java)
-}
-
-/**
- * The build verb: one closure, read twice — once for what to compile and once for what to run over
+ * The build: one closure, read twice — once for what to compile and once for what to run over
  * it — then the assets on disk and the compiler once per line.
  *
  * Twice from *one* resolution, which is why `rootsOf` takes one rather than making its own: the roots

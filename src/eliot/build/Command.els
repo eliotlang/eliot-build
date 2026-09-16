@@ -1,97 +1,60 @@
 import eliot.collection.List
 import eliot.file.Path
 import eliot.system.Process
-import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
 import eliot.build.model.PackageId
-import eliot.build.resolve.Selection
 
 /**
  * What the tool was asked for, and what it says back.
  *
- * A module of its own because none of it is the tool *running*: reading a verb and rendering a
- * resolution are decisions about text, true of a command line and a resolution whether or not
- * anything is cloned, so they are testable without a platform beneath them while
- * `eliot.build.Launcher` — which is the boundary, and is where the implementations are bound — can
- * never be. That is the same cut `eliot.build.format.DescriptorWriter` makes against the parser, for
- * the same reason, and the import list is the argument here too: this knows what a package name and
- * a selection are and nothing about git, the filesystem or a subprocess.
+ * A module of its own because none of it is the tool *running*: reading a command line and spelling
+ * the compiler's are decisions about text, true whether or not anything is cloned, so they are
+ * testable without a platform beneath them while `eliot.build.Launcher` — which is the boundary, and
+ * is where the implementations are bound — can never be. That is the same cut
+ * `eliot.build.format.DescriptorWriter` makes against the parser, for the same reason, and the import
+ * list is the argument here too: this knows what a package name is and nothing about git, the
+ * filesystem or a subprocess.
  *
- * **Two verbs, so there is a sum.** A fixed verb set is the design's first decision, and it was worth
- * exactly nothing while there was one verb; `Request` arrives now, with the second, rather than in
- * anticipation of it. Every verb takes a *package* and resolves it, which is the shape the rest of the
- * set has too: a verb names what to do *with* a resolution, and the resolution is the argument's
- * business.
- *
- * `resolve` reports to a person — a header and an indented line per package. `roots` reports to
- * whatever runs next: one directory per line, unadorned, because the list is the compiler's `--path`
- * arguments and a shell is the only reader that matters. That the two verbs render differently is the
- * decision, not an oversight.
+ * **There are no verbs.** `eliot <package>` runs every `compiler` line in the package's closure, and
+ * what that *does* — compile, run a suite, flash a board, render the docs — is the line's to say, so a
+ * word in front of the package could only ever have been a name for "do it". `resolve` and `roots`,
+ * the two questions the tool used to answer, went with `build`: they were queries about a closure, and
+ * the query a closure is actually asked by something other than a person is the IDE's project model
+ * (`docs/build-system.md`, "IDE integration"), which is a machine-facing interface of its own rather
+ * than a verb beside a package name.
  *
  * **`eliot.system.Process` is imported for two pure list builders and nothing else.** A command line
  * is text — `command("java").withArgument("-cp")` is the spelling this project already uses for one —
  * and assembling the compiler's is exactly the kind of decision that belongs here rather than at a
- * boundary that cannot be tested. Nothing in this module performs the effect; `build` spawns what this
- * module wrote.
+ * boundary that cannot be tested. Nothing in this module performs the effect; the launcher spawns
+ * what this module wrote.
  */
 
 /**
- * What a command line asks the tool to do: name the versions one package resolves to, name the
- * directories it compiles from, or compile them.
- */
-data Request =
-   Resolve(resolvedPackage: PackageName) |
-   Roots(rootsPackage: PackageName) |
-   Build(builtPackage: PackageName)
-
-/**
- * What `commandLine` asks for, absent where it asks for anything the tool does not offer.
+ * The package `commandLine` names, absent where it names anything else.
  *
- * Absent covers every unknown verb, a missing package name and a spare argument alike, because a
- * tool that read past an argument it did not understand would act on something the user did not
- * name. What is *not* refused here is a package no descriptor declares: that is a fact about a
- * descriptor this module has never seen, and the resolver already reports it against the one it has.
+ * Absent covers a missing name, a spare argument and a word starting `-` alike: a tool that read past
+ * an argument it did not understand would act on something the user did not name, and a leading dash
+ * is kept free so that an option can arrive later without first being mistaken for a package. What
+ * is *not* refused here is a package no descriptor declares: that is a fact about a descriptor this
+ * module has never seen, and the resolver already reports it against the one it has.
+ *
+ * Written with `fold` rather than `if..else`, and the reason is a compiler finding rather than a
+ * preference: a complete `if..else` discharges an `Abort`, and `runAbort[Option[PackageName]]` erases
+ * to the same JVM descriptor as the `runAbort[Option[String]]` that `eliot.system.Environment` needs to
+ * read a variable. Two instantiations, one emitted native (`docs/effectful-modules.md` §11.3) — and what
+ * died was reading `ELIOT_JAVA`, in a module that never mentions one. `fold` introduces no `Abort`, so
+ * there is nothing to collide. Undo this once the compiler emits both.
  *
  * ```eliot
- * val request = requested(command("resolve").withArgument("controller-jvm"))
+ * val name = requested(singleton("controller-jvm"))
  * ```
  */
-def requested(commandLine: List[String]): Option[Request] = {
-   val verb = at(0, commandLine) orElse ""
-   val named = at(1, commandLine) orElse ""
+def requested(commandLine: List[String]): Option[PackageName] = {
+   val named = at(0, commandLine) orElse ""
 
-   fold(size(commandLine) == 2, verbRequest(verb, PackageName(named)), None)
+   fold(size(commandLine) == 1 && named != "" && !startsWith("-", named), Some(PackageName(named)), None)
 }
-
-/**
- * The package `request` is about — every verb takes one, and a failure has to name it.
- */
-def requestedPackage(request: Request): PackageName = request match {
-   case Resolve(name) -> name
-   case Roots(name)   -> name
-   case Build(name)   -> name
-}
-
-/**
- * What a resolution looks like on a terminal: the package it is of, then one indented line per
- * dependency.
- *
- * The order is the resolution's own, which is canonical per repository rather than the order the
- * closure happened to discover things in — so two runs of one graph print the same text, and a
- * future lockfile records the same lines it shows.
- */
-def report(name: PackageName, resolution: Resolution): List[String] =
-   prepend(resolution.selections.map(selectionLine), show(name) ++ ":")
-
-/**
- * What an assembly looks like on a terminal: one source root per line and nothing else.
- *
- * Deliberately not `report`'s shape. These lines are arguments — `eliot roots test` exists to be read
- * by whatever compiles, so a header to strip and an indent to trim would be two things every caller
- * has to undo. The order is the assembly's: the project's own roots first, then the dependencies in
- * the resolution's canonical order.
- */
-def reportRoots(roots: List[Path]): List[String] = roots.map(show)
 
 /**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
@@ -162,40 +125,10 @@ def classpathOf(directories: List[Path]): String =
 def failed(doing: String, problem: String): List[String] = singleton("eliot: " ++ doing ++ ": " ++ problem)
 
 /**
- * How to invoke the tool, for a command line that named nothing it offers — one line per verb, and
- * one saying what the argument they share is.
+ * How to invoke the tool, for a command line that named no package: what the one argument is, and
+ * what naming it does.
  */
 def usage: List[String] =
-   singleton("usage: eliot <verb> <package>") ++
-      singleton("   " ++ resolveVerb ++ "   the version selected for each dependency of the package") ++
-      singleton("   " ++ rootsVerb ++ "     the source directories the package compiles from") ++
-      singleton("   " ++ buildVerb ++ "     run every compiler line of the package's closure over them") ++
+   singleton("usage: eliot <package>") ++
+      singleton("   runs every compiler line in the package's closure over the package's sources") ++
       singleton("   <package>   'root', 'test', or any package declared in " ++ descriptorFileName)
-
-/**
- * Written with `fold` rather than as the `if..else..else None` chain it obviously is, and the reason is
- * a compiler finding rather than a preference: a complete `if..else` discharges an `Abort`, and
- * `runAbort[Option[Request]]` erases to the same JVM descriptor as the `runAbort[Option[String]]` that
- * `eliot.system.Environment` needs to read a variable. Two instantiations, one emitted native
- * (`docs/effectful-modules.md` §11.3) — and what died was reading `ELIOT_JAVA`, in a module that never
- * mentions one. `fold` introduces no `Abort`, so there is nothing to collide. Undo this once the
- * compiler emits both.
- */
-private def verbRequest(verb: String, name: PackageName): Option[Request] =
-   fold(
-      verb == resolveVerb,
-      Some(Resolve(name)),
-      fold(
-         verb == rootsVerb,
-         Some(Roots(name)),
-         fold(verb == buildVerb, Some(Build(name)), None)
-      )
-   )
-
-private def resolveVerb: String = "resolve"
-
-private def rootsVerb: String = "roots"
-
-private def buildVerb: String = "build"
-
-private def selectionLine(selection: Selection): String = "   " ++ show(selection)

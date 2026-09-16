@@ -78,11 +78,11 @@ jobs:
       - name: The suite is green
         run: |
           mkdir -p out
-          ./bootstrap build test
+          ./bootstrap test
 
       - name: The launcher
         run: |
-          ./bootstrap build launcher
+          ./bootstrap launcher
           mkdir -p out/release
           cp target/Launcher.jar out/release/eliot-launcher.jar
 
@@ -91,7 +91,7 @@ jobs:
       - name: The launcher builds its own repository
         run: |
           rm -f target/Runner.jar
-          java -jar out/release/eliot-launcher.jar build test
+          java -jar out/release/eliot-launcher.jar test
 
       - name: The notes
         run: |

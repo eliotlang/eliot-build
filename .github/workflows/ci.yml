@@ -29,18 +29,18 @@ jobs:
           key: packages-${{ hashFiles('eliot.pkg') }}
           restore-keys: packages-
 
-      # `build test` compiles the suite and runs it (`eliot-test//suite`'s `compiler run` line), and
+      # `test` compiles the suite and runs it (`eliot-test//suite`'s `compiler run` line), and
       # exits with the runner's code, so a failing case fails the step.
       - name: Stage 1 builds a green suite
-        run: ./bootstrap build test
+        run: ./bootstrap test
 
       - name: Stage 1 builds the launcher
         run: |
-          ./bootstrap build launcher
+          ./bootstrap launcher
           mkdir -p out
           cp target/Launcher.jar out/Launcher.jar
 
       - name: Stage 2 builds a green suite
         run: |
           rm -f target/Runner.jar
-          java -jar out/Launcher.jar build test
+          java -jar out/Launcher.jar test

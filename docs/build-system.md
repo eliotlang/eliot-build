@@ -33,8 +33,10 @@ package carries at most one `compiler <arguments>` line, `eliot <package>` runs 
 line in the closure over the invoked package's roots, and a bill of materials composes a full build
 (suite, docs, style) by depending on the packages that carry the lines. `main`, `plugin`'s markers and
 the `build`/`run`/`test` verbs go with it ("What a build runs", below). Implemented the same day, all
-but the two root lists and the verb's name ("What was built", below): `eliot build test` compiles the
-suite *and runs it*, because the framework's `suite` package carries the line.
+but the two root lists ("What was built", below): `eliot test` compiles the suite *and runs it*,
+because the framework's `suite` package carries the line. Amended 2026-09-16: **the tool has no verbs
+at all** — `build` was renamed away to `eliot <package>`, and `resolve` and `roots` were removed rather
+than kept beside it ("What was built", below).
 
 **Where the implementation stands** (2026-09-16, 264 tests):
 
@@ -51,12 +53,16 @@ suite *and runs it*, because the framework's `suite` package carries the line.
 | `Assembly` | a resolution and the standard layout become source roots | done |
 | `Assets` | a release asset's location, and getting one onto disk | done |
 | `Invocation` | every asset for the classpath, every `compiler` line in the closure | done |
-| `Launcher` | the `main`, the composition, the failure channels | three verbs: `resolve`, `roots`, `build` (one run per line) |
-| `Command` | what a command line asks for, what a resolution reads as | done for those verbs |
+| `Launcher` | the `main`, the composition, the failure channels | `eliot <package>`, one run per line |
+| `Command` | what a command line names, how the compiler is spelled | done |
 | `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
 | — | lockfile | not started |
 | — | the `compiler` line: every line in the closure | done 2026-09-16 |
-| — | the two root lists, and `build` renamed to `eliot <package>` | not started |
+| — | `build` renamed to `eliot <package>`; `resolve` and `roots` removed | done 2026-09-16 |
+| — | the two root lists | not started |
+
+The three paragraphs below are the tool's history, in the verbs it had then; since 2026-09-16 there is
+only `eliot <package>`, which does what `eliot build` did.
 
 **There is a tool now, and there is a package to point it at.** `eliot resolve <configuration>` reads
 the descriptor where the user is standing, closes that configuration over the graph and prints what was
@@ -213,8 +219,10 @@ platform-neutral; the platform's backend plugin supplies the meaning of `run` (a
 hardware-in-the-loop later). Precedent: embedded Rust never got `cargo flash`; it got
 `runner = probe-rs` under an unchanged `cargo run`.
 
-**Amended 2026-09-16: the verb set is one verb**, and the paragraph above is now a statement about the
-backend's `run` mode rather than about a verb of the tool. What replaces `build/run/test` is below.
+**Amended 2026-09-16: the verb set is empty** — the command line is `eliot <package>` — and the
+paragraph above is now a statement about the backend's `run` mode rather than about a verb of the tool.
+What stays fixed is the descriptor's meaning and what a package name does. What replaces
+`build/run/test` is below.
 
 ## What a build runs: one compiler line per package, and no tasks (2026-09-16)
 
@@ -232,9 +240,9 @@ compiler <arguments…>
 
 `eliot <package>` resolves the closure, checks the selected versions out, fetches every asset they
 ship, and then runs the compiler **once per `compiler` line in the closure**, with that line's
-arguments, over the invoked package's roots. That is the whole verb, and it is the only one that
-builds. `resolve` and `roots` remain as *questions* about the model — they are the project-model query
-in two spellings — and are not the same kind of thing.
+arguments, over the invoked package's roots. That is the whole command line. `resolve` and `roots`,
+which were *questions* about the model rather than builds, were removed with the verb: the
+project-model query is where such questions go ("IDE integration", below).
 
 ### What it looks like
 
@@ -309,7 +317,7 @@ concept, and the compiler receives both with a flag between them. The compiler c
 and a plugin asks whether a root is current; the compiler itself can cap warnings from dependency
 roots the way every compiler does (javac's `-sourcepath` against `-classpath`, rustc's `--cap-lints`
 on dependencies). Whether the flag is `--dependency` or a `--` separator is the compiler's call. The
-same two lists are what `eliot roots` prints and what the IDE query returns, since an IDE indexes
+same two lists are what the IDE query returns, since an IDE indexes
 project and library sources differently anyway — the split is the project model, not a compiler
 quirk.
 
@@ -437,7 +445,7 @@ The launcher side is the design above with two deviations and two decisions it l
   first `--` anywhere, which would have swallowed every long flag on a line. A word that merely starts
   with two dashes is an argument now.
 - **A closure with no line is refused** (`NothingToRun`), rather than compiling nothing and exiting 0:
-  `eliot build root` on a library would otherwise read as green. It is the one `InvocationError`; the
+  `eliot root` on a library would otherwise read as green. It is the one `InvocationError`; the
   six `ToolchainError`s went with `Toolchain`.
 - **Lines run in canonical order and the first failure stops the rest** — the project's opened
   packages first, then the dependencies in resolution order, the order `Assembly` lists roots in — and
@@ -450,8 +458,27 @@ first word is a mode rather than a backend is given the one backend accepting th
 backend on the classpath does not make `run` ambiguous). eliot-test's runner registers exit code 1 when
 a case fails, which is what makes a red suite a red build.
 
+Later the same day, **the verbs went**:
+
+- **`eliot <package>` is the whole command line.** `build` was the word for "do what the lines say",
+  and a line may run a suite, flash a board or render docs, so the word could only ever mislead. The
+  command line is one package name; anything else — no name, a second word, a word starting `-` — is
+  the usage and exit 1. The dash is kept free so an option can arrive later without first being
+  read as a package, and `eliot build test`, the old spelling, is refused rather than read as a
+  package called `build`.
+- **`resolve` and `roots` were removed, not turned into options.** Both were questions about a
+  closure put to a person. `roots` had two users — the `eliot.paths` stopgap and the hand check of a
+  build by passing its roots to the compiler — and both belong to the project-model query ("IDE
+  integration", below), which is a machine-facing interface of its own when it is built. Until then
+  the IDE stopgap is written by hand.
+- **Bare `eliot` does not build everything.** Considered and dropped: every package runs a suite
+  twice once a bill of materials composes it (the two invocations mount different roots, so nothing
+  can merge them and no cache makes a `run` line free), every package shares one `target/` in which
+  two builds of one module overwrite each other, and a leaf whose line runs a server would block the
+  rest. A project that wants "everything" writes the bill of materials that says what that is.
+
 Still the design's and not the tool's: the two root lists (every root is still passed positionally,
-since the compiler has no flag between them yet) and renaming `build <package>` to `eliot <package>`.
+since the compiler has no flag between them yet).
 
 ## Distribution: git-native
 

@@ -79,17 +79,18 @@ the run boundary, the one place writing `with gitPackages with shellGit with she
 the source where mirrors live, and where the six failure channels are discharged separately, each
 reporting as itself and every one of them registering a non-zero exit code — and **`Command`**, the
 half that is about text rather than about running
-(the `Request` sum a command line asks for, what a resolution and an assembly read as), split out
-because it is testable with no platform beneath it and the boundary never can be. Three verbs, each
-taking a **package name**: `eliot resolve <package>` prints the version selected per dependency, `eliot
-roots <package>` checks each out and prints the source directories it compiles from, and `eliot build
-<package>` fetches the plugin assets those same versions ship and runs the compiler over those same
+(the package a command line names, how the compiler is spelled, the usage), split out
+because it is testable with no platform beneath it and the boundary never can be. **There are no
+verbs**: the command line is `eliot <package>` and nothing else — it resolves the package, checks the
+selected versions out, fetches the plugin assets they ship and runs the compiler over the package's
 roots **once per `compiler` line in the closure**, stopping at the first that fails — inheriting its
-streams and registering its exit code. `build test` therefore *runs* the suite: `eliot-test//suite`
-carries `compiler run -m eliot.test.Runner`, the compiler's `run` mode executes the jar, and the
-runner exits 1 on a failing case. `root` is the library itself, which is
-the query the IDE wants and the old model had no way to ask. The lockfile and the rest of the verb set
-are the steps after them.
+streams and registering its exit code. What that *does* is the lines' business, which is why no word
+for it survives: `eliot test` *runs* the suite, because `eliot-test//suite` carries `compiler run -m
+eliot.test.Runner`, the compiler's `run` mode executes the jar, and the runner exits 1 on a failing
+case; `eliot launcher` builds the jar. `resolve` and `roots` were removed on 2026-09-16 rather than kept
+as options — questions about a closure belong to the project-model query (`docs/build-system.md`, "IDE
+integration"), which is not built. A second word, no word, or a word starting `-` is the usage and exit
+1. The lockfile is the step after this.
 
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
@@ -134,7 +135,7 @@ that. There is no `pure` any more, no capture tag and no carrier.
 
 A major version is a branch, a release is an **annotated** tag on it; the line is `v0`. To publish:
 fast-forward `v0` to the commit, `git tag -a v0.<n>` on it, push both. `.github/workflows/release.yml`
-then runs `./bootstrap build test`, builds the jar with `./bootstrap build launcher`, checks that the
+then runs `./bootstrap test`, builds the jar with `./bootstrap launcher`, checks that the
 jar it is about to attach builds a green suite on its own, and attaches it as `eliot-launcher.jar` with
 its sha256 in the notes. **A release is bootstrapped from its own source**, not built by the previous
 release: that chain broke twice (`v0.1` had nothing before it, and `v0.1`'s launcher cannot read the
@@ -153,7 +154,7 @@ the style of the existing history.
 
 ## Bootstrapping: the tool built from this working tree
 
-**`./bootstrap <verb> <package>` is the way to run and check this repository.** It is `./eliotw` with
+**`./bootstrap <package>` is the way to run and check this repository.** It is `./eliotw` with
 the working tree's launcher in place of the published one, in two stages. Stage 0 is the script: it
 clones eliot at the tag `eliot.pkg`'s `dep` lines name (they must all agree), fetches its three plugin
 assets, and compiles `src` against the `lang`/`stdlib`/`jvm` layer sources into
@@ -163,9 +164,9 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap build test                                       # compiles and runs the suite, 264 green
-./bootstrap build launcher                                   # target/Launcher.jar, stage 1's output
-java -jar target/Launcher.jar build test                     # stage 2: that jar builds and runs it too
+./bootstrap test                                             # compiles and runs the suite, 258 green
+./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
+java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
 
 That sequence is `.github/workflows/ci.yml`, run on every push, and it is the platform check below
@@ -189,9 +190,9 @@ eliot `v0.4` and eliot-test `v0.2`, the first tags of each with `asset` clauses 
 (and eliot's the first compiler with the `run` mode and a default backend). A launcher older than
 `v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16) and pinned.
 
-**The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
+**The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 264 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 258 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -219,11 +220,12 @@ package root is `test/`.
 
 ### Running the tool
 
-There are two ways in. `./eliotw <verb> <package>` is the user's: the committed wrapper reads
+There are two ways in. `./eliotw <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.3`) has `build`, so
-`./eliotw build test` in a checkout holding nothing but the wrapper builds and runs this project's
-suite. It still runs the *published* launcher and never your
+it, so it needs no compiler checkout and no mill. **The pinned launcher (`v0.3`) predates the verbless
+command line** and still wants `./eliotw build test` (and still has `resolve` and `roots`); from the
+first release after it, the spelling is `./eliotw test`. Either way, in a checkout holding nothing but
+the wrapper it builds and runs this project's suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
 which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
@@ -237,29 +239,27 @@ cd /home/robert/personal/eliot
    /home/robert/personal/eliot-build/src \
    -o /home/robert/personal/eliot-build/target
 cd <any project with an eliot.pkg>
-java -jar /home/robert/personal/eliot-build/target/Launcher.jar resolve test
-java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test
-java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar test
 ```
 
-`build` is the one that exercises the whole stack, and it is the end-to-end check now that it exists:
-it resolves, checks out, fetches every plugin asset the selected versions ship, and runs the compiler
-over the roots itself. The strongest form of it is this repository building itself — `build launcher`
-then running the jar that came out — and the broader form is another project, with `target/` deleted
+That exercises the whole stack, and it is the end-to-end check: it resolves, checks out, fetches every
+plugin asset the selected versions ship, and runs the compiler over the roots itself. The strongest
+form of it is this repository building itself — `launcher` then running the jar that came out — and the broader form is another project, with `target/` deleted
 first so the clone, the checkout and the download are all part of what is checked:
 
 ```bash
 cd /home/robert/personal/eliot-test
 rm -rf target
-java -jar /home/robert/personal/eliot-build/target/Launcher.jar build test   # must exit 0, green
+java -jar /home/robert/personal/eliot-build/target/Launcher.jar test   # must exit 0, green
 ```
 
 A package's `eliot.pkg` must require eliot at `v0.4` or later for this to work at all — every earlier
 tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository and
 `../eliot-test` both require `v0.4`. Three things to check while you are there: a failing case must
-make `build test` exit 1, a deliberate syntax error in any
-mounted source must make `build` exit 1 with the compiler's own diagnostics on the terminal, and
-`build nosuch` must exit 1 rather than printing a failure and exiting 0.
+make `test` exit 1, a deliberate syntax error in any
+mounted source must make the build exit 1 with the compiler's own diagnostics on the terminal, and
+`nosuch` — and a bare command line, and the old `build test` — must exit 1 rather than printing a
+failure and exiting 0.
 
 **Checking against tags that are not published yet** — a change that needs a new eliot or eliot-test
 tag has to be verified before the tag exists, and nothing in the tool can be pointed elsewhere. Git and
@@ -273,13 +273,15 @@ resolves, checks out and builds exactly as it will against GitHub. `./bootstrap`
 `<clone>/releases/download/<tag>/`. Do it in a copy of the project so the real `target/cache` never holds
 a tag GitHub does not.
 
-The older half of the check still works and is what to fall back on when `build` itself is what is
-suspect: `roots` prints the compiler's argument list, and passing those lines to `Main` by hand builds
-the same jar. It cannot go through `examples.run`, which always appends the checkout's own layer roots
+The older half of the check is what to fall back on when the build itself is what is suspect, and it
+now needs the *published* `v0.3` launcher, the last with `roots` (`./eliotw roots test`, while the pin
+is `v0.3`): `roots` prints the compiler's argument list, and passing those lines to `Main` by hand
+builds the same jar. Once the pin moves past `v0.3` this fallback is gone until the project-model query
+exists. It cannot go through `examples.run`, which always appends the checkout's own layer roots
 and would mount each layer twice — drive `Main` directly with that task's classpath instead:
 
 ```bash
-ROOTS=$(java -jar /home/robert/personal/eliot-build/target/Launcher.jar roots test)
+ROOTS=$(./eliotw roots test)                  # the pinned v0.3 launcher; the working tree's has no roots
 CP=$(cd /home/robert/personal/eliot && ./mill show examples.runClasspath | python3 -c \
    'import sys,json,re; print(":".join(re.sub(r"^.*?@","",x) for x in json.load(sys.stdin)))')
 java -cp "$CP" com.vanillasource.eliot.eliotc.compiler.Main jvm exe-jar -m eliot.test.Runner \
@@ -314,12 +316,14 @@ render inside every `provide`.
 ### `eliot.paths` is gone
 
 It was the stopgap for exactly one thing — telling the IntelliJ LSP where every source root is, in a
-world with no build tool to ask. There is one now: `./eliotw roots test` prints the same list, derived
-from `eliot.pkg` rather than maintained by hand beside it, and a file that has to be kept in sync with
-something that can be computed is a file that is eventually wrong.
+world with no build tool to ask. `./eliotw roots test` printed the same list, derived from `eliot.pkg`
+rather than maintained by hand beside it, and a file that has to be kept in sync with something that
+can be computed is a file that is eventually wrong. `roots` was removed on 2026-09-16 and only the
+pinned `v0.3` launcher still has it.
 
 The LSP has not learned to ask yet, so until it does it falls back to guessing roots and will not find
-the layers. Regenerating the stopgap is one line if the IDE needs it meanwhile:
+the layers. Regenerating the stopgap is one line if the IDE needs it meanwhile, as long as the pin
+is `v0.3`:
 
 ```bash
 ./eliotw roots test | sed 's/^/runtime /' > eliot.paths

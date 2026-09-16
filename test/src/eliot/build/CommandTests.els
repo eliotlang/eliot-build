@@ -3,69 +3,37 @@ import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
-import eliot.build.model.Version
-import eliot.build.model.Lineage
-import eliot.build.model.Descriptor
-import eliot.build.resolve.Selection
 import eliot.build.Command
 
 /**
  * The half of the tool that is about text rather than about running: what a command line asks for,
- * and what a resolution reads as.
+ * and how the compiler it runs is spelled.
  *
  * These cases declare nothing and arrange nothing — there is no platform under any of them, which is
  * the reason the module exists apart from `eliot.build.Launcher`. What the launcher does instead is
  * checked by running it.
  */
 def testCases: Test = {
-   "requested" should "read the package the resolve verb names" in {
-      described(requested(commandLine("resolve", "controller-jvm"))) shouldBe "resolve controller-jvm"
+   "requested" should "read the package the command line names" in {
+      described(requested(commandLine("controller-jvm"))) shouldBe "controller-jvm"
    }
    "requested" should "read the suite by the word that spells it, which is a package name like any other" in {
-      described(requested(commandLine("resolve", "test"))) shouldBe "resolve test"
+      described(requested(commandLine("test"))) shouldBe "test"
    }
-   "requested" should "tell the verbs apart, and the package is the same argument" in {
-      described(requested(commandLine("roots", "root"))) shouldBe "roots root"
+   "requested" should "read a package whose name was once a verb as that package" in {
+      described(requested(commandLine("build"))) shouldBe "build"
    }
-   "requested" should "read the verb that actually compiles" in {
-      described(requested(commandLine("build", "controller-jvm"))) shouldBe "build controller-jvm"
+   "requested" should "ask for nothing where the old verb spelling puts a word before the package" in {
+      described(requested(append(commandLine("build"), "test"))) shouldBe "<none>"
    }
-   "requested" should "ask for nothing where the verb is not one the tool offers" in {
-      described(requested(commandLine("fetch", "test"))) shouldBe "<none>"
+   "requested" should "ask for nothing rather than read an option as a package" in {
+      described(requested(commandLine("--offline"))) shouldBe "<none>"
    }
-   "requested" should "ask for nothing where no package was named" in {
-      described(requested(append(empty, "resolve"))) shouldBe "<none>"
-   }
-   "requested" should "ask for nothing rather than read past an argument it does not understand" in {
-      described(requested(append(commandLine("resolve", "test"), "--offline"))) shouldBe "<none>"
+   "requested" should "ask for nothing where the package name is empty" in {
+      described(requested(commandLine(""))) shouldBe "<none>"
    }
    "requested" should "ask for nothing on an empty command line" in {
       described(requested(empty)) shouldBe "<none>"
-   }
-
-   "report" should "name the package and then one line per dependency" in {
-      joined("/", report(PackageName("test"), resolutionOf(selected("github.com/x/foo", 1, 2))))
-         shouldBe "test:/   github.com/x/foo v1.2"
-   }
-   "report" should "keep the canonical order the resolution holds" in {
-      joined(
-         "/",
-         report(
-            PackageName("app"),
-            resolutionOf(selected("github.com/x/bar", 2, 0)).addSelection(selected("github.com/x/foo", 1, 2))
-         )
-      ) shouldBe "app:/   github.com/x/bar v2.0/   github.com/x/foo v1.2"
-   }
-   "report" should "name a package that resolved to nothing at all" in {
-      joined("/", report(PackageName("root"), Resolution(empty))) shouldBe "root:"
-   }
-
-   "reportRoots" should "print one root per line, unadorned, because the lines are arguments" in {
-      joined("/", reportRoots(append(singleton(path("/project/src")), path("/cache/x/foo@v1.2/src"))))
-         shouldBe "/project/src//cache/x/foo@v1.2/src"
-   }
-   "reportRoots" should "print nothing at all for a package that mounts nothing" in {
-      joined("/", reportRoots(empty)) shouldBe ""
    }
 
    "compilerCommand" should "put the line's words between the entry point and the first source root" in {
@@ -92,16 +60,14 @@ def testCases: Test = {
       joined("/", failed("git refused", "no such repository")) shouldBe "eliot: git refused: no such repository"
    }
 
-   "usage" should "name every verb and the argument they share" in {
+   "usage" should "name the one argument and what naming it does" in {
       joined("/", usage) shouldBe expectedUsage
    }
 }
 
 private def expectedUsage: String =
-   "usage: eliot <verb> <package>/" ++
-      "   resolve   the version selected for each dependency of the package/" ++
-      "   roots     the source directories the package compiles from/" ++
-      "   build     run every compiler line of the package's closure over them/" ++
+   "usage: eliot <package>/" ++
+      "   runs every compiler line in the package's closure over the package's sources/" ++
       "   <package>   'root', 'test', or any package declared in eliot.pkg"
 
 /**
@@ -126,25 +92,6 @@ private def compilationOf(line: String): Compilation =
       path("/project/target")
    )
 
-/**
- * A request renders as its verb and the package it is about, because a `Show[Request]` would have to
- * choose one of the three and there is nothing to choose: the verb is half of what was asked for.
- */
-private def described(request: Option[Request]): String =
-   foldOption("<none>", found -> describe(found), request)
+private def described(name: Option[PackageName]): String = foldOption("<none>", show, name)
 
-private def describe(request: Request): String = request match {
-   case Resolve(name) -> "resolve " ++ show(name)
-   case Roots(name)   -> "roots " ++ show(name)
-   case Build(name)   -> "build " ++ show(name)
-}
-
-private def commandLine(verb: String, argument: String): List[String] = append(singleton(verb), argument)
-
-private def resolutionOf(selection: Selection): Resolution = Resolution(singleton(selection))
-
-private def addSelection(selection: Selection, resolution: Resolution): Resolution =
-   Resolution(append(resolution.selections, selection))
-
-private def selected(url: String, major: Int, minor: Int): Selection =
-   Selection(repositoryAt(url), Version(Line(major), Some(minor)), None, singleton(PackageName("root")))
+private def commandLine(argument: String): List[String] = singleton(argument)

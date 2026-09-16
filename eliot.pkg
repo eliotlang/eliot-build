@@ -10,7 +10,7 @@
 --
 -- **What a build runs is one `compiler` line per package in the closure** (`docs/build-system.md`,
 -- "What a build runs"). `launcher` carries its own: build the executable, don't run it. `test` carries
--- none — `eliot-test//suite` carries `compiler run -m eliot.test.Runner`, so `eliot build test`
+-- none — `eliot-test//suite` carries `compiler run -m eliot.test.Runner`, so `eliot test`
 -- compiles the suite and runs it, and fails when a case does. Neither line is on `root`, and neither
 -- could be: every closure holding `root` would run it, the other leaf among them.
 --
