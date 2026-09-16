@@ -187,8 +187,7 @@ release anyone depends on, so the reader for them was deleted rather than kept. 
 dependencies is that their tags are spelled the current way, which is why this repository requires
 eliot `v0.4` and eliot-test `v0.2`, the first tags of each with `asset` clauses and `compiler` lines
 (and eliot's the first compiler with the `run` mode and a default backend). A launcher older than
-`v0.3` cannot read this repository's own descriptor; the pin has to move to `v0.3` once it is
-published.
+`v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16) and pinned.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
@@ -222,9 +221,9 @@ package root is `test/`.
 
 There are two ways in. `./eliotw <verb> <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. The pinned launcher has `build`, but `v0.2` cannot
-read `compiler`/`asset` clauses, so `./eliotw` is broken on this repository until `v0.3` is published
-and pinned. It still runs the *published* launcher and never your
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.3`) has `build`, so
+`./eliotw build test` in a checkout holding nothing but the wrapper builds and runs this project's
+suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
 which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
