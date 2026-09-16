@@ -180,8 +180,8 @@ blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) �
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
 eliot `v0.3` and eliot-test `v0.1`, the first tags of each that are. A launcher older than `v0.2`
-cannot read this repository's own descriptor, which is why `./eliotw` is broken here until `v0.2` is
-published and pinned — `./bootstrap` is unaffected.
+cannot read this repository's own descriptor; `v0.2` is published (2026-09-16) and pinned, and is the
+first launcher that can.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
 eliot `v0.3`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
@@ -213,11 +213,11 @@ package root is `test/`.
 
 ### Running the tool
 
-There are two ways in. `./eliotw <verb> <configuration>` is the user's: the committed wrapper reads
+There are two ways in. `./eliotw <verb> <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. As of `v0.1` that launcher has `build`, so
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.2`) has `build`, so
 `./eliotw build test` in a checkout holding nothing but the wrapper is a working build of this project
-— verified from an empty cache, 239 green. It still runs the *published* launcher and never your
+— verified from an empty cache, 259 green. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
 it at a mirror (a `file://` directory laid out as `releases/download/<tag>/eliot-launcher.jar` works,
 which is how the wrapper is tested without publishing) and `ELIOT_CACHE` moves the cache.
