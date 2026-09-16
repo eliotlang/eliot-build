@@ -46,24 +46,6 @@ def testCases: Test = {
    "PackageId" should "tell two repositories of one host apart" in {
       same("github.com/x/foo//core", "github.com/x/bar//core") shouldBe "different"
    }
-   "PackageId" should "order packages stably, so anything keyed by package has one line order" in {
-      sortedIds shouldBe "github.com/a/two//root github.com/b/one//core github.com/b/one//jvm"
-   }
-   "repositoryOf" should "drop the package selector, since a tag versions the whole repository" in {
-      canonicalRepository("github.com/eliot-lang/eliot//stdlib") shouldBe "github.com/eliot-lang/eliot"
-   }
-   "repositoryOf" should "answer nothing for a sibling, which is a package of whatever is being read" in {
-      canonicalRepository("//stdlib") shouldBe "<sibling>"
-   }
-   "repositoryAt" should "canonicalize a repository URL the way a dependency line is" in {
-      show(repositoryAt("https://GitHub.com/x/foo.git/")) shouldBe "github.com/x/foo"
-   }
-   "repositoryAt" should "strip a trailing slash" in {
-      show(repositoryAt("github.com/x/foo/")) shouldBe "github.com/x/foo"
-   }
-   "repositoryAt" should "strip a slash written behind the '.git'" in {
-      show(repositoryAt("github.com/x/foo.git/")) shouldBe "github.com/x/foo"
-   }
    "PackageId" should "read a package of the repository being read as a sibling" in {
       kindOfReference("//stdlib") shouldBe "sibling"
    }
@@ -78,27 +60,11 @@ def testCases: Test = {
  */
 private def canonical(text: String): String = show(packageId(text)) else "<no package>"
 
-private def canonicalRepository(text: String): String =
-   foldOption("<sibling>", found -> show(found), repositoryOf(idOf(text)))
-
 private def same(a: String, b: String): String = fold(idOf(a) == idOf(b), "same", "different")
 
 private def kindOfReference(text: String): String = idOf(text) match {
    case Sibling(_) -> "sibling"
    case Foreign(_) -> "foreign"
-}
-
-/**
- * Three packages given out of order and sorted back, rendered on one line: the property a lockfile
- * needs, which is that the order depends on the packages and not on how they arrived.
- */
-private def sortedIds: String = {
-   val given = append(
-      append(append(empty, idOf("github.com/b/one//jvm")), idOf("github.com/a/two//root")),
-      idOf("github.com/b/one//core")
-   )
-
-   given.sorted.joined(" ")
 }
 
 /**

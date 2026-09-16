@@ -72,7 +72,7 @@ private def mirrors: Mirrors =
       singleton(Pair("v1.2:eliot.pkg", "package root {\n  at .\n  dep github.com/x/bar//root v1.1\n}"))
    )
 
-private def cached: Repository = repositoryAt("github.com/x/foo")
+private def cached: Repository = Repository("github.com/x/foo")
 
 private def mirrorPath: Path = path("target/cache/github.com/x/foo")
 

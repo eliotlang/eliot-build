@@ -57,16 +57,6 @@ def mounts(name: PackageName, selection: Selection): Bool =
    selection.selectedPackages.any(selected -> selected == name)
 
 /**
- * The version `resolution` selected for `repository`, absent when the closure never reached it.
- */
-def selectedVersionOf(repository: Repository, resolution: Resolution): Option[Version] =
-   foldOption(
-      None,
-      selection -> Some(selection.selectedVersion),
-      resolution.selections.find(selection -> selection.selectedRepository == repository)
-   )
-
-/**
  * `true` when a requirement for `minimum` at a repository anchored at `anchor` is a requirement on
  * the package `selection` already stands for — the same compatibility line, starting at the same
  * commit.

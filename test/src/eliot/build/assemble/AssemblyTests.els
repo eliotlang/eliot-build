@@ -34,66 +34,66 @@ import eliot.build.assemble.Assembly
  * already left to.
  */
 def testCases: Test = {
-   "sourceRoots" should "mount the root package at the repository root" in {
+   "rootsOf" should "mount the root package at the repository root" in {
       assembled("root", rootPackage(""), publishing("unused", "")) shouldBe "/project/src"
    }
-   "sourceRoots" should "mount a suite beside the library it deps, and in that order" in {
+   "rootsOf" should "mount a suite beside the library it deps, and in that order" in {
       assembled(
          "test",
          rootPackage("") ++ "\npackage test {\n  dep //root\n}",
          publishing("unused", "")
       ) shouldBe "/project/test/src, /project/src"
    }
-   "sourceRoots" should "leave the project's suite out of a build that does not dep it" in {
+   "rootsOf" should "leave the project's suite out of a build that does not dep it" in {
       assembled(
          "root",
          rootPackage("") ++ "\npackage test {\n  dep //root\n}",
          publishing("unused", "")
       ) shouldBe "/project/src"
    }
-   "sourceRoots" should "mount each package of the project at the directory it declares" in {
+   "rootsOf" should "mount each package of the project at the directory it declares" in {
       assembled(
          "lang",
          "package lang {\n  at lang/eliot\n  dep //stdlib\n}\npackage stdlib {\n  at stdlib/eliot\n}",
          publishing("unused", "")
       ) shouldBe "/project/lang/eliot/src, /project/stdlib/eliot/src"
    }
-   "sourceRoots" should "mount a dependency's root package at its repository root" in {
+   "rootsOf" should "mount a dependency's root package at its repository root" in {
       assembled(
          "root",
          rootPackage("dep github.com/x/foo//root v1.2"),
          publishing("github.com/x/foo@v1.2", rootPackage(""))
       ) shouldBe "/project/src, /trees/github.com/x/foo@v1.2/src"
    }
-   "sourceRoots" should "mount a dependency's selected package at the directory that package declares" in {
+   "rootsOf" should "mount a dependency's selected package at the directory that package declares" in {
       assembled(
          "root",
          rootPackage("dep github.com/e/eliot//jvm v1.2"),
          publishing("github.com/e/eliot@v1.2", "package jvm {\n  at jvm/eliot\n}")
       ) shouldBe "/project/src, /trees/github.com/e/eliot@v1.2/jvm/eliot/src"
    }
-   "sourceRoots" should "mount a package that ships a plugin and no sources of its own" in {
+   "rootsOf" should "mount a package that ships a plugin and no sources of its own" in {
       assembled(
          "root",
          rootPackage("dep github.com/e/eliot//apidoc v1.2"),
          publishing("github.com/e/eliot@v1.2", "package apidoc {\n  asset eliot-apidoc.zip\n}")
       ) shouldBe "/project/src, /trees/github.com/e/eliot@v1.2/apidoc/src"
    }
-   "sourceRoots" should "leave a package nobody selected out of the mount" in {
+   "rootsOf" should "leave a package nobody selected out of the mount" in {
       assembled(
          "root",
          rootPackage("dep github.com/e/eliot//stdlib v1.2"),
          publishing("github.com/e/eliot@v1.2", "package stdlib {\n}\npackage jvm {\n}")
       ) shouldBe "/project/src, /trees/github.com/e/eliot@v1.2/stdlib/src"
    }
-   "sourceRoots" should "mount the sibling a selected package carries, which is how a layer brings its base" in {
+   "rootsOf" should "mount the sibling a selected package carries, which is how a layer brings its base" in {
       assembled(
          "root",
          rootPackage("dep github.com/e/eliot//jvm v1.2"),
          publishing("github.com/e/eliot@v1.2", "package stdlib {\n}\npackage jvm {\n  dep //stdlib\n}")
       ) shouldBe expectedSiblingMount
    }
-   "sourceRoots" should "never mount a dependency's suite, which nothing depends on" in {
+   "rootsOf" should "never mount a dependency's suite, which nothing depends on" in {
       assembled(
          "root",
          rootPackage("dep github.com/x/foo//root v1.2"),
@@ -103,7 +103,7 @@ def testCases: Test = {
          )
       ) shouldBe "/project/src, /trees/github.com/x/foo@v1.2/src"
    }
-   "sourceRoots" should "mount every selected package, in the resolution's own order" in {
+   "rootsOf" should "mount every selected package, in the resolution's own order" in {
       assembled(
          "root",
          rootPackage("dep github.com/x/foo//root v1.2"),
@@ -111,11 +111,11 @@ def testCases: Test = {
             .published("github.com/x/bar@v1.1", rootPackage(""))
       ) shouldBe "/project/src, /trees/github.com/x/bar@v1.1/src, /trees/github.com/x/foo@v1.2/src"
    }
-   "sourceRoots" should "report a selected version whose sources cannot be read back" in {
+   "rootsOf" should "report a selected version whose sources cannot be read back" in {
       assembled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.1", rootPackage("")))
          shouldBe "github.com/x/foo publishes no v1.2"
    }
-   "sourceRoots" should "report a package no descriptor declares" in {
+   "rootsOf" should "report a package no descriptor declares" in {
       assembled("nosuch", "", publishing("unused", "")) shouldBe "no package named 'nosuch'"
    }
 }
@@ -136,7 +136,7 @@ private def assembled(name: String, rootText: String, universe: List[Pair[String
    rendered(
       against(
          universeOf(universe, empty),
-         renderedRoots(sourceRoots(PackageName(name), projectOf(rootText)))
+         renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText))))
       )
    )
 

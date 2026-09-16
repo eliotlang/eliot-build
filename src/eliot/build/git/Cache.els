@@ -115,7 +115,7 @@ def descriptorTextAt(root: Path, version: Version, repository: Repository): Cach
    foldOption(
       refetched(root, version, repository),
       text -> Some(text),
-      ensuredMirror(root, repository).fileAt(AtVersion(version), descriptorFileName)
+      ensuredMirror(root, repository).fileAt(version, descriptorFileName)
    )
 
 /**
@@ -187,7 +187,7 @@ private def missingDirectory(present: Bool, directory: Path): Option[Path] = fol
  * the first read stays the one-liner it is, and so the fetch is unmistakably the exceptional path.
  */
 private def refetched(root: Path, version: Version, repository: Repository): Cached[Option[String]] =
-   refreshed(root, repository).fileAt(AtVersion(version), descriptorFileName)
+   refreshed(root, repository).fileAt(version, descriptorFileName)
 
 private def under(root: Path, url: String): Path =
    split("/", url).foldLeft(root, segment -> directory -> directory / segment)
@@ -208,4 +208,4 @@ private def cloned(root: Path, directory: Path, repository: Repository): Cached[
  * read descriptors of it already is, and for one this verb reached first it is not.
  */
 private def checkedOut(root: Path, directory: Path, version: Version, repository: Repository): Cached[Path] =
-   addWorktree(AtVersion(version), directory, ensuredMirror(root, repository)).worktreeDirectory
+   addWorktree(version, directory, ensuredMirror(root, repository)).worktreeDirectory

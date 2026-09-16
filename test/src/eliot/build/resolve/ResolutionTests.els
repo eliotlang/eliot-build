@@ -199,20 +199,6 @@ def testCases: Test = {
    "resolutionDepthLimit" should "be the number of rounds the closure may take" in {
       show(resolutionDepthLimit) shouldBe "64"
    }
-   "selectedVersionOf" should "answer the version a package was selected at" in {
-      versionSelected(
-         "github.com/x/foo",
-         rootPackage("dep github.com/x/foo//root v1.2"),
-         publishing("github.com/x/foo@v1.2", rootPackage(""))
-      ) shouldBe "v1.2"
-   }
-   "selectedVersionOf" should "answer nothing for a package the closure never reached" in {
-      versionSelected(
-         "github.com/x/elsewhere",
-         rootPackage("dep github.com/x/foo//root v1.2"),
-         publishing("github.com/x/foo@v1.2", rootPackage(""))
-      ) shouldBe "<unselected>"
-   }
 }
 
 /**
@@ -256,7 +242,7 @@ private def mounted(url: String, rootText: String, universe: List[Pair[String, S
    reported(
       against(
          universeOf(universe, empty),
-         renderedPackages(repositoryAt(url), resolve(PackageName("root"), descriptorOf(rootText)))
+         renderedPackages(Repository(url), resolve(PackageName("root"), descriptorOf(rootText)))
       )
    )
 
@@ -266,21 +252,6 @@ private def renderedPackages(repository: Repository, resolution: Resolution): St
       selection -> selection.selectedPackages.map(name -> "//" ++ show(name)).joined(", "),
       resolution.selections.find(selection -> selection.selectedRepository == repository)
    )
-
-/**
- * The version `url` was selected at by the root package of `rootText`, so the reading side of a
- * resolution is exercised rather than only its rendering.
- */
-private def versionSelected(url: String, rootText: String, universe: List[Pair[String, String]]): String =
-   reported(
-      against(
-         universeOf(universe, empty),
-         renderedVersion(selectedVersionOf(repositoryAt(url), resolve(PackageName("root"), descriptorOf(rootText))))
-      )
-   )
-
-private def renderedVersion(version: Option[Version]): String =
-   foldOption("<unselected>", selected -> show(selected), version)
 
 /**
  * The answer on one line, or the error instead — both outcomes asserted the same way.

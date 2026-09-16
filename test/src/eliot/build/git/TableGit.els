@@ -1,6 +1,7 @@
 import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
+import eliot.build.model.Version
 import eliot.test.Mock
 import eliot.build.git.Git
 import eliot.build.git.Tags
@@ -31,17 +32,11 @@ import eliot.build.git.Tags
 
 /**
  * What every repository answers: the tags a listing announces, the files `fileAt` can read keyed
- * `<revision>:<path>`, and the refusal — if any — every operation that can refuse raises.
+ * `<version>:<path>`, and the refusal — if any — every operation that can refuse raises.
  */
 data Mirrors(announcedTags: List[TagRef], heldFiles: List[Pair[String, String]], refusal: Option[GitError])
 
 implement tableGit: Git {
-   def remoteTags(remote: Remote): {Dep[Mirrors], Log, Throw[GitError]} List[TagRef] = {
-      log("remoteTags " ++ remote.remoteUrl)
-
-      unlessRefused(dependency.announcedTags)
-   }
-
    def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Mirror = {
       log("cloneMirror " ++ remote.remoteUrl ++ " " ++ show(target))
       withDirectory(target)
@@ -61,14 +56,14 @@ implement tableGit: Git {
       unlessRefused(dependency.announcedTags)
    }
 
-   def fileAt(revision: Revision, path: String, mirror: Mirror): {Dep[Mirrors], Log} Option[String] = {
-      log("fileAt " ++ revisionName(revision) ++ ":" ++ path ++ " " ++ show(mirror.mirrorDirectory))
+   def fileAt(version: Version, path: String, mirror: Mirror): {Dep[Mirrors], Log} Option[String] = {
+      log("fileAt " ++ show(version) ++ ":" ++ path ++ " " ++ show(mirror.mirrorDirectory))
 
-      dependency.heldFiles.lookupOption(revisionName(revision) ++ ":" ++ path)
+      dependency.heldFiles.lookupOption(show(version) ++ ":" ++ path)
    }
 
-   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
-      log("addWorktree " ++ revisionName(revision) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
+   def addWorktree(version: Version, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
+      log("addWorktree " ++ show(version) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
       withDirectory(target)
 
       unlessRefused(Worktree(target))

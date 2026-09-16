@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
 import eliot.system.Process
+import eliot.build.model.Version
 import eliot.build.git.Git
 import eliot.build.git.Tags
 
@@ -23,11 +24,8 @@ import eliot.build.git.Tags
  * this implementation's failure, and no caller declaring `{Git}` ever names it.
  */
 implement shellGit: Git {
-   def remoteTags(remote: Remote): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
-      parseTagRefs(checked(lsRemoteTags(remote.remoteUrl), here))
-
    def cloneMirror(remote: Remote, target: Path): {Process, Throw[IoError], Throw[GitError]} Mirror = {
-      val cloned = checked(
+      checked(
          command("git").withArgument("clone").withArgument("--mirror")
             .withArgument(remote.remoteUrl).withArgument(show(target)),
          here
@@ -37,7 +35,7 @@ implement shellGit: Git {
    }
 
    def fetch(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Unit = {
-      val fetched = checked(
+      checked(
          command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune"),
          mirror.mirrorDirectory
       )
@@ -52,9 +50,9 @@ implement shellGit: Git {
     * `Throw[IoError]` is a different statement from the refusal this reads, and stays: git refusing to
     * answer is what this reads, git failing to *start* is not.
     */
-   def fileAt(revision: Revision, path: String, mirror: Mirror): {Process, Throw[IoError]} Option[String] = {
+   def fileAt(version: Version, path: String, mirror: Mirror): {Process, Throw[IoError]} Option[String] = {
       val shown = run(
-         command("git").withArgument("show").withArgument(revisionName(revision) ++ ":" ++ path),
+         command("git").withArgument("show").withArgument(show(version) ++ ":" ++ path),
          mirror.mirrorDirectory
       )
 
@@ -68,10 +66,10 @@ implement shellGit: Git {
     * refuses a path nothing occupies — a cache that cannot heal itself from a deleted directory would
     * be a cache a user has to know how to repair.
     */
-   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
-      val added = checked(
+   def addWorktree(version: Version, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
+      checked(
          command("git").withArgument("worktree").withArgument("add").withArgument("--detach")
-            .withArgument("--force").withArgument(show(target)).withArgument(revisionName(revision)),
+            .withArgument("--force").withArgument(show(target)).withArgument(show(version)),
          mirror.mirrorDirectory
       )
 

@@ -87,11 +87,6 @@ data BuildPackage(
 data Descriptor(packages: List[BuildPackage])
 
 /**
- * The empty descriptor — what a file of nothing but comments means: no packages at all.
- */
-def emptyDescriptor: Descriptor = Descriptor(empty)
-
-/**
  * The package `name` declares, absent where the descriptor declares none — the one lookup every
  * reader of a descriptor makes, so it is written once here rather than in each of them.
  */

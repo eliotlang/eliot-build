@@ -2,31 +2,20 @@ import eliot.collection.List
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
-import eliot.build.model.Version
-import eliot.build.model.Lineage
 import eliot.build.git.Git
 
 /**
- * The vocabulary the operations are said in: how a repository is reached, and how a revision is
- * spelled to git.
+ * The vocabulary the operations are said in: how a repository is reached.
  *
- * Three cases, and that is the point of the module they exercise — everything `eliot.build.git.Git`
- * still decides *outside* the effect is the scheme a descriptor deliberately omits and the tag a
- * revision names. What a listing says is read by `eliot.build.git.Tags` and asserted in `TagsTests`;
- * what a subprocess does is `ShellGitTests`.
+ * One case, and that is the point of the module it exercises — everything `eliot.build.git.Git`
+ * still decides *outside* the effect is the scheme a descriptor deliberately omits. What a listing
+ * says is read by `eliot.build.git.Tags` and asserted in `TagsTests`; what a subprocess does is
+ * `ShellGitTests`.
  *
  * The bare `Test` keeps this pure: a case may assert and nothing else.
  */
 def testCases: Test = {
    "remoteOf" should "supply the scheme a descriptor deliberately does not carry" in {
-      remoteOf(repositoryAt("github.com/x/foo")).remoteUrl shouldBe "https://github.com/x/foo"
-   }
-   "revisionName" should "spell a version as the tag it was published as" in {
-      revisionName(AtVersion(version("v1.2"))) shouldBe "v1.2"
-   }
-   "revisionName" should "spell a commit as its hash" in {
-      revisionName(AtCommit(Commit("aaa1"))) shouldBe "aaa1"
+      remoteOf(Repository("github.com/x/foo")).remoteUrl shouldBe "https://github.com/x/foo"
    }
 }
-
-private def version(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

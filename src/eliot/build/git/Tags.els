@@ -28,16 +28,6 @@ import eliot.build.model.Lineage
 data TagRef(taggedVersion: Version, taggedCommit: Commit)
 
 /**
- * Tags order by the version they name, newest last — so the newest release a repository publishes is
- * the last of its sorted tags. That is not a question resolution asks, since MVS selects the maximum
- * of the declared *minimums* and never enumerates; it is what `eliot get` will ask when raising a
- * minimum to what is actually available.
- */
-implement Compare[TagRef] {
-   def lessThanOrEqual(a: TagRef, b: TagRef): Bool = a.taggedVersion <= b.taggedVersion
-}
-
-/**
  * What the tool asks of git. Five operations, each about a remote or a mirror, and nothing about how
  * they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
  * caller declaring `{Git}` cannot tell them apart.

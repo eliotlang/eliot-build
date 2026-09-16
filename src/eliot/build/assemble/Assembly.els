@@ -49,27 +49,19 @@ import eliot.build.resolve.Resolution
 data Project(projectDirectory: Path, projectDescriptor: Descriptor)
 
 /**
- * Every source root building `name` compiles from: the project's own packages first, then one per
- * package of each selected dependency, in the resolution's canonical order.
+ * Every source root building `name` compiles from, against the closure `resolution` already is: the
+ * project's own packages first, then one per package of each selected dependency, in the resolution's
+ * canonical order.
  *
  * The project first because that is the order a reader expects and the order a command line reads
  * best; within the dependencies, the resolution's own order, so two runs of one graph assemble the
- * same list in the same order and a diff of it means something changed.
+ * same list in the same order and a diff of it means something changed. The closure is taken rather
+ * than made, because the launcher reads the invocation off the same one — resolving twice would be two
+ * closures that merely ought to agree.
  *
  * ```eliot
- * val roots = sourceRoots(PackageName("test"), Project(here, descriptor))
+ * val roots = rootsOf(PackageName("test"), Project(here, descriptor), resolve(name, descriptor))
  * ```
- */
-def sourceRoots(
-   name: PackageName,
-   project: Project
-): {PackageSource, Throw[ResolutionError]} List[Path] =
-   rootsOf(name, project, resolve(name, project.projectDescriptor))
-
-/**
- * `sourceRoots` against a closure somebody else already computed — what a caller wanting the
- * *toolchain* as well as the roots uses, since both are readings of one resolution and resolving twice
- * would be two closures that merely ought to agree.
  */
 def rootsOf(
    name: PackageName,

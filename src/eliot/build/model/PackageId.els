@@ -71,21 +71,6 @@ def packageId(text: String): {Abort} PackageId = {
    fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), name)))
 }
 
-/**
- * The repository `text` names, in canonical form — for the places that hold a repository URL rather
- * than a dependency line: a lockfile entry, a cache key, a test.
- */
-def repositoryAt(text: String): Repository = Repository(canonicalUrl(withoutScheme(text)))
-
-/**
- * The repository `id` lives in, absent for a sibling: a sibling is a package of whatever repository is
- * being read, which this type cannot know.
- */
-def repositoryOf(id: PackageId): Option[Repository] = id match {
-   case Sibling(_)       -> None
-   case Foreign(package) -> Some(package.packageRepository)
-}
-
 implement Show[Repository] {
    def show(value: Repository): String = value.repositoryUrl
 }
@@ -110,10 +95,6 @@ implement Eq[PackageName] {
    def equals(a: PackageName, b: PackageName): Bool = a.packageNameText == b.packageNameText
 }
 
-implement Compare[PackageName] {
-   def lessThanOrEqual(a: PackageName, b: PackageName): Bool = a.packageNameText <= b.packageNameText
-}
-
 /**
  * The canonical spelling, which is also what a descriptor is written back out as.
  */
@@ -130,10 +111,6 @@ implement Eq[Package] {
    def equals(a: Package, b: Package): Bool = show(a) == show(b)
 }
 
-implement Compare[Package] {
-   def lessThanOrEqual(a: Package, b: Package): Bool = show(a) <= show(b)
-}
-
 implement Show[PackageId] {
    def show(value: PackageId): String = value match {
       case Sibling(name)    -> "//" ++ show(name)
@@ -143,10 +120,6 @@ implement Show[PackageId] {
 
 implement Eq[PackageId] {
    def equals(a: PackageId, b: PackageId): Bool = show(a) == show(b)
-}
-
-implement Compare[PackageId] {
-   def lessThanOrEqual(a: PackageId, b: PackageId): Bool = show(a) <= show(b)
 }
 
 private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)

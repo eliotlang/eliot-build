@@ -21,31 +21,13 @@ import eliot.build.git.ShellGit
  * the subject's type, and the half that has actually been wrong.
  */
 def testCases: Test = {
-   "remoteTags" should "ask a remote what it publishes, without fetching it" in mocked {
-      remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
-
-      calls shouldBe ".$ git ls-remote --tags https://github.com/x/foo"
-   }
-   "remoteTags" should "read the versions the remote announced" in mocked {
-      whenSpawning("ls-remote", succeeding(listing))
-
-      renderedTags(remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
-   }
-   "remoteTags" should "raise exactly what git ran and exactly what it said back" in mocked {
-      whenSpawning("ls-remote", failing(128, "no such repository"))
-
-      raising[GitError](expectedRefusal, {
-         remoteTags(remoteOf(repositoryAt("github.com/x/foo"))) with shellGit
-         unit
-      })
-   }
    "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked {
-      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+      cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
 
       calls shouldBe ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
    }
    "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked {
-      val made = cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+      val made = cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
 
       show(made.mirrorDirectory) shouldBe "/cache/github.com/x/foo"
    }
@@ -69,37 +51,40 @@ def testCases: Test = {
 
       renderedTags(tags(mirror) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
    }
+   "tags" should "raise exactly what git ran and exactly what it said back" in mocked {
+      whenSpawning("ls-remote", failing(128, "no such repository"))
+
+      raising[GitError](expectedRefusal, {
+         tags(mirror) with shellGit
+         unit
+      })
+   }
    "fileAt" should "read one file out of the object database, inside the mirror" in mocked {
-      fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
+      fileAt(version("v1.2"), "eliot.pkg", mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
    }
-   "fileAt" should "read at a commit by its hash" in mocked {
-      fileAt(AtCommit(Commit("aaa1")), "eliot.pkg", mirror) with shellGit
-
-      calls shouldBe "/cache/github.com/x/foo$ git show aaa1:eliot.pkg"
-   }
-   "fileAt" should "answer what that revision holds" in mocked {
+   "fileAt" should "answer what that version holds" in mocked {
       whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar//root v1.1"))
 
-      val shown = fileAt(AtVersion(version("v1.2")), "eliot.pkg", mirror) with shellGit
+      val shown = fileAt(version("v1.2"), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "dep github.com/x/bar//root v1.1"
    }
    "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked {
       whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
 
-      val shown = fileAt(AtVersion(version("v1.9")), "eliot.pkg", mirror) with shellGit
+      val shown = fileAt(version("v1.9"), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "<none>"
    }
    "addWorktree" should "check out a detached tree, standing inside the mirror the objects are in" in mocked {
-      addWorktree(AtVersion(version("v1.2")), treePath, mirror) with shellGit
+      addWorktree(version("v1.2"), treePath, mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.2"
    }
    "addWorktree" should "answer the tree it made, at the directory it was asked for" in mocked {
-      val made = addWorktree(AtVersion(version("v1.2")), treePath, mirror) with shellGit
+      val made = addWorktree(version("v1.2"), treePath, mirror) with shellGit
 
       show(made.worktreeDirectory) shouldBe "/cache/github.com/x/foo@v1.2"
    }
@@ -107,12 +92,12 @@ def testCases: Test = {
       whenSpawning("worktree", failing(128, "invalid reference: v1.9"))
 
       raising[GitError](expectedCheckoutRefusal, {
-         addWorktree(AtVersion(version("v1.9")), treePath, mirror) with shellGit
+         addWorktree(version("v1.9"), treePath, mirror) with shellGit
          unit
       })
    }
    "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
-      cloneMirror(remoteOf(repositoryAt("github.com/x/foo")), mirrorPath) with shellGit
+      cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
       fetch(mirror) with shellGit
 
       calls shouldBe (
@@ -130,7 +115,7 @@ private def treePath: Path = path("/cache/github.com/x/foo@v1.2")
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
 private def expectedRefusal: String =
-   "'git ls-remote --tags https://github.com/x/foo' failed with exit code 128: no such repository"
+   "'git ls-remote --tags /cache/github.com/x/foo' failed with exit code 128: no such repository"
 
 private def expectedCheckoutRefusal: String =
    "'git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.9' failed with exit code 128: " ++

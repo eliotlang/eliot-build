@@ -83,7 +83,7 @@ def testCases: Test = {
 }
 
 private def jvmAsset: Asset =
-   Asset(repositoryAt("github.com/e/eliot"), Version(Line(1), Some(2)), "eliot-jvm.zip")
+   Asset(Repository("github.com/e/eliot"), Version(Line(1), Some(2)), "eliot-jvm.zip")
 
 private def expectedTree: String = "target/cache/assets/github.com/e/eliot@v1.2/eliot-jvm.zip"
 

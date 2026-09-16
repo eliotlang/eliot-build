@@ -190,7 +190,7 @@ private def expectedRefusal: String =
 
 private def cacheRoot: Path = path("target/cache")
 
-private def cached: Repository = repositoryAt("github.com/x/foo")
+private def cached: Repository = Repository("github.com/x/foo")
 
 private def mirrorPath: Path = path("target/cache/github.com/x/foo")
 

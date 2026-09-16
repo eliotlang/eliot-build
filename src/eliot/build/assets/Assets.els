@@ -85,7 +85,7 @@ effect Assets {
  * consumer already selected.
  *
  * ```eliot
- * val url = assetUrlOf(Asset(repositoryAt("github.com/e/eliot"), version, "eliot-jvm.zip"))
+ * val url = assetUrlOf(Asset(Repository("github.com/e/eliot"), version, "eliot-jvm.zip"))
  * ```
  *
  * The path is the forge default — correct on GitHub, Gitea, Forgejo and Codeberg, which is the big

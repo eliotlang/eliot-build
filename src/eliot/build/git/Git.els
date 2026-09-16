@@ -2,7 +2,6 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.build.model.PackageId
 import eliot.build.model.Version
-import eliot.build.model.Lineage
 import eliot.build.git.Tags
 
 /**
@@ -31,8 +30,8 @@ import eliot.build.git.Tags
  * version. `git worktree` is what does it — a second working tree of the mirror that already holds the
  * objects, so a checkout costs a tree and not a second copy of the history. A *remote* is the address
  * git is given to reach a repository. A *commit* — `eliot.build.model.Lineage`'s, because a content
- * hash is vocabulary before it is git's — is what a tag names. A *revision* is what a file is read at,
- * and what a tree is checked out at — a version's tag or a commit. `fetch` brings a mirror up to date
+ * hash is vocabulary before it is git's — is what a tag names. A file is read, and a tree checked out,
+ * at a *version*, which git is asked for by the tag it was published as. `fetch` brings a mirror up to date
  * and touches no working tree; `pull` would merge into a branch and has no meaning in a mirror.
  *
  * **Every operation's subject says where it runs.** Git resolves a relative path against *its* working
@@ -89,13 +88,7 @@ data Worktree(worktreeDirectory: Path)
 data Remote(remoteUrl: String)
 
 /**
- * A point in a repository's history a file is read at: the tag a version was published as, or a commit
- * outright. Spelled to git by `revisionName`.
- */
-data Revision = AtVersion(revisionVersion: Version) | AtCommit(revisionCommit: Commit)
-
-/**
- * What the tool asks of git. Six operations, each about a remote or a mirror, and nothing about how
+ * What the tool asks of git. Five operations, each about a remote or a mirror, and nothing about how
  * they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
  * caller declaring `{Git}` cannot tell them apart.
  *
@@ -104,12 +97,6 @@ data Revision = AtVersion(revisionVersion: Version) | AtCommit(revisionCommit: C
  * the one operation that *reads* a refusal rather than raising it.
  */
 effect Git {
-   /**
-    * The versions `remote` publishes — a listing that fetches none of it. The question `eliot get`
-    * asks of a repository it has never mirrored.
-    */
-   def remoteTags(remote: Remote): {Throw[GitError]} List[TagRef]
-
    /**
     * Mirror `remote` at `target` — the whole repository, no working tree — and answer the mirror.
     *
@@ -135,18 +122,18 @@ effect Git {
    def tags(mirror: Mirror): {Throw[GitError]} List[TagRef]
 
    /**
-    * The content of the file at `path` inside `mirror` at `revision`, straight from the object database
-    * — absent where the revision or the file is not there.
+    * The content of the file at `path` inside `mirror` at `version`, straight from the object database
+    * — absent where the version or the file is not there.
     *
     * The one operation that *reads* a refusal rather than raising it, and the signature says so by
     * carrying no `Throw[GitError]`. A version nobody tagged and a tag carrying no such file are equally
     * "there is nothing to read", and a caller that reached either has a dependency line to blame that
     * this module cannot see.
     */
-   def fileAt(revision: Revision, path: String, mirror: Mirror): Option[String]
+   def fileAt(version: Version, path: String, mirror: Mirror): Option[String]
 
    /**
-    * Check `mirror` out at `revision` into `target`, and answer the tree.
+    * Check `mirror` out at `version` into `target`, and answer the tree.
     *
     * The one operation that leaves files on disk, and it exists because the compiler mounts source
     * *directories*: a resolution is a set of versions and a build is a set of roots, so something has
@@ -158,7 +145,7 @@ effect Git {
     * operation stands *inside* the mirror (it operates on the repository it is in), so a relative
     * target would be read against the mirror's directory rather than against the caller's.
     */
-   def addWorktree(revision: Revision, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
+   def addWorktree(version: Version, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
 }
 
 /**
@@ -171,11 +158,3 @@ effect Git {
  * a mirror table when there is one to grow.
  */
 def remoteOf(repository: Repository): Remote = Remote("https://" ++ repository.repositoryUrl)
-
-/**
- * `revision` as git is asked for it: a version by the tag it was published as, a commit by its hash.
- */
-def revisionName(revision: Revision): String = revision match {
-   case AtVersion(version) -> show(version)
-   case AtCommit(commit)   -> show(commit)
-}

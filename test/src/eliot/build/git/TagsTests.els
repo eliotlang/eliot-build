@@ -64,9 +64,6 @@ def testCases: Test = {
    "anchorCommit" should "find no anchor for a line the repository does not publish" in {
       anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
    }
-   "TagRef" should "order by version, so the newest release sorts last" in {
-      newestOf("aaa1\trefs/tags/v1.10\nbbb2\trefs/tags/v1.9\nccc3\trefs/tags/v1.2") shouldBe "v1.10 aaa1"
-   }
 }
 
 /**
@@ -79,9 +76,6 @@ private def renderedTags(refs: List[TagRef]): String =
    refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
 
 private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
-
-private def newestOf(output: String): String =
-   foldOption("<none>", newest -> renderedTags(singleton(newest)), parseTagRefs(output).sorted.last)
 
 private def commit(tag: String, output: String): String =
    renderedCommit(commitOf(version(tag), parseTagRefs(output)))

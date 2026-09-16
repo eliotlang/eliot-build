@@ -15,8 +15,10 @@ import eliot.build.model.Descriptor
  * Not a byte-for-byte round trip — comments, order within a keyword's group and spelling are the
  * author's, not the model's, and an `at` repeating the package's own name is dropped because the name
  * already said it — but every clause the model carries reappears, canonically ordered. That is what
- * makes a descriptor inspectable, what makes the tool's own edits to one reviewable, and what lets a
- * reader's test assert on a rendering rather than on a shape.
+ * lets a reader's test assert on a rendering rather than on a shape.
+ *
+ * **It lives with the suites** because nothing in the tool writes a descriptor: a test is its only
+ * reader. The lockfile, or anything else that edits one, is where it moves back to `src`.
  *
  * **Every package is a block.** There is one spelling of a package; one standing at the repository
  * root, `package root { at . … }` by convention, writes its `at` because `.` is not what its name

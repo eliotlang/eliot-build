@@ -72,7 +72,7 @@ def against[A](
  */
 def descriptorOf(text: String): Descriptor =
    foldEither(
-      _ -> emptyDescriptor,
+      _ -> Descriptor(empty),
       descriptor -> descriptor,
       runThrow[DescriptorError, Descriptor](parseDescriptor(split("\n", text)))
    )

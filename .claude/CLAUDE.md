@@ -36,10 +36,11 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
   channels meet, and has **one entry point**, `parseDescriptor`: package blocks and nothing else, a
   `dep`/`compiler`/`asset` at the top level refused with the block it belongs in; a second `compiler`
   line in one block is refused too — a package that wants two things is two packages. It reads the project's
-  own file and every mirror's alike — there is one spelling of the format and no older one is read;
-  `DescriptorWriter` writes a descriptor back out, a block per package, and imports `model` alone.
-- **`git/`** — `Git` (`effect Git` — six operations over `Remote`, `Mirror`, `Worktree` and `Revision`,
-  git's own vocabulary; a mirror is a bare `--mirror` clone, every *question* is answered from its object
+  own file and every mirror's alike — there is one spelling of the format and no older one is read.
+  Nothing in the tool writes a descriptor, so `DescriptorWriter` lives under `test/` as the suites'
+  renderer; it moves back when the lockfile needs it.
+- **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror` and `Worktree`, git's own
+  vocabulary, reading and checking out at a `Version`; a mirror is a bare `--mirror` clone, every *question* is answered from its object
   database, and the one thing ever checked out is a worktree, because a compiler mounts
   directories), `Tags` (`TagRef` and
   the pure reading of a `ls-remote` listing — `Git` imports it, never the other way round), `ShellGit`
@@ -95,8 +96,8 @@ integration"), which is not built. A second word, no word, or a word starting `-
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
 the three modules nothing but that boundary imports. `test/` mirrors
-the tree package for package under `test/src`, plus `git/TableGit` and `resolve/TablePackages` — named implementations of
-this project's own effects, which the framework cannot double (`Assets` needs none: `Invocation` names
+the tree package for package under `test/src`, plus `format/DescriptorWriter` and two named implementations of this project's own effects, which the
+framework cannot double: `git/TableGit` and `resolve/TablePackages` (`Assets` needs none: `Invocation` names
 assets without fetching any, and `ShellAssets` is checked under `mocked` like `ShellGit`). **Bind a named implementation with an
 expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `with` binds the
 implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
@@ -164,7 +165,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 258 green
+./bootstrap test                                             # compiles and runs the suite, 244 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -193,7 +194,7 @@ launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` 
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 258 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 244 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
