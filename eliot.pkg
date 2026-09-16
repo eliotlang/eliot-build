@@ -19,9 +19,10 @@
 -- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
--- `v0.4` and not lower, everywhere: it is the first eliot tag whose compiler has the `run` mode and
--- picks the backend by it (the `compiler` lines here name none), and whose descriptor names its assets
--- with `asset`, the only spelling this tool reads. `eliot-test v0.2` is the first with `//suite`.
+-- `v0.5`, everywhere. `v0.4` is the first eliot tag whose compiler has the `run` mode and picks the
+-- backend by it (the `compiler` lines here name none), and whose descriptor names its assets with
+-- `asset`, the only spelling this tool reads; `v0.5` is the first whose warm build over an unchanged
+-- tree stays warm rather than alternating with a slow one. `eliot-test v0.2` is the first with `//suite`.
 
 -- The launcher `./eliotw` runs, and the one line of this file the wrapper reads: it greps for the first
 -- line starting `launcher `. The launcher itself accepts the line and ignores it.
@@ -29,17 +30,17 @@ launcher v0.4
 
 package root {
   at .
-  dep github.com/robertbraeutigam/eliot//stdlib v0.4
+  dep github.com/robertbraeutigam/eliot//stdlib v0.5
 }
 
 package launcher {
   dep //root
-  dep github.com/robertbraeutigam/eliot//jvm v0.4
+  dep github.com/robertbraeutigam/eliot//jvm v0.5
   compiler exe-jar -m eliot.build.Launcher
 }
 
 package test {
   dep //root
   dep github.com/eliotlang/eliot-test//suite v0.2
-  dep github.com/robertbraeutigam/eliot//jvm v0.4
+  dep github.com/robertbraeutigam/eliot//jvm v0.5
 }

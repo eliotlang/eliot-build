@@ -186,9 +186,10 @@ a published eliot tag.
 blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
-eliot `v0.4` and eliot-test `v0.2`, the first tags of each with `asset` clauses and `compiler` lines
-(and eliot's the first compiler with the `run` mode and a default backend). A launcher older than
-`v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16); `v0.4` is pinned.
+eliot `v0.5` and eliot-test `v0.2`. `v0.4` and `v0.2` are the first tags of each with `asset` clauses
+and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
+`v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow. A
+launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` is published (2026-09-16); `v0.4` is pinned.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
@@ -253,8 +254,8 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar test   # must ex
 ```
 
 A package's `eliot.pkg` must require eliot at `v0.4` or later for this to work at all — every earlier
-tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository and
-`../eliot-test` both require `v0.4`. Three things to check while you are there: a failing case must
+tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository
+requires `v0.5` and `../eliot-test` `v0.4`. Three things to check while you are there: a failing case must
 make `test` exit 1, a deliberate syntax error in any
 mounted source must make the build exit 1 with the compiler's own diagnostics on the terminal, and
 `nosuch` — and a bare command line, and the old `build test` — must exit 1 rather than printing a
