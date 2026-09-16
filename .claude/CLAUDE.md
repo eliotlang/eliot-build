@@ -129,21 +129,14 @@ that. There is no `pure` any more, no capture tag and no carrier.
 
 A major version is a branch, a release is an **annotated** tag on it; the line is `v0`. To publish:
 fast-forward `v0` to the commit, `git tag -a v0.<n>` on it, push both. `.github/workflows/release.yml`
-then runs the suite through `./eliotw build test`, builds the jar with `./eliotw build launcher` and
-attaches it as `eliot-launcher.jar` with its sha256 in the notes — so each release is built by the
-launcher the *previous* release published, which is what `.eliot-version` pins. `v0.1` is the one
-exception and had to be: it was built by the working tree that became it, because nothing before it
-could build anything.
+then runs `./bootstrap build test`, builds the jar with `./bootstrap build launcher`, checks that the
+jar it is about to attach builds a green suite on its own, and attaches it as `eliot-launcher.jar` with
+its sha256 in the notes. **A release is bootstrapped from its own source**, not built by the previous
+release: that chain broke twice (`v0.1` had nothing before it, and `v0.1`'s launcher cannot read the
+descriptor `v0.2` is spelled in), and `./bootstrap` is what replaced it.
 
-**`v0.2` is the second exception, for the same reason one level up.** The descriptor format changed
-when the scopes were cut, and `v0.1`'s launcher cannot parse a `package` clause — so `./eliotw build
-test` in this working tree fails against the pin, and CI cannot cut `v0.2` the way it cuts every other
-release. Build it the way `v0.1` was built: `./mill examples.run jvm exe-jar -m eliot.build.Launcher
-<this repo>/src -o target` in the compiler checkout, then `java -jar target/Launcher.jar build test`
-and `build launcher` with the jar that came out, and attach that. From `v0.2` onward the loop closes
-again, for as long as the format holds still.
-
-Bump `.eliot-version` to the new tag on `master` after publishing. A published asset is never replaced —
+Bump `.eliot-version` to the new tag on `master` after publishing — it is what `./eliotw` runs, and
+nothing in this repository's own build reads it any more. A published asset is never replaced —
 a mistake is a new tag.
 
 ## Committing
@@ -151,6 +144,32 @@ a mistake is a new tag.
 **Commit and push automatically** once a change builds and the suite is green — do not wait to be
 asked. One commit per coherent change, with a message that says what the code now means and why, in
 the style of the existing history.
+
+## Bootstrapping: the tool built from this working tree
+
+**`./bootstrap <verb> <package>` is the way to run and check this repository.** It is `./eliotw` with
+the working tree's launcher in place of the published one, in two stages. Stage 0 is the script: it
+clones eliot at the tag `eliot.pkg`'s `dep` lines name (they must all agree), fetches its three plugin
+assets, and compiles `src` against the `lang`/`stdlib`/`jvm` layer sources into
+`target/bootstrap/stage0/Launcher.jar` — reading nothing else of the descriptor, so no format change can
+stop it. Stage 1 is that jar, run on the repository. Stage 0 is recompiled only when a file under `src`
+or the tag changed (a checksum stamp beside the jar, removed before compiling, so a failed compile never
+leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
+
+```bash
+./bootstrap build test && java -jar target/Runner.jar         # the suite, 254 green
+./bootstrap build launcher                                   # target/Launcher.jar, stage 1's output
+java -jar target/Launcher.jar build test                     # stage 2: that jar builds the suite too
+```
+
+That sequence is `.github/workflows/ci.yml`, run on every push, and it is the platform check below
+done automatically. The price is a second copy of three facts the tool derives: eliot's asset names,
+its layer directories, and the compiler command line (`Command.compilerCommand`). When eliot changes
+one, the script fails naming it, and the fix is in the script. `rm -rf target/bootstrap` starts stage 0
+from nothing; `ELIOT_BOOTSTRAP_REMOTE` points it at another eliot remote.
+
+The compiler CLI below is still how a change to the *compiler* is picked up, since stage 0 compiles with
+a published eliot tag.
 
 ## Building and running (compiler CLI)
 
@@ -161,7 +180,7 @@ release anyone depends on, so the reader for them was deleted rather than kept. 
 dependencies is that their tags are spelled the current way, which is why this repository requires
 eliot `v0.3` and eliot-test `v0.1`, the first tags of each that are. A launcher older than `v0.2`
 cannot read this repository's own descriptor, which is why `./eliotw` is broken here until `v0.2` is
-published (see "Releasing").
+published and pinned — `./bootstrap` is unaffected.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
 eliot `v0.3`'s three plugin assets and produces the launcher jar, and that jar builds this project's own

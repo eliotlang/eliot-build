@@ -3,16 +3,13 @@
 # system whose location is not derived from anything — which is exactly why it is pinned by hand in each
 # consumer's `.eliot-version` and why what is attached here has to be right.
 #
-# One-off for v0.2: the descriptor format changed when the scopes were cut, and v0.1's launcher cannot
-# parse a `package` clause — so this workflow cannot cut v0.2. Build and attach that one by hand, the
-# way v0.1 was built (see `.claude/CLAUDE.md`, "Releasing"); from v0.3 on this runs as written again.
-#
-# The jar is built by the build system, by the previous launcher. `./eliotw build launcher` reads this
-# tag's `eliot.pkg`, fetches the compiler this tag selected, and compiles `src` with it — so a release is
-# built by the toolchain its own descriptor names rather than by whatever this workflow happens to have
-# installed. The wrapper fetches the launcher `.eliot-version` pins, which for tag v0.<n> is v0.<n-1>:
-# the bootstrap chain is each release building the next one, and v0.1 was built by the working tree that
-# became it because there was nothing before it that could.
+# The jar is built by this tag's own source, bootstrapped. `./bootstrap` compiles the launcher from the
+# tag's `src` with the eliot toolchain its `eliot.pkg` names (stage 0), and that launcher then builds
+# the suite and the release jar (stage 1). No published launcher is in the chain, so a release never
+# depends on the previous one being able to read this tag's descriptor — which it could not, twice,
+# before this existed. The jar that is attached then has to build the suite itself before it is
+# published (stage 2): what ships is a launcher that is known to build the repository it came from.
+
 name: release
 
 on:
@@ -53,50 +50,52 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # The launcher cache, not a build cache: `~/.cache/eliot` holds the jars `eliotw` has fetched, and
-      # `target/cache` holds this build's mirrors and plugin assets. Keying the first on the pin file is
-      # exact — a different pin is a different launcher — and the second on the descriptor is close
-      # enough, since that is the file that decides which tags get cloned and which assets get fetched.
+      # `target/bootstrap` holds eliot's sources and assets at the tag stage 0 compiles with, and
+      # `target/cache` this build's mirrors and plugin assets. Both are keyed on the descriptor, the file
+      # that decides which tags get cloned; stage 0's jar is in the first and is recompiled whenever
+      # the source it was compiled from differs, which the script checks itself.
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/eliot
-          key: launcher-${{ hashFiles('.eliot-version') }}
-      - uses: actions/cache@v4
-        with:
-          path: target/cache
+          path: |
+            target/bootstrap
+            target/cache
           key: packages-${{ hashFiles('eliot.pkg') }}
           restore-keys: packages-
 
-      # The suite, as the gate. A launcher published from a red commit is the tool every consumer of
-      # this tag builds with, and this workflow is the only thing that runs the suite before that
-      # happens. It is run through the build system itself, which makes the gate a second check that
-      # the thing being released works at all.
+      # The suite, as the gate, built by the launcher this tag compiles to. A launcher published from a
+      # red commit is the tool every consumer of this tag builds with.
       #
-      # Grepping the output rather than trusting the exit code, and that is not paranoia: `eliot build`
-      # reports the *compiler's* status, and the runner jar it produced reports success whether or not
-      # the cases passed — `eliot.test.Runner` does not register an exit code yet. When it does, this
+      # Grepping the output rather than trusting the exit code: `eliot build` reports the *compiler's*
+      # status, and the runner jar it produced does not register an exit code yet. When it does, this
       # becomes a plain `java -jar target/Runner.jar`.
       - name: The suite is green
         run: |
           mkdir -p out
-          ./eliotw build test
+          ./bootstrap build test
           java -jar target/Runner.jar | tee out/suite.log
           grep -q "all clear" out/suite.log ||
              { echo "::error::the suite is not green"; exit 1; }
 
       - name: The launcher
         run: |
-          ./eliotw build launcher
+          ./bootstrap build launcher
           mkdir -p out/release
           cp target/Launcher.jar out/release/eliot-launcher.jar
 
-      # The sha256 in the notes, for whoever wants to check by hand. Nothing in the chain checks one —
-      # the pin carries no hash, and when `eliot.lock` lands it will record what it fetched rather than
-      # what it was promised — so this is the published record a lockfile entry can be read against.
+      # The jar about to be published builds the suite on its own, with nothing from stage 0 left in
+      # `target` to hide behind.
+      - name: The launcher builds its own repository
+        run: |
+          rm -f target/Runner.jar
+          java -jar out/release/eliot-launcher.jar build test
+          java -jar target/Runner.jar | tee out/stage2.log
+          grep -q "all clear" out/stage2.log ||
+             { echo "::error::the released launcher does not build a green suite"; exit 1; }
+
       - name: The notes
         run: |
           {
-            echo "The launcher \`eliotw\` fetches, built by the launcher before it."
+            echo "The launcher \`eliotw\` fetches, bootstrapped from this tag's own source."
             echo
             echo "| asset | sha256 |"
             echo "| --- | --- |"

@@ -1047,9 +1047,21 @@ environment chooses *where from*.
 output is already exactly that artifact shape, so self-hosting the build tool and satisfying the
 dumb-script constraint are the same act. No fat-jar/ServiceLoader hazard: that gotcha is about
 collapsing *compiler-plugin* jars, which stay separate (fetched later, by the launcher);
-generated Eliot bytecode carries no `META-INF/services` files to collapse. The bootstrap chain
-is the standard compiler one: launcher v0 is built by mill and published; thereafter launcher
-vN−1 builds launcher vN.
+generated Eliot bytecode carries no `META-INF/services` files to collapse.
+
+**The launcher is bootstrapped from its own source, not built by the release before it** (2026-09-16).
+The chain as first designed was the standard compiler one — launcher vN−1 builds launcher vN — and it
+broke on the second link: the descriptor format changed, and the pinned launcher could not read the
+file of the tree it was asked to build. A chain that has to be cut by hand every time the format moves
+is no chain while the format is still moving. `./bootstrap`, in this repository only, replaces it with
+two stages: a shell script compiles the launcher from the working tree against a closure it states
+itself — eliot's assets and layer sources at the tag `eliot.pkg` names, and the compiler command line —
+reading nothing else of the descriptor; the launcher that comes out builds everything else, itself
+included, and CI checks that the result builds the repository again. The cost is a second copy of what
+the launcher derives from eliot's descriptor, which fails loudly when eliot changes shape. The
+Go/Rust alternative — keep vN−1 as stage 0 and keep the tree readable by it, so every format change
+takes two releases — is the right one once the format is stable, and is what this can revert to then.
+`eliotw` is untouched: every other project should run a published launcher, and does.
 
 What the Eliot-written launcher demands is a set of jvm-layer effects/natives, and that was a
 feature rather than an obstacle: the build tool is the forcing function for the effect system and

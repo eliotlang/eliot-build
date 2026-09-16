@@ -1,0 +1,137 @@
+#!/bin/sh
+#
+# The build tool, built from this working tree and then run: `./bootstrap build test` is `./eliotw build
+# test` with the launcher this checkout's `src` compiles to in place of the published one.
+#
+# Two stages, the way a self-hosting compiler bootstraps. Stage 0 is this script: it compiles the
+# launcher *without reading `eliot.pkg`'s structure*, from a closure written down here — eliot's three
+# plugin assets and its `lang`, `stdlib` and `jvm` layer sources, at one tag. Stage 1 is the launcher that
+# comes out, and it does everything else, `build launcher` included. Nothing in the chain is a launcher
+# somebody published, so a change to the descriptor format cannot leave this repository unable to build
+# itself — which is what `v0.1` and `v0.2` both had to be cut by hand around.
+#
+# What this costs is a second copy of three facts the tool otherwise reads off the closure: which
+# assets eliot ships, where its layers' sources are, and how the compiler is invoked
+# (`eliot.build.Command.compilerCommand`). They are copied, not derived, deliberately — deriving them is
+# what the launcher is for, and stage 0 exists because the launcher is the thing that may not work. When
+# eliot changes one of them, this script fails loudly here rather than building something else.
+#
+# The one thing read from `eliot.pkg` is the eliot tag, from its `dep` lines, so the version stage 0
+# compiles with and the version stage 1 resolves are the same line of the same file. Every eliot line
+# has to agree on it.
+#
+# `eliotw` stays what it is — the wrapper every *other* project runs, fetching a published launcher —
+# and `.eliot-version` still pins that one. This script is for this repository and its CI.
+
+set -eu
+
+fail() {
+   echo "bootstrap: $1" >&2
+   exit 1
+}
+
+here=$(cd "$(dirname "$0")" > /dev/null && pwd -P)
+eliotRepository="github.com/robertbraeutigam/eliot"
+eliotRemote="${ELIOT_BOOTSTRAP_REMOTE:-https://$eliotRepository}"
+compilerMainClass="com.vanillasource.eliot.eliotc.compiler.Main"
+launcherModule="eliot.build.Launcher"
+
+# The closure stage 0 compiles against: eliot's assets in the order its packages depend on each
+# other, and the source directory of each of those packages at the tag.
+eliotAssets="eliot-compiler.zip eliot-stdlib.zip eliot-jvm.zip"
+eliotLayerRoots="lang/eliot/src stdlib/eliot/src jvm/eliot/src"
+
+# The eliot tag, off every `dep` line naming the eliot repository. More than one distinct tag is a
+# descriptor this script cannot build from, and one the resolver would have selected the maximum of —
+# so refuse rather than pick, and let whoever edits the file keep the lines in step.
+eliotTags=$(sed -n "s|^[[:space:]]*dep[[:space:]]\{1,\}$eliotRepository//[^[:space:]]*[[:space:]]\{1,\}\(v[0-9][0-9.]*\).*|\1|p" \
+   "$here/eliot.pkg" | sort -u)
+[ -n "$eliotTags" ] || fail "no 'dep $eliotRepository//<package> <tag>' line in eliot.pkg to take the toolchain from."
+[ "$(echo "$eliotTags" | wc -l)" -eq 1 ] || fail "eliot.pkg requires eliot at more than one tag ($(echo $eliotTags)).
+   Bring the lines in step; stage 0 compiles with exactly one."
+eliotTag=$eliotTags
+
+# The JVM, chosen exactly as `eliotw` chooses it, and handed on the same way.
+if [ -n "${JAVA_HOME:-}" ]; then
+   java="$JAVA_HOME/bin/java"
+   [ -x "$java" ] || fail "JAVA_HOME is set to '$JAVA_HOME', which holds no executable bin/java."
+elif command -v java > /dev/null 2>&1; then
+   java=java
+else
+   fail "no java found. Set JAVA_HOME or put java on the PATH."
+fi
+
+stageDirectory="$here/target/bootstrap"
+toolchainDirectory="$stageDirectory/eliot@$eliotTag"
+stage0Directory="$stageDirectory/stage0"
+stage0Jar="$stage0Directory/Launcher.jar"
+stampFile="$stage0Directory/stamp"
+
+fetch() {
+   if command -v curl > /dev/null 2>&1; then
+      curl --fail --location --silent --show-error --connect-timeout 30 --output "$2" "$1"
+   elif command -v wget > /dev/null 2>&1; then
+      wget --quiet --connect-timeout=30 --output-document "$2" "$1"
+   else
+      fail "neither curl nor wget is installed, and one of them has to fetch eliot's assets."
+   fi
+}
+
+# Each piece lands under a temporary name and is renamed into place once whole, so an interrupted run
+# leaves nothing that a later one mistakes for finished.
+if [ ! -d "$toolchainDirectory/sources" ]; then
+   mkdir -p "$toolchainDirectory"
+   rm -rf "$toolchainDirectory/sources.partial"
+   echo "bootstrap: cloning eliot $eliotTag" >&2
+   git clone --quiet --depth 1 --branch "$eliotTag" "$eliotRemote" "$toolchainDirectory/sources.partial" 2> /dev/null ||
+      fail "could not clone $eliotRemote at $eliotTag"
+   mv "$toolchainDirectory/sources.partial" "$toolchainDirectory/sources"
+fi
+
+classpath=""
+for asset in $eliotAssets; do
+   assetDirectory="$toolchainDirectory/assets/$asset"
+   if [ ! -d "$assetDirectory" ]; then
+      mkdir -p "$toolchainDirectory/assets"
+      echo "bootstrap: fetching $asset from eliot $eliotTag" >&2
+      fetch "$eliotRemote/releases/download/$eliotTag/$asset" "$assetDirectory.download" ||
+         { rm -f "$assetDirectory.download"; fail "could not fetch $asset from eliot $eliotTag"; }
+      rm -rf "$assetDirectory.partial"
+      unzip -q -o "$assetDirectory.download" -d "$assetDirectory.partial" ||
+         fail "could not unpack $asset"
+      rm -f "$assetDirectory.download"
+      mv "$assetDirectory.partial" "$assetDirectory"
+   fi
+   classpath="$classpath${classpath:+:}$assetDirectory/*"
+done
+
+roots="$here/src"
+for layer in $eliotLayerRoots; do
+   [ -d "$toolchainDirectory/sources/$layer" ] ||
+      fail "eliot $eliotTag has no '$layer'. Its layout changed; update this script's closure."
+   roots="$roots $toolchainDirectory/sources/$layer"
+done
+
+# Stage 0 is compiled again only when what it is compiled from changed: every file under `src`, by
+# name and checksum, and the tag. The stamp is removed before compiling and written after, because a
+# failed compile leaves the previous jar where it was and that jar must not pass for this source.
+stamp=$( (echo "$eliotTag"; find "$here/src" -type f -exec cksum {} +) | LC_ALL=C sort | cksum)
+if [ ! -f "$stage0Jar" ] || [ "$(cat "$stampFile" 2> /dev/null)" != "$stamp" ]; then
+   mkdir -p "$stage0Directory"
+   rm -f "$stampFile"
+   echo "bootstrap: compiling the launcher from this working tree with eliot $eliotTag" >&2
+   # The argument order is the compiler's own: `-m` straight after the artifact kind, the roots, then
+   # `-o`. `eliot.build.Command.compilerCommand` is where the tool writes the same thing down.
+   # shellcheck disable=SC2086
+   "$java" -cp "$classpath" "$compilerMainClass" jvm exe-jar -m "$launcherModule" \
+      $roots -o "$stage0Directory" ||
+      fail "the launcher did not compile; the compiler's diagnostics are above."
+   [ -f "$stage0Jar" ] || fail "the compiler reported success and wrote no $stage0Jar."
+   echo "$stamp" > "$stampFile"
+fi
+
+# Stage 1: the launcher this tree compiled to, run on the tree, with the JVM chosen above.
+export ELIOT_JAVA="$java"
+cd "$here"
+# shellcheck disable=SC2086
+exec "$java" ${ELIOT_OPTS:-} -jar "$stage0Jar" "$@"
