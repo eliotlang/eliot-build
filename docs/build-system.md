@@ -165,8 +165,9 @@ their sources never import is an unused-dependency lint, and a closure with two 
 implementations of one name is refused with both named.
 
 Files in a repository: `eliot.pkg`, `eliot.lock` (tool-written, always committed, never edited), the
-wrapper and its pin file, and `.gitignore` for `target/`; directories `src/` and `test/src/`, and
-`compiler/` for layer authors only. Whether the pin folds into `eliot.pkg`, the wrapper is installed
+wrapper, and `.gitignore` for `target/`; directories `src/` and `test/src/`, and
+`compiler/` for layer authors only. The wrapper's pin is a line of `eliot.pkg` since 2026-09-16.
+Whether the wrapper is installed
 once rather than committed, and the cache leaves the project directory is recorded as open, below.
 ## The core decision: a descriptor, not build-as-code
 
@@ -320,7 +321,7 @@ needs redirecting to prevent a duplicate. Availability is mechanism 1 above, whi
 configuration by design. What remained was the local-development story, and that argues against a
 descriptor clause on this design's own terms: which checkout stands in for a dependency is an
 *environment* property, not a project property — the same rule that keeps mirrors out of the
-descriptor and the repo URL out of the wrapper's pin file. Go is the cautionary precedent rather than
+descriptor and the repo URL out of the wrapper's pin. Go is the cautionary precedent rather than
 the model here: `replace` had to be confined to the root to limit the damage, and `go.work` was
 introduced later precisely to move local-development redirection back out of the committed manifest.
 Substituting genuinely *different* content for a transitive dependency — a fork carrying a fix
@@ -847,7 +848,7 @@ does. Sources and binary cannot skew because they are the same tag.
 - **A published asset is never replaced.** A release asset is mutable where a git tag's content is not,
   so what stands behind it is a promise rather than a Merkle root: a mistake in a published asset is a
   new tag, never a re-upload. This is the rule the bootstrap section leans on when it declines to put a
-  hash in the pin file, and it is the one every publisher in this ecosystem is expected to keep —
+  hash in the pin, and it is the one every publisher in this ecosystem is expected to keep —
   including for the launcher, which is the asset with the least excuse.
 - **Marked transitional**: when the compiler is self-hosted, plugins become Eliot source in ordinary git
   packages and this clause retires.
@@ -996,22 +997,29 @@ descriptor parser + resolver + artifact fetcher + classpath assembler + verb dis
 by design, changing rarely.
 
 **The wrapper script is version-free and byte-identical in every repo** — all variance lives in
-the pin file, so "grab the script from anywhere" is literally true. No hardcoded fallback
+the pin, so "grab the script from anywhere" is literally true. No hardcoded fallback
 version: a baked-in default drifts, and "no pin → latest" silently breaks reproducibility. The
-pin file is required; the script errors helpfully without it (`eliot init` writes both). The
+pin is required; the script errors helpfully without it (`eliot init` writes both). The
 script's whole job: find a JRE (`JAVA_HOME`/PATH, clear error if absent — JRE *provisioning* is
 a later nicety, not v1), read the pin, check the local cache, download on miss, verify,
 `exec java -jar launcher.jar "$@"`.
 
-**The pin file** (`.eliot-version`, mill's pattern) is a third file, distinct from `eliot.lock`
-— the lockfile is tool output, per-package, and does not exist before the first resolve.
-It is one line:
+**The pin** is one top-level line of `eliot.pkg`, distinct from `eliot.lock` — the lockfile is tool
+output, per-package, and does not exist before the first resolve:
 
 ```
-v0.6.2
+launcher v0.6.2
 ```
 
-and nothing else. **No hash** (2026-09-14, reversing the `distributionSha256Sum` precedent this
+The wrapper reads it as the first line of the file matching `^launcher[ \t]` and takes the second
+word — a `grep`, not a parser. That is sound because of what else a descriptor may hold: comments
+start `--`, the top level is otherwise `package` blocks, and a `launcher` inside a block is refused by
+the launcher as an unknown clause, so no other line can match. The launcher accepts the clause at the
+top level, checks it names exactly one tag, and ignores it: it pins what *this* repository's
+developers run, not anything a dependent inherits, so a mirror's pin means nothing and the model holds
+no place for one. It was `.eliot-version`, mill's pattern, until 2026-09-16 (below).
+
+**No hash in it** (2026-09-14, reversing the `distributionSha256Sum` precedent this
 section used to cite). A pinned hash was specified here, then implemented, then implemented a second
 time with the wrapper recording it so nobody had to type one — and the second implementation is what
 made the first one's cost legible: bumping a version had become edit, run, commit again, and a dumb
@@ -1093,6 +1101,14 @@ it settled.
   find one clause inside the *smart* file is a shell script that has started parsing the format. The
   proposal is not dead — one `grep` is not a parser either — but it buys one fewer file at the price of
   the one property the bootstrap rests on.
+- **And then it folded** (2026-09-16), once the descriptor's top level held package blocks and nothing
+  else. The objection above was to the wrapper *finding a clause in* the file; with no top-level
+  clause but `package` left, `grep -m 1 '^launcher[ \t]'` finds exactly one thing and knows nothing
+  else of the format — no position is required, comments may precede it. It was done before the
+  first launcher reading package blocks was published, because a launcher refuses an unknown
+  top-level clause: shipped any later, that launcher would have refused every dependency whose
+  descriptor carries a pin. Named `launcher` rather than `eliot`, because the `dep …/eliot//… v0.3`
+  lines beside it pin the *compiler*, a different repository with different numbers.
 - **What the comparison with `gradlew` and `millw` turned up.** Four defects, all now fixed, and each
   one a thing both of those scripts learned the hard way: a pin committed with CRLF line endings put a
   carriage return in the download URL (mill strips them explicitly); `dirname "$0"` is a symlink's
@@ -1160,7 +1176,7 @@ Consequences worth stating:
   Eliot bytecode whose entry point is an effectful `main` is not a Scala-callable library. Process
   spawn is the only viable mechanism, and it is what the cited precedents do anyway.
 - **The no-code-execution cornerstone is untouched.** Spawning the build tool executes a fixed,
-  version-pinned, reviewed binary — the one the wrapper's pin file already selects. Gradle sync
+  version-pinned, reviewed binary — the one the wrapper's pin already selects. Gradle sync
   is a different thing entirely: it *evaluates a program the repo supplied*. The property was
   never about who does the parsing.
 - **The query must answer offline and degraded.** Opening a project whose dependencies are not
@@ -1237,9 +1253,8 @@ as the mount, and resolved sources reach the compiler as `git worktree add --det
 `<cache>/<url>@<tag>` — beside the mirror, checked out once and reused, the objects never copied
 twice.)*
 
-- **Three file-count reductions, proposed and undecided**: the pin as the first clause of `eliot.pkg`
-  (`eliot v0.6`, read by the wrapper and the resolver alike, so the toolchain minimum is spelled once);
-  a wrapper installed once per machine rather than committed per repository (Go's toolchain
+- **Two file-count reductions, proposed and undecided** (a third, the pin as a line of `eliot.pkg`,
+  was done 2026-09-16 — as `launcher <tag>`, read by the wrapper alone): a wrapper installed once per machine rather than committed per repository (Go's toolchain
   auto-download, rustup), honouring the same mirror override; and the mirror cache under the user's
   cache directory rather than `target/cache`, which `Launcher.els` already argues for. Together they
   leave `eliot.pkg` and `eliot.lock`, one of them human-written.

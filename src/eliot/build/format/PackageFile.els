@@ -20,10 +20,16 @@ import eliot.build.model.Descriptor
  * `eliot.build.format.DependencyClause` reads the `dep` line, which every `package` block reads the
  * same way. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
  * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
- * left here is the keywords themselves: `package`, `at`, `internal`, `main`, `plugin`, `compiler`,
+ * left here is the keywords themselves: `launcher`, `package`, `at`, `internal`, `main`, `plugin`, `compiler`,
  * `backend`, and which part of the model each of them feeds.
  *
- * **A file is package blocks and nothing else.** Every package is written out — the one standing at
+ * **A file is package blocks, and one line that is not about packages at all.** `launcher <tag>` pins
+ * the launcher this repository's own developers build with, and `eliotw` is its only reader: it greps
+ * for the first line starting `launcher `, so the clause needs no parser and the pin needs no file of its
+ * own. The launcher checks the clause's shape and then drops it — it pins what *this* repository runs,
+ * not anything a dependent inherits, so a mirror's pin means nothing and the model has no place for one.
+ *
+ * Every package is written out — the one standing at
  * the repository root too, `package root { at . … }` by convention — so a `dep` line has exactly one
  * place it can stand, the block of the package whose sources need it, and the file never carries a
  * clause whose scope a reader has to know. A `dep`, `main` or `plugin` at the top level is refused with
@@ -65,7 +71,7 @@ implement Show[DescriptorError] {
 def descriptorFileName: String = "eliot.pkg"
 
 /**
- * The descriptor `lines` spell: package blocks, and nothing else.
+ * The descriptor `lines` spell: package blocks, and a `launcher` pin that says nothing about them.
  *
  * ```eliot
  * val descriptor = parseDescriptor(readLines(root / "eliot.pkg"))
@@ -105,13 +111,25 @@ private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor 
 }
 
 /**
- * The top level holds package blocks and nothing else. A clause that belongs *inside* one is told so,
+ * The top level holds package blocks and the launcher pin, and nothing else. A clause that belongs *inside* one is told so,
  * and told how a package at the repository root is spelled, because "unknown clause, upgrade" would
  * send its author looking for a newer launcher when what the line needs is a block around it.
  */
 private def topLevelClauses(clauses: List[Clause]): {Throw[ClauseProblem]} Unit = {
    clauses.foreach(clause -> requireThat(!belongsInsideAPackage(clause), belongsInside(clause), clause))
    knownClauses(descriptorKeywords, clauses)
+   clausesNamed("launcher", clauses).foreach(launcherClause)
+}
+
+/**
+ * `launcher <tag>` — read for its shape alone, so a pin `eliotw` would choke on is refused here rather
+ * than passing the launcher and failing only the wrapper. What it names is nobody's business but the
+ * wrapper's, which has already acted on it by the time anything reads this.
+ */
+private def launcherClause(clause: Clause): {Throw[ClauseProblem]} Unit = {
+   required(0, "a launcher pin needs the tag it pins", clause)
+   atMostArguments(1, clause)
+   knownChildren(empty, clause)
 }
 
 private def belongsInsideAPackage(clause: Clause): Bool =
@@ -215,9 +233,10 @@ private def backendWordClause(clause: Clause): {Throw[ClauseProblem]} String = {
 }
 
 /**
- * What the top level may hold: package blocks, and nothing that belongs inside one.
+ * What the top level may hold: package blocks and the launcher pin, and nothing that belongs inside a
+ * package.
  */
-private def descriptorKeywords: List[String] = singleton("package")
+private def descriptorKeywords: List[String] = append(singleton("package"), "launcher")
 
 /**
  * The clauses that describe a package rather than declare one — what the top level refuses with the

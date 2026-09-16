@@ -24,6 +24,10 @@
 -- `test` declares no `main`: `eliot-test v0.1`'s root package declares `eliot.test.Runner` about
 -- itself, and a suite gets it through the `dep`.
 
+-- The launcher `./eliotw` runs, and the one line of this file the wrapper reads: it greps for the first
+-- line starting `launcher `. The launcher itself accepts the line and ignores it.
+launcher v0.1
+
 package root {
   at .
   dep github.com/robertbraeutigam/eliot//stdlib v0.3

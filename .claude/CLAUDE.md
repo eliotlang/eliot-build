@@ -135,8 +135,9 @@ its sha256 in the notes. **A release is bootstrapped from its own source**, not 
 release: that chain broke twice (`v0.1` had nothing before it, and `v0.1`'s launcher cannot read the
 descriptor `v0.2` is spelled in), and `./bootstrap` is what replaced it.
 
-Bump `.eliot-version` to the new tag on `master` after publishing — it is what `./eliotw` runs, and
-nothing in this repository's own build reads it any more. A published asset is never replaced —
+Bump the `launcher` line of `eliot.pkg` to the new tag on `master` after publishing — it is what
+`./eliotw` runs (the wrapper greps for the first line starting `launcher `), and the launcher itself
+accepts the line and ignores it. A published asset is never replaced —
 a mistake is a new tag.
 
 ## Committing
@@ -157,7 +158,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap build test && java -jar target/Runner.jar         # the suite, 254 green
+./bootstrap build test && java -jar target/Runner.jar         # the suite, 259 green
 ./bootstrap build launcher                                   # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar build test                     # stage 2: that jar builds the suite too
 ```
@@ -184,7 +185,7 @@ published and pinned — `./bootstrap` is unaffected.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar build launcher` in this repository fetches
 eliot `v0.3`'s three plugin assets and produces the launcher jar, and that jar builds this project's own
-suite — 254 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+suite — 259 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -213,7 +214,7 @@ package root is `test/`.
 ### Running the tool
 
 There are two ways in. `./eliotw <verb> <configuration>` is the user's: the committed wrapper reads
-`.eliot-version`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
+the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
 it, so it needs no compiler checkout and no mill. As of `v0.1` that launcher has `build`, so
 `./eliotw build test` in a checkout holding nothing but the wrapper is a working build of this project
 — verified from an empty cache, 239 green. It still runs the *published* launcher and never your

@@ -1,7 +1,7 @@
 # Publishing this repository is publishing one jar: `eliot-launcher.jar`, the tool `eliotw` fetches and
 # execs. Everything else a build needs comes from the dependency graph, so this is the one binary in the
 # system whose location is not derived from anything — which is exactly why it is pinned by hand in each
-# consumer's `.eliot-version` and why what is attached here has to be right.
+# consumer's `launcher` line in `eliot.pkg` and why what is attached here has to be right.
 #
 # The jar is built by this tag's own source, bootstrapped. `./bootstrap` compiles the launcher from the
 # tag's `src` with the eliot toolchain its `eliot.pkg` names (stage 0), and that launcher then builds

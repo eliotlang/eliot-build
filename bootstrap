@@ -21,7 +21,7 @@
 # has to agree on it.
 #
 # `eliotw` stays what it is — the wrapper every *other* project runs, fetching a published launcher —
-# and `.eliot-version` still pins that one. This script is for this repository and its CI.
+# and the `launcher` line of `eliot.pkg` still pins that one. This script is for this repository and its CI.
 
 set -eu
 

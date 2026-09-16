@@ -915,7 +915,8 @@ its own. The parser needed no disambiguation to make that true; block scope alre
 disambiguation.
 
 **The tool has a front door, and it is the first part of it not written in Eliot.** `eliotw` and
-`.eliot-version`: find a JRE, read the pinned version, fetch that launcher once into
+its pin (`.eliot-version` then, a `launcher` line of `eliot.pkg` since 2026-09-16): find a JRE, read
+the pinned version, fetch that launcher once into
 `~/.cache/eliot/launcher/<tag>/`, exec it. A hundred lines of POSIX shell that know three things — a
 URL shape, an asset name and a cache path — and nothing whatever about descriptors, resolution or
 verbs. That is the same rule every module in this project is held to, applied to a file the compiler
