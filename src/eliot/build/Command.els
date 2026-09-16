@@ -37,7 +37,7 @@ import eliot.build.model.PackageId
  * an argument it did not understand would act on something the user did not name, and a leading dash
  * is kept free so that an option can arrive later without first being mistaken for a package. What
  * is *not* refused here is a package no descriptor declares: that is a fact about a descriptor this
- * module has never seen, and the resolver already reports it against the one it has.
+ * function has not seen, and `unknownPackage` is what the launcher answers once it has read one.
  *
  * Written with `fold` rather than `if..else`, and the reason is a compiler finding rather than a
  * preference: a complete `if..else` discharges an `Abort`, and `runAbort[Option[PackageName]]` erases
@@ -125,10 +125,48 @@ def classpathOf(directories: List[Path]): String =
 def failed(doing: String, problem: String): List[String] = singleton("eliot: " ++ doing ++ ": " ++ problem)
 
 /**
- * How to invoke the tool, for a command line that named no package: what the one argument is, and
- * what naming it does.
+ * How to invoke the tool: what the one argument is, what naming it does, and — where the descriptor
+ * could be read — which packages there are to name.
+ *
+ * **The names are the descriptor's, never examples.** No package name is special, so a usage that
+ * suggested `root` or `test` would be suggesting names this project may not have — and in this
+ * repository `root` is declared and runs nothing. The only list that is right is the one the file in
+ * the working directory makes, so a command line naming nothing, or naming a package the file does not
+ * declare, answers with exactly that list. Names only, in declaration order: whether a package runs
+ * anything is a fact about its closure, and asking would turn a usage into a resolution.
+ *
+ * `None` is a descriptor that could not be read, whose failure the caller has already reported; the
+ * usage then says what the argument is and lists nothing, rather than an empty list that would read
+ * as a file declaring no packages.
+ *
+ * ```eliot
+ * val lines = usage(Some(descriptor.packages.map(packageName)))
+ * ```
  */
-def usage: List[String] =
+def usage(declared: Option[List[PackageName]]): List[String] =
    singleton("usage: eliot <package>") ++
       singleton("   runs every compiler line in the package's closure over the package's sources") ++
-      singleton("   <package>   'root', 'test', or any package declared in " ++ descriptorFileName)
+      foldOption(empty, listed, declared)
+
+/**
+ * A command line naming a package the descriptor does not declare: that, and then the usage listing
+ * what it does declare.
+ *
+ * Refused here rather than by the resolver, because the resolver's `NoSuchPackage` is about whatever
+ * descriptor it was handed and cannot say what the user could have typed instead; this knows it is the
+ * project's own file.
+ */
+def unknownPackage(name: PackageName, declared: List[PackageName]): List[String] =
+   failed("no package named '" ++ show(name) ++ "'", "not declared in " ++ descriptorFileName) ++
+      usage(Some(declared))
+
+/**
+ * The packages a descriptor declares, one per line under a heading naming the file, or the one line
+ * saying there are none.
+ */
+private def listed(declared: List[PackageName]): List[String] =
+   fold(
+      isEmpty(declared),
+      singleton(descriptorFileName ++ " declares no packages"),
+      singleton("packages in " ++ descriptorFileName ++ ":") ++ declared.map(name -> "   " ++ show(name))
+   )

@@ -91,7 +91,9 @@ eliot.test.Runner`, the compiler's `run` mode executes the jar, and the runner e
 case; `eliot launcher` builds the jar. `resolve` and `roots` were removed on 2026-09-16 rather than kept
 as options — questions about a closure belong to the project-model query (`docs/build-system.md`, "IDE
 integration"), which is not built. A second word, no word, or a word starting `-` is the usage and exit
-1. The lockfile is the step after this.
+1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
+with that list after the error (the descriptor is read before the command line is looked at, so a
+missing or malformed one is reported first, followed by the bare usage). The lockfile is the step after this.
 
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
@@ -165,7 +167,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 244 green
+./bootstrap test                                             # compiles and runs the suite, 247 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -194,7 +196,7 @@ launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` 
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 244 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 247 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`

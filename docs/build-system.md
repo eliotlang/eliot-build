@@ -465,7 +465,10 @@ Later the same day, **the verbs went**:
   command line is one package name; anything else — no name, a second word, a word starting `-` — is
   the usage and exit 1. The dash is kept free so an option can arrive later without first being
   read as a package, and `eliot build test`, the old spelling, is refused rather than read as a
-  package called `build`.
+  package called `build`. The usage lists the packages `eliot.pkg` declares, read from the file rather
+  than suggested — no name is special, so an example would name a package this project may not have —
+  and a name the file does not declare is refused with the same list after it. Names only: whether a
+  package runs anything is a fact about its closure, and asking would make a usage a resolution.
 - **`resolve` and `roots` were removed, not turned into options.** Both were questions about a
   closure put to a person. `roots` had two users — the `eliot.paths` stopgap and the hand check of a
   build by passing its roots to the compiler — and both belong to the project-model query ("IDE

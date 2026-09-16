@@ -70,9 +70,46 @@ private def javaCommandName: {Environment} String = environmentVariable("ELIOT_J
  *
  * The command line, the directory and the JVM arrive as values rather than being read here, so
  * everything below `main` states what it performs and nothing below `main` states `Environment`.
+ *
+ * **The descriptor is read before the command line is looked at**, because every answer needs it: a
+ * build builds from it, and a command line naming nothing — or naming a package it does not declare —
+ * is answered with the packages it does. A descriptor that cannot be read is reported as itself and
+ * followed by the usage, which is what a user who typed `eliot` in the wrong directory needs to see.
  */
 private def answer(commandLine: List[String], here: Path, java: String): {FileSystem, Process} List[String] =
-   foldOption(reporting(usage), name -> attempted(name, here, java), requested(commandLine))
+   catch[IoError, List[String]](
+      catch[DescriptorError, List[String]](
+         answered(requested(commandLine), parseDescriptor(readLines(here / descriptorFileName)), here, java),
+         problem -> reporting(failed("malformed " ++ descriptorFileName, show(problem)) ++ usage(None))
+      ),
+      problem -> reporting(failed("cannot read " ++ descriptorFileName, show(problem)) ++ usage(None))
+   )
+
+/**
+ * What the command line asks of `descriptor`: the usage where it names no package, the usage after a
+ * refusal where it names one the descriptor does not declare, and the build otherwise.
+ *
+ * `foldOption` rather than `if..else` for the same reason `eliot.build.Command.requested` gives: an
+ * `if..else` over `List[String]` would add a `runAbort` instantiation for nothing.
+ */
+private def answered(
+      name: Option[PackageName],
+      descriptor: Descriptor,
+      here: Path,
+      java: String
+   ): {FileSystem, Process} List[String] = {
+   val declared = descriptor.packages.map(packageName)
+
+   foldOption(
+      reporting(usage(Some(declared))),
+      named -> foldOption(
+         reporting(unknownPackage(named, declared)),
+         _ -> attempted(named, descriptor, here, java),
+         packageNamed(named, descriptor)
+      ),
+      name
+   )
+}
 
 /**
  * Lines that say the tool did not do what it was asked, and the exit code that says so to whatever
@@ -103,14 +140,19 @@ private def reporting(lines: List[String]): {Process} List[String] = {
  * Every one is spelled out, and has to be: the row names `Throw` six times, so nothing but the call
  * can say which of them a given `catch` is for.
  */
-private def attempted(name: PackageName, here: Path, java: String): {FileSystem, Process} List[String] =
+private def attempted(
+      name: PackageName,
+      descriptor: Descriptor,
+      here: Path,
+      java: String
+   ): {FileSystem, Process} List[String] =
    catch[IoError, List[String]](
       catch[GitError, List[String]](
          catch[AssetError, List[String]](
             catch[DescriptorError, List[String]](
                catch[ResolutionError, List[String]](
                   catch[InvocationError, List[String]](
-                     performed(name, here, java),
+                     performed(name, descriptor, here, java),
                      problem -> reporting(
                         failed("cannot build '" ++ show(name) ++ "'", show(problem))
                      )
@@ -129,8 +171,8 @@ private def attempted(name: PackageName, here: Path, java: String): {FileSystem,
    )
 
 /**
- * The whole of the tool, composed: read the descriptor where the user is standing, and build the
- * package that was named against the packages the cache can reach.
+ * The whole of the tool, composed: build the package that was named, out of the descriptor where the
+ * user is standing, against the packages the cache can reach.
  *
  * `with gitPackages with shellGit` is that composition. The inner binding answers what the tool asks
  * of a package — a descriptor, an anchor, a tree — out of the mirror cache; the outer one gives that
@@ -149,19 +191,17 @@ private def attempted(name: PackageName, here: Path, java: String): {FileSystem,
  */
 private def performed(
       name: PackageName,
+      descriptor: Descriptor,
       here: Path,
       java: String
    ): {
       FileSystem, Process, Throw[IoError], Throw[GitError], Throw[AssetError], Throw[DescriptorError],
       Throw[ResolutionError], Throw[InvocationError]
-   } List[String] = {
-   val descriptor = parseDescriptor(readLines(here / descriptorFileName))
-
+   } List[String] =
    provide(
       cacheRoot(here),
       compiled(name, descriptor, here, java) with gitPackages with shellGit with shellAssets
    )
-}
 
 /**
  * The build: one closure, read twice — once for what to compile and once for what to run over

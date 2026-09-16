@@ -60,15 +60,32 @@ def testCases: Test = {
       joined("/", failed("git refused", "no such repository")) shouldBe "eliot: git refused: no such repository"
    }
 
-   "usage" should "name the one argument and what naming it does" in {
-      joined("/", usage) shouldBe expectedUsage
+   "usage" should "name the one argument, what naming it does, and every package the descriptor declares" in {
+      joined("/", usage(Some(declaredNames))) shouldBe (expectedUsage ++ expectedListing)
+   }
+   "usage" should "list nothing where the descriptor could not be read" in {
+      joined("/", usage(None)) shouldBe expectedUsage
+   }
+   "usage" should "say so where the descriptor declares no packages at all" in {
+      joined("/", usage(Some(empty))) shouldBe (expectedUsage ++ "/eliot.pkg declares no packages")
+   }
+
+   "unknownPackage" should "name the package that is not declared, then list the ones that are" in {
+      joined("/", unknownPackage(PackageName("nosuch"), declaredNames)) shouldBe expectedRefusal
    }
 }
 
 private def expectedUsage: String =
    "usage: eliot <package>/" ++
-      "   runs every compiler line in the package's closure over the package's sources/" ++
-      "   <package>   'root', 'test', or any package declared in eliot.pkg"
+      "   runs every compiler line in the package's closure over the package's sources"
+
+private def expectedListing: String = "/packages in eliot.pkg:/   root/   launcher/   test"
+
+private def expectedRefusal: String =
+   "eliot: no package named 'nosuch': not declared in eliot.pkg/" ++ expectedUsage ++ expectedListing
+
+private def declaredNames: List[PackageName] =
+   append(append(singleton(PackageName("root")), PackageName("launcher")), PackageName("test"))
 
 /**
  * The order is the compiler's own argument parser's: the line's mode and its `-m` before the first
