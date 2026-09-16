@@ -1,15 +1,16 @@
 -- The build tool as a package — the one whose descriptor the tool itself has to be able to read, and
 -- as of v0.2 of the toolchain the one it can build.
 --
--- **Three packages, no scopes.** Top-level clauses are the *root package*: the library at `src/`,
--- which is what a consumer would get and what `//root` names. `launcher` is that library plus a
--- platform plus an entry point, and `test` is the suite at `test/src`. Nothing depends on either, so
--- neither one's platform layer reaches anybody — the isolation the old `artifact` and `test` scopes
--- were enforcing is the shape of the graph now (`docs/build-system.md`, "What this replaced, and why").
+-- **Three packages, no scopes, every one of them written out.** `root` is the library at `src/`, which
+-- is what a consumer would get and what `//root` names; it says `at .` because its directory is the
+-- repository's own and its name would have said otherwise. `launcher` is that library plus a platform
+-- plus an entry point, and `test` is the suite at `test/src`. Nothing depends on either, so neither
+-- one's platform layer reaches anybody — the isolation the old `artifact` and `test` scopes were
+-- enforcing is the shape of the graph now (`docs/build-system.md`, "What this replaced, and why").
 --
 -- `launcher` is a package rather than a clause on the root, and it has to be: were `main
--- eliot.build.Launcher` declared beside the sources, `test` would inherit it through `dep //root`
--- alongside the framework's runner, and the closure would hold two entry points.
+-- eliot.build.Launcher` declared in `root`, `test` would inherit it through `dep //root` alongside the
+-- framework's runner, and the closure would hold two entry points.
 --
 -- `//stdlib` alone in the root package, because that is what `src` names: `eliot.collection.List`,
 -- `eliot.file` and `eliot.system`. The `lang` layer arrives underneath it anyway — the eliot
@@ -26,7 +27,10 @@
 -- it predates the `main` clause; a published tag is never replaced, so the line moves out of this file
 -- the day a tag carrying it can be depended on.
 
-dep github.com/robertbraeutigam/eliot//stdlib v0.2
+package root {
+  at .
+  dep github.com/robertbraeutigam/eliot//stdlib v0.2
+}
 
 package launcher {
   dep //root

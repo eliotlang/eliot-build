@@ -18,11 +18,10 @@ import eliot.build.model.Descriptor
  * makes a descriptor inspectable, what makes the tool's own edits to one reviewable, and what lets a
  * reader's test assert on a rendering rather than on a shape.
  *
- * **The root package is written as the top level, not as a block.** It is the one package whose
- * directory is not a choice, so `package root { … }` would be a block whose only content is what the
- * file could have said with no block at all — and a writer that emitted one would teach every reader
- * a second spelling of the common case. A descriptor whose root package says nothing writes nothing
- * for it, which is what a repository of packages in subdirectories looks like.
+ * **Every package is a block, the root package included.** There is one spelling of a package, and
+ * the root's is `package root { at . … }` — its `at` is written because `.` is not what its name would
+ * have said, exactly as for any package whose directory is not its name. A descriptor declaring no
+ * packages writes nothing at all.
  *
  * Nesting is written by indenting a whole rendered block rather than by threading a depth through the
  * renderers, so a package's plugin sub-clauses end up two levels in without any renderer knowing how
@@ -30,23 +29,13 @@ import eliot.build.model.Descriptor
  */
 
 /**
- * `descriptor` written back out in `eliot.pkg` syntax: the root package's own clauses at the top
- * level, then a block per package beside it.
+ * `descriptor` written back out in `eliot.pkg` syntax: a block per package, in the order declared.
  *
  * ```eliot
  * val text = renderDescriptor(parseDescriptor(lines))
  * ```
  */
-def renderDescriptor(descriptor: Descriptor): String =
-   nonEmptyLines(
-      rootClauses(descriptor) ++ besideTheRoot(descriptor).map(renderPackage)
-   )
-
-private def rootClauses(descriptor: Descriptor): List[String] =
-   foldOption(empty, root -> packageClauses(root), packageNamed(rootPackageName, descriptor))
-
-private def besideTheRoot(descriptor: Descriptor): List[BuildPackage] =
-   descriptor.packages.filter(built -> built.packageName != rootPackageName)
+def renderDescriptor(descriptor: Descriptor): String = nonEmptyLines(descriptor.packages.map(renderPackage))
 
 /**
  * Everything one package says, in the order a reader expects it: where it is, whether it is anyone
@@ -69,16 +58,10 @@ private def renderDependency(dependency: Dependency): String = dependency match 
 
 /**
  * `at <directory>`, written only where the directory is not the package's name. Where it is, the name
- * has already said so, and writing it out would spell a convention as though it were an override. The
- * root package's `.` is never written for the same reason twice over: it is not a choice, and the top
- * level it is rendered at is what says so.
+ * has already said so, and writing it out would spell a convention as though it were an override.
  */
 private def renderAt(built: BuildPackage): List[String] =
-   fold(atItsDefault(built), empty, singleton("at " ++ built.packageRoot))
-
-private def atItsDefault(built: BuildPackage): Bool =
-   built.packageRoot == show(built.packageName) ||
-      (built.packageName == rootPackageName && built.packageRoot == rootPackageDirectory)
+   fold(built.packageRoot == show(built.packageName), empty, singleton("at " ++ built.packageRoot))
 
 private def renderInternal(built: BuildPackage): List[String] =
    fold(built.exported, empty, singleton("internal"))

@@ -52,9 +52,8 @@ def clausesNamed(name: String, clauses: List[Clause]): List[Clause] =
    clauses.filter(clause -> clause.keyword == name)
 
 /**
- * The direct children of `clause` whose keyword is `name`. The same question asked of a block that
- * `clausesNamed` asks of a file, which is what lets the root be interpreted exactly as every block
- * inside it is.
+ * The direct children of `clause` whose keyword is `name` — the same question asked of a block that
+ * `clausesNamed` asks of a file.
  */
 def childrenNamed(name: String, clause: Clause): List[Clause] = clausesNamed(name, clause.children)
 

@@ -1062,3 +1062,51 @@ about to fail, so an offline build of an unchanged graph still touches no networ
 just works. The lesson is the smaller one this document keeps recording — a cache whose staleness is
 invisible to the thing it serves will eventually lie to it, and the place to spend a network round trip
 is the place where the alternative is a wrong answer.
+
+### 17.2 The root package is written out (2026-09-16)
+
+The descriptor's top level held the root package's clauses bare, and a `package` block for everything
+else. That was sbt's confusion in miniature — a free-standing line reads as file-wide when nothing in
+the format is, because there is no build-wide scope for it to belong to — and it left the one package
+every sibling names (`dep //root`) as the one no line declared. Now every package is a block, `package
+root { at . … }` included, and the top level holds nothing else; a `dep` outside a block is refused
+with the spelling it should have had rather than as an unknown keyword, because "upgrade your
+launcher" is the wrong hint for a line that needs a block around it. The root writes `at .` because
+`at` defaults to the name for every package and one rule beats one rule plus an exception.
+
+What it cost the modules is smaller than the change reads. `PackageFile` gained a second entry point:
+`parseDescriptor` is the format as spelled today and is what `Launcher` reads the project's own file
+with; `parsePublishedDescriptor` is every spelling ever published — `module` for `package`, a bare top
+level as the root package at `.`, `test` and `artifact` dropped — and is what `GitPackages` reads a
+mirror's descriptor with, since a tag is never replaced. The line is drawn at the call site rather than
+by sniffing the file, because the only descriptor whose author can be told to write it the current way
+is the one they are standing on, and a published one is read leniently or not at all. A published file
+of blocks alone — the layers' repository at every tag — describes no root package and gets none; the
+synthesised root that "always existed" is gone with the rule that needed it, so a package exists
+exactly where a block declares it and an empty descriptor is empty. `DescriptorWriter` lost its one
+special case, `Descriptor` lost `rootPackageDirectory`, and `Clause`'s `clausesNamed` stopped being
+the reason the top level *could* be read as a block, which it still is, since a file of blocks is what
+a file is. `TablePackages` reads as a mirror does and gained `rootPackage(clauses)`, the one-line
+spelling of the common case every resolving suite writes; the three sibling descriptors were
+rewritten, and eliot's — which has no root package — says so in a comment rather than by omission.
+
+Left where it was: a bare `dep` on a repository that declares no root package still mounts nothing,
+silently. The design records the diagnostic as owed by the author's build; it is no worse than the
+empty `src/` it used to mount, and it is not this change's.
+
+**One run-time oddity, recorded because it was not explained.** Midway through, with an earlier edit
+of `GitPackagesTests` still carrying its old expectation, the full runner died with an uncaught
+`RuntimeException` from `Throw.exitInternal` instead of reporting the failed assertion, and the trace
+named `AssemblyTests`, a suite that had already reported green. The trace is stale by construction —
+the exit sentinel is allocated on the first raise of the run and rethrown ever after, so it always
+names the first raise and never the one that escaped — which is worth knowing before reading one.
+The same sources rebuilt into a fresh output directory reported the failure normally, twice, and the
+suite alone did too; the only difference was that the crashing jar had been built incrementally through
+several edits in one `target/`. §11.3's first finding — a stale incremental cache — is the likeliest
+reading, and the rule stands: when a run makes no sense, delete `target/.eliot-index-*` and
+`.eliot-objects-*` before reading the code.
+
+Verified the way §17 says to: 254 cases through the compiler CLI; the locally built launcher building
+eliot-test's suite from a deleted `target/` (96 green) with eliot `v0.1` read out of a published tag
+by the lenient path and eliot-test's own descriptor read strictly; `build launcher` here, and the jar
+that came out building this suite; `build nosuch` exiting 1.

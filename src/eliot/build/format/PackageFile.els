@@ -17,26 +17,30 @@ import eliot.build.model.Descriptor
  * Two things the vocabulary is made of live next door, because neither is about a keyword.
  * `eliot.build.format.ClauseReader` reads one clause carefully — which argument has to be there, which
  * children are recognised, what a clause that does not say so is complained about with — and
- * `eliot.build.format.DependencyClause` reads the `dep` line, which the top level and every `package`
- * block read identically. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs
- * none of this module's machinery — a model in hand cannot fail to be written — and imports `model`
- * alone. What is left here is the keywords themselves: `package`, `at`, `internal`, `main`, `plugin`,
- * `compiler`, `backend`, and which part of the model each of them feeds.
+ * `eliot.build.format.DependencyClause` reads the `dep` line, which every `package` block reads the
+ * same way. The other direction is `eliot.build.format.DescriptorWriter`'s, which needs none of this
+ * module's machinery — a model in hand cannot fail to be written — and imports `model` alone. What is
+ * left here is the keywords themselves: `package`, `at`, `internal`, `main`, `plugin`, `compiler`,
+ * `backend`, and which part of the model each of them feeds.
  *
- * **The top level is a package block with the braces left off.** Its `dep`, `main` and `plugin`
- * clauses describe the *root package* — the one whose directory is the repository's own and which a
- * `dep` line carrying no selector selects — so a flat repository writes no block at all and a
- * repository with several packages beside the root writes one each. The root package is synthesised
- * whether or not anything was written for it, because a bare dep on a repository has to land
- * somewhere and "somewhere" should not depend on which clauses the author happened to need.
+ * **A file is package blocks and nothing else.** Every package is written out, the root package
+ * included — `package root { at . … }` — so a `dep` line has exactly one place it can stand, the block
+ * of the package whose sources need it, and the file never carries a clause whose scope a reader has
+ * to know. A `dep`, `main` or `plugin` at the top level is refused with the spelling it should have
+ * had, rather than as an unknown keyword: it is not a clause a newer launcher would know, it is a
+ * clause that belongs somewhere. A package exists exactly when a block declares it, the root package
+ * among them; a repository whose packages all live in subdirectories declares no `root`, and a bare
+ * `dep` on it names a package it does not declare.
  *
- * **Retired keywords are read, not refused.** `module`, `test` and `artifact` are what this format
- * spelled before the scopes were cut (`docs/build-system.md`, "What this replaced, and why"), and
- * tags carrying them are published and immutable — a resolver that could not read them could not
- * resolve anything. So `module` is read exactly as `package` is, which it turns out to be: its `at`
- * meant the same directory, holding the same `src/`. `test` and `artifact` are *dropped*, which loses
- * nothing, because neither ever reached a consumer and a consumer's descriptor is the only one this
- * path ever sees.
+ * **What was published is read as it was spelled.** Tags carrying the earlier forms exist and are
+ * immutable — a resolver that could not read them could not resolve anything — so `parsePublishedDescriptor`
+ * is what a mirror's descriptor is read with, and it accepts every spelling this format has had:
+ * `module` blocks, read exactly as `package` is (its `at` meant the same directory, holding the same
+ * `src/`); top-level `dep`, `main` and `plugin` clauses, which described the root package when the
+ * root package was the top level, and are read as one at `.`; and `test` and `artifact` blocks, which
+ * are dropped, losing nothing, because neither ever reached a consumer. `parseDescriptor` is the
+ * format as it is spelled today, and it is what the descriptor a user is standing on is read with —
+ * the one file whose author can be told to write it the current way.
  *
  * The two error channels meet here and nowhere else: the parser raises `ClauseError`, a reader raises
  * `ClauseProblem`, and `DescriptorError` is the union a caller catches. Unknown clauses are fatal by
@@ -68,16 +72,30 @@ implement Show[DescriptorError] {
 def descriptorFileName: String = "eliot.pkg"
 
 /**
- * The descriptor `lines` spell.
+ * The descriptor `lines` spell, in the format as it is spelled today: package blocks, the root
+ * package written out among them.
  *
  * ```eliot
  * val descriptor = parseDescriptor(readLines(root / "eliot.pkg"))
  * ```
  */
-def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
+def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor = read(false, lines)
+
+/**
+ * The descriptor `lines` spell, in any form this format has ever been published in — what a
+ * dependency's descriptor is read with, since a published tag is never replaced and may spell the
+ * root package as the top level, or a package as a `module`.
+ *
+ * ```eliot
+ * val descriptor = parsePublishedDescriptor(split("\n", fileAt(AtVersion(version), "eliot.pkg", mirror)))
+ * ```
+ */
+def parsePublishedDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor = read(true, lines)
+
+private def read(published: Bool, lines: List[String]): {Throw[DescriptorError]} Descriptor =
    foldEither(
       error -> raise(Malformed(error)),
-      clauses -> interpreted(clauses),
+      clauses -> interpreted(published, clauses),
       runThrow[ClauseError](parseClauses(lines))
    )
 
@@ -85,49 +103,79 @@ def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
  * What `clauses` mean, with the reader's complaints answered as descriptor errors — the second of the
  * two channels the modules underneath raise on, and the only place either becomes a `DescriptorError`.
  */
-private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
+private def interpreted(published: Bool, clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
    foldEither(
       problem -> raise(Unreadable(problem)),
       descriptor -> descriptor,
-      runThrow[ClauseProblem](interpret(clauses))
+      runThrow[ClauseProblem](interpret(published, clauses))
    )
 
 /**
- * The descriptor `clauses` spell: the root package the top level describes, then every package
- * declared beside it.
+ * The descriptor `clauses` spell: every package the file declares a block for, and — where the file is
+ * a published one — every package it spells in a form this format no longer writes.
  *
- * The root is read exactly as every block inside it is read — by asking for the clauses of one
- * keyword and interpreting those — rather than by folding a growing `Descriptor` through a sum over
- * keywords. The fold was forced once: under the carrier model an `if`'s arms could not raise, so
- * naming the alternatives was the only way to refuse an unknown one. It is `knownClauses` that
- * refuses now, up front and for all of them at once, and what is left is the mapping itself.
+ * Read by asking for the clauses of one keyword and interpreting those, rather than by folding a
+ * growing `Descriptor` through a sum over keywords. The fold was forced once: under the carrier model
+ * an `if`'s arms could not raise, so naming the alternatives was the only way to refuse an unknown one.
+ * It is `knownClauses` that refuses now, up front and for all of them at once, and what is left is the
+ * mapping itself.
  */
-private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor = {
-   knownClauses(descriptorKeywords, clauses)
+private def interpret(published: Bool, clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor = {
+   if(published) knownClauses(publishedKeywords, clauses) else currentClauses(clauses)
 
-   Descriptor(prepend(declaredPackages(clauses), rootPackageOf(clauses)))
+   Descriptor(clausesNamed("package", clauses).map(packageOf) ++ retiredPackages(published, clauses))
 }
 
 /**
- * Every package the file declares a block for, `module` blocks among them: a retired keyword that
- * meant what `package` means, read the same way so an already-published tag still resolves.
+ * The top level as it is spelled today holds package blocks and nothing else. A clause that belongs
+ * *inside* one is told so, and told the spelling the root package has, because "unknown clause,
+ * upgrade" would send its author looking for a newer launcher when what the line needs is a block
+ * around it.
  */
-private def declaredPackages(clauses: List[Clause]): {Throw[ClauseProblem]} List[BuildPackage] =
-   clausesNamed("package", clauses).map(packageOf) ++ clausesNamed("module", clauses).map(packageOf)
+private def currentClauses(clauses: List[Clause]): {Throw[ClauseProblem]} Unit = {
+   clauses.foreach(clause -> requireThat(!belongsInsideAPackage(clause), belongsInside(clause), clause))
+   knownClauses(descriptorKeywords, clauses)
+}
+
+private def belongsInsideAPackage(clause: Clause): Bool =
+   rootClauseKeywords.any(known -> keyword(clause) == known)
+
+private def belongsInside(clause: Clause): String =
+   "'" ++ clause.keyword ++ "' belongs inside a package block; the root package is written 'package root { at . ... }'"
 
 /**
- * The root package: the top level's own clauses, at the repository root, exported because a bare `dep`
- * line on this repository is exactly what selects it.
+ * The packages a published descriptor spells in a retired form, and nothing where the descriptor is
+ * the user's own: the root package the top level once described, first, and then every `module`
+ * block, which was `package` under another name.
  */
-private def rootPackageOf(clauses: List[Clause]): {Throw[ClauseProblem]} BuildPackage =
-   BuildPackage(
-      rootPackageName,
-      rootPackageDirectory,
-      true,
-      dependenciesIn(clauses),
-      mainIn(clauses),
-      pluginsIn(clauses)
-   )
+private def retiredPackages(published: Bool, clauses: List[Clause]): {Throw[ClauseProblem]} List[BuildPackage] =
+   if(published) (topLevelRoot(clauses) ++ clausesNamed("module", clauses).map(packageOf)) else empty
+
+/**
+ * The root package a published top level describes: present exactly where the top level says
+ * something about it, at the repository root, exported because a bare `dep` line on the repository is
+ * what selected it. A published file of blocks alone described no root package, and gets none — the
+ * layers' repository is that file, and a bare `dep` on it never mounted anything worth having.
+ */
+private def topLevelRoot(clauses: List[Clause]): {Throw[ClauseProblem]} List[BuildPackage] =
+   if(clauses.any(belongsInsideAPackage))
+      singleton(
+         BuildPackage(
+            rootPackageName,
+            retiredRootDirectory,
+            true,
+            dependenciesIn(clauses),
+            mainIn(clauses),
+            pluginsIn(clauses)
+         )
+      )
+   else empty
+
+/**
+ * Where the root package stood when the top level described it: the repository root, which the
+ * current spelling writes out as `at .` and this one never could.
+ */
+private def retiredRootDirectory: String = "."
 
 private def packageOf(clause: Clause): {Throw[ClauseProblem]} BuildPackage = {
    val name = required(0, "a package needs a name", clause)
@@ -226,14 +274,23 @@ private def backendWordClause(clause: Clause): {Throw[ClauseProblem]} String = {
 }
 
 /**
- * `test` and `artifact` are listed so a published descriptor still parses, and read nowhere: neither
+ * What the top level may hold today: package blocks, and nothing that belongs inside one.
+ */
+private def descriptorKeywords: List[String] = singleton("package")
+
+/**
+ * What a published top level may hold: the current spelling, `module` for `package`, the root
+ * package's own clauses written bare, and `test` and `artifact`, which are read nowhere — neither
  * ever reached a consumer, and a consumer's descriptor is the only one a retired keyword is met in.
  */
-private def descriptorKeywords: List[String] =
-   append(
-      append(append(append(append(append(empty, "dep"), "package"), "main"), "plugin"), "module"),
-      "test"
-   ) ++ singleton("artifact")
+private def publishedKeywords: List[String] =
+   descriptorKeywords ++ rootClauseKeywords ++ append(append(append(empty, "module"), "test"), "artifact")
+
+/**
+ * The clauses that describe a package rather than declare one — what a published top level spelled
+ * the root package with, and what the current one refuses outside a block.
+ */
+private def rootClauseKeywords: List[String] = append(append(append(empty, "dep"), "main"), "plugin")
 
 private def packageKeywords: List[String] =
    append(append(append(append(append(append(empty, "at"), "internal"), "dep"), "main"), "plugin"), "test")

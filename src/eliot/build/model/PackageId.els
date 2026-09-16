@@ -41,7 +41,7 @@ data PackageName(packageNameText: String)
  * *root package*, which is what a `dep` line carrying no selector means.
  *
  * A sum rather than an `Option[PackageName]` because the root package is a package — the one whose
- * directory is the repository's own, which every descriptor has — rather than the absence of one, and
+ * directory is the repository's own, declared like any other — rather than the absence of one, and
  * because what is mounted is a *set* of these, which an `Option` would make unreadable at every use.
  */
 data PackageSelector = RootPackage | PackageSelected(selectorName: PackageName)
@@ -60,13 +60,14 @@ data Package(packageRepository: Repository, selectedPackage: PackageSelector)
 data PackageId = Sibling(siblingPackage: PackageName) | Foreign(foreignPackage: Package)
 
 /**
- * The name of the **root package**: the one whose directory is the repository's own, which top-level
- * clauses describe and which a `dep` line carrying no selector selects.
+ * The name of the **root package**: the one whose directory is the repository's own, declared as
+ * `package root { at . … }` and selected by a `dep` line carrying no selector.
  *
  * It is a name like any other, and that is the point — the root stopped being an anonymous module
- * that may or may not exist and became a package that is always there, spelled `//root` when a
- * sibling names it. Because it has both a name and an empty selector, the two spellings have to agree:
- * `selectorFor` is where they are made to, so `//root` and a bare URL cannot resolve to two packages.
+ * that may or may not exist and became a package declared in the file like the rest, spelled `//root`
+ * when a sibling names it. Because it has both a name and an empty selector, the two spellings have to
+ * agree: `selectorFor` is where they are made to, so `//root` and a bare URL cannot resolve to two
+ * packages.
  */
 def rootPackageName: PackageName = PackageName("root")
 

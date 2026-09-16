@@ -53,14 +53,14 @@ def testCases: Test = {
       toolchainFor(dependingOnFrameworkAndRunnable) shouldBe expectedMainConflict
    }
    "toolchainOf" should "refuse a closure in which nothing ships a compiler" in {
-      toolchainFor("dep github.com/x/foo v1.2\nmain Hello")
+      toolchainFor(rootPackage("dep github.com/x/foo v1.2\nmain Hello"))
          shouldBe "nothing 'root' depends on ships a compiler"
    }
    "toolchainOf" should "refuse a closure in which two assets claim to be the compiler" in {
       toolchainFor(dependingOnBothCompilers) shouldBe expectedCompilerConflict
    }
    "toolchainOf" should "refuse a closure that ships a compiler but no backend" in {
-      toolchainFor("dep github.com/e/eliot//stdlib v1.2\nmain Hello")
+      toolchainFor(rootPackage("dep github.com/e/eliot//stdlib v1.2\nmain Hello"))
          shouldBe "nothing 'root' depends on ships a backend"
    }
    "toolchainOf" should "refuse a closure shipping two backends, which is two platform layers" in {
@@ -79,32 +79,32 @@ private def eliotPackages: String =
       "package jvm {\n  dep //stdlib\n  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}\n" ++
       "package apidoc {\n  dep //lang\n  plugin eliot-apidoc.zip {\n    backend apidoc\n  }\n}"
 
-private def dependingOnJvm: String = "dep github.com/e/eliot//jvm v1.2\nmain Hello"
+private def dependingOnJvm: String = rootPackage("dep github.com/e/eliot//jvm v1.2\nmain Hello")
 
 /**
  * A suite as the design has one: a package that deps the library beside it and the framework, and
  * declares no entry point of its own because the framework declares one about itself.
  */
 private def suiteDependingOnFramework: String =
-   "dep github.com/e/eliot//jvm v1.2\n" ++
-      "package test {\n  dep //root\n  dep github.com/e/eliot-test v1.0\n}"
+   rootPackage("dep github.com/e/eliot//jvm v1.2") ++
+      "\npackage test {\n  dep //root\n  dep github.com/e/eliot-test v1.0\n}"
 
 private def suiteWithNoFramework: String =
-   "dep github.com/e/eliot//jvm v1.2\npackage test {\n  dep //root\n}"
+   rootPackage("dep github.com/e/eliot//jvm v1.2") ++ "\npackage test {\n  dep //root\n}"
 
 /**
  * The mistake the executable-is-its-own-package rule exists to prevent, written out: a library that
  * declares a `main` of its own, and a suite that then inherits it alongside the framework's.
  */
 private def dependingOnFrameworkAndRunnable: String =
-   "dep github.com/e/eliot//jvm v1.2\ndep github.com/e/eliot-test v1.0\nmain Hello"
+   rootPackage("dep github.com/e/eliot//jvm v1.2\ndep github.com/e/eliot-test v1.0\nmain Hello")
 
 /**
  * Both packages of a repository whose two assets each claim the marker — which no descriptor reader
  * could refuse, since each descriptor is read alone and there is only one here.
  */
 private def dependingOnBothCompilers: String =
-   "dep github.com/two/compilers//one v1.0\ndep github.com/two/compilers//other v1.0\nmain Hello"
+   rootPackage("dep github.com/two/compilers//one v1.0\ndep github.com/two/compilers//other v1.0\nmain Hello")
 
 /**
  * Two repositories that each ship a backend, which is two platform layers in one closure. There is
@@ -193,7 +193,7 @@ private def universe: Universe =
       published("github.com/e/eliot@v1.2", eliotPackages,
          published("github.com/a/avr@v1.0", "package avr {\n  plugin avr.zip {\n    backend avr\n  }\n}",
             published("github.com/x/foo@v1.2", "",
-               published("github.com/e/eliot-test@v1.0", "main eliot.test.Runner",
+               published("github.com/e/eliot-test@v1.0", rootPackage("main eliot.test.Runner"),
                   published("github.com/two/compilers@v1.0", twoCompilerPackages, empty))))),
       empty
    )

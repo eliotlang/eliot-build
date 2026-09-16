@@ -24,7 +24,11 @@ rules the old model needed are consequences of the graph rather than rules, and 
 "Platforms", below). Q1 keeps its answer for half its old reasons, and Q4 loses its special case. The
 layout follows the same move: `at` names a **package root**, with the sources and the compile-time
 overlay as fixed names under it, so the root package is the one at the repository root and "root"
-names a directory rather than a module that may or may not exist.
+names a directory rather than a module that may or may not exist. Amended 2026-09-16: **every package
+is written out, the root package included** — `package root { at . … }` — so the top level of the file
+is package blocks and nothing else, a package exists exactly where a block declares it, and what was
+published in the earlier spelling is read by a separate, lenient entry point ("What a user writes" and
+the clause reference, below).
 
 **Where the implementation stands** (2026-09-15, 237 tests):
 
@@ -95,7 +99,10 @@ the rest of this document records is real, and it stays under the hood.
 A library:
 
 ```
-dep github.com/eliot-lang/eliot//stdlib v1
+package root {
+  at .
+  dep github.com/eliot-lang/eliot//stdlib v1
+}
 
 package test {
   dep //root
@@ -106,7 +113,10 @@ package test {
 An application is the same file plus one package, and no new concept:
 
 ```
-dep github.com/eliot-lang/eliot//stdlib v1
+package root {
+  at .
+  dep github.com/eliot-lang/eliot//stdlib v1
+}
 
 package hello {
   dep //root
@@ -121,11 +131,16 @@ package test {
 ```
 
 `eliot init` writes those lines; nobody types them. **There is one concept in the file** — a package: a
-directory of sources, the things it depends on, and an entry point if it is meant to be run. Top-level
-clauses are the root package, named `root`; `test` is a package that deps it and adds what it takes
-to run a suite; `hello` is a package that deps it and adds what it takes to run a program. Every
-dependency is transitive and none is scoped, so *where does this line go* has one answer — in the
-package whose sources need it.
+directory of sources, the things it depends on, and an entry point if it is meant to be run. `root` is
+the library itself, written out like every other package — its `at .` says where it is, because its name
+would otherwise have said `root/`; `test` is a package that deps it and adds what it takes to run a
+suite; `hello` is a package that deps it and adds what it takes to run a program. Every dependency is
+transitive and none is scoped, so *where does this line go* has one answer — in the block of the
+package whose sources need it — and the top level of the file holds blocks and nothing else, so there
+is no line whose scope a reader has to work out. (The first cut of this design wrote the root package's
+clauses bare at the top level. It was cut on 2026-09-16: a free-standing line reads as file-wide when
+nothing in this format is — sbt's confusion exactly — and `//root` then named the one package no line
+declared.)
 
 What a user never writes: a backend, a command word, an artifact kind, or a platform's parameters.
 `main Hello` is the whole of what they state about producing an executable, and the rest is read off
@@ -327,9 +342,9 @@ What remains, as of the 2026-09-15 revision:
 - **Packages**: the units of dependency inside one repository. Per package: a name, where its sources
   are (`at`, defaulting to the name), an export flag (dependents may dep an exported package;
   examples, applications and test fixtures are `internal`), its dependency list, an optional entry
-  point, and the compiler plugin it ships if it ships one. A repository with no `package` block is one
-  package named `root` at the repository root — the zero-configuration common case, and what top-level
-  clauses describe. **A package may have no sources at all**: one that is only `dep` lines is a bill of
+  point, and the compiler plugin it ships if it ships one. A package exists exactly where a `package`
+  block declares it, the root package — `package root { at . … }`, the one a bare `dep` selects —
+  included. **A package may have no sources at all**: one that is only `dep` lines is a bill of
   materials, and is how the toolchain is handed out (`//jvm-test`).
   **One root descriptor** — per-package descriptor files reintroduce Maven's parent-POM web and Go's
   nested-modules mess, and break the one-parse LSP story.
@@ -385,15 +400,17 @@ the `eliot.paths` precedent this system retires.
 ### Clause reference
 
 ```
-dep github.com/x/foo v1.3                    -- a dependency on that repo's root package
-dep github.com/eliot-lang/eliot//stdlib v1.2 -- package-selected
-dep //root                                   -- a sibling package of this repository
+package root {                               -- the root package: what a bare `dep` on this repo selects
+  at .                                       -- at the repository root, which its name would not have said
+  dep github.com/x/foo v1.3                  -- a dependency on that repo's root package
+  dep github.com/eliot-lang/eliot//stdlib v1.2 -- package-selected
+}
 
 package test {                               -- a package: a directory, dependencies, maybe a `main`
   at test                                    -- its root directory (default: the package's name);
                                              -- sources at test/src, overlay at test/compiler
   internal                                   -- may not be depended on from outside (default: exported)
-  dep //root                                 -- what it compiles against, transitively
+  dep //root                                 -- a sibling package of this repository, transitively
   dep github.com/eliot-lang/eliot//jvm-test v1
 }
 
@@ -415,16 +432,19 @@ package lang {                               -- a layer, and a plugin-shipping p
   wherever it is written. A package's dependencies reach whatever depends on *that package* — and
   nothing depends on a `test` package or an executable, which is where the old model's three
   non-transitivity rules went.
-- **Top-level clauses are the default package**, whose name is `src` and whose source directory is
-  `src/`. Writing `package src { … }` explicitly means the same thing; the zero-config library writes
-  neither. A bare repository dep selects that package and nothing else.
-- **The root package always exists**, whether or not the file writes a clause for it, and that is what
-  killed the ghost. The old model's root module was present when a repository declared no `module`
-  clauses and absent when it did, so one spelling of a bare dep meant two things depending on a remote
-  file. Now a bare dep always names one package at one directory; a repository whose packages all live
-  in subdirectories simply has a root package nobody mounts, and a bare dep on it mounts an empty
-  `src/`. That last case is a diagnostic the author's build owes — "you exported nothing" — rather than
-  a dichotomy the format has to state and every reader has to remember.
+- **The top level holds package blocks and nothing else.** Every package is written out, the root
+  package included, and a `dep`, `main` or `plugin` standing outside a block is refused with the
+  spelling it should have had rather than as an unknown keyword. A free-standing line would read as
+  file-wide, and nothing in this format is — there is no build-wide scope for it to belong to — which
+  is exactly the confusion sbt's top level causes, and the one the first cut of this file reproduced
+  (2026-09-16).
+- **A package exists exactly where a block declares it**, and that is what killed the ghost. The old
+  model's root module was present when a repository declared no `module` clauses and absent when it
+  did, so one spelling of a bare dep meant two things depending on a remote file. Now the root package
+  is `package root { at . … }`, a bare repository dep selects the package called `root` and nothing
+  else, and `//root` in a sibling names a line the same file declares. A repository whose packages all
+  live in subdirectories declares no root package, and a bare dep on it names a package it does not
+  declare — a diagnostic the author's build owes, and not yet raised: today it mounts nothing.
 - **A package need not have sources.** One that has none is a bill of materials: what it contributes is
   its `dep` lines, to whoever deps it. It is *not* a parent — it contributes dependencies only, never
   configuration and never a directory — which is what keeps it from being Maven's parent POM, rejected
@@ -442,8 +462,8 @@ package lang {                               -- a layer, and a plugin-shipping p
   application author's. A package may state backend parameters about itself for that reason, and the
   consumer may override one it disagrees with; neither writes the plugin's internal word.
 - `at` is the package's **root directory**, relative to the repo root, defaulting to the package's
-  name — so `test` and a flat layer write none, and the root package is at `.`, which is not a choice
-  and is never written. Its sources are
+  name — so `test` and a flat layer write none, and the root package writes `at .`, because its name
+  would have said `root/` and one default rule beats one rule plus an exception. Its sources are
   `<at>/src` and its compile-time overlay `<at>/compiler`, both fixed names no descriptor spells
   ("Standard layout", below). It buys one thing: the package's *name is not
   its path*. Names are half of package identity in a registry-less design (`URL//name`), so a repo that
@@ -569,9 +589,11 @@ put together killed it.
 **The root was a ghost.** A repository with no `module` clauses had an anonymous root module at `src/`,
 and `dep github.com/x/foo` selected it; a repository with `module` clauses had none, and the identical
 line was an error. One spelling, two meanings, decided by the contents of a file on someone else's
-server, and the thing itself never named. Now every package has a name and a root directory — the
-root package is called `root` and its directory is the repository's — and a repository either **is** a
-package or **contains** packages.
+server, and the thing itself never named. Now every package has a name, a root directory and a block
+declaring it — the root package is `package root { at . … }` — and a repository either **is** a package
+or **contains** packages. (The first cut of this, 2026-09-15, still wrote the root package's clauses
+bare at the top level; a day later that was recognised as the same ghost one size smaller — the one
+package every sibling names was the one no line declared — and cut.)
 
 **The normal project could not be referred to.** Every verb took a configuration, and for a library the
 only configuration was `test`. There was no way to ask for *the library as consumers see it* — which is
@@ -604,11 +626,10 @@ in no descriptor:
 | `<at>/compiler/` | the package's compile-time **overlay** | no | yes, as **override** files | with the package |
 
 `at` defaults to the package's own name, so `package test` is `test/src` and `test/compiler`. **The
-root package** — what a repository with no `package` clause is, and what top-level clauses describe —
-has the repository root as its package root, so its tracks are `./src` and `./compiler` and the
-descriptor sits beside them. That is the whole of what "root" means in this document now: a package
-root is a directory, the root package is the one whose directory is the repository's, and the word
-names something in both uses rather than a module that may or may not exist.
+root package** writes `at .`, so its tracks are `./src` and `./compiler` and the descriptor sits
+beside them. That is the whole of what "root" means in this document now: a package root is a
+directory, the root package is the one whose directory is the repository's, and the word names
+something in both uses rather than a module that may or may not exist.
 
 Two of the three conventional directories this section used to describe are therefore ordinary
 packages: `src/` belongs to the root package and `test/src/` to the `test` package, so *when does this

@@ -66,15 +66,27 @@ def against[A](
    provide(universe, runThrow[ResolutionError, A](computation))
 
 /**
- * The descriptor `text` spells, taken as empty where it spells nothing readable. A malformed
- * descriptor is `eliot.build.format.PackageFile`'s subject, and nothing here is about it.
+ * The descriptor `text` spells, read as a mirror's is — in any form ever published — and taken as
+ * empty where it spells nothing readable. A malformed descriptor is `eliot.build.format.PackageFile`'s
+ * subject, and nothing here is about it.
  */
 def descriptorOf(text: String): Descriptor =
    foldEither(
       _ -> emptyDescriptor,
       descriptor -> descriptor,
-      runThrow[DescriptorError, Descriptor](parseDescriptor(split("\n", text)))
+      runThrow[DescriptorError, Descriptor](parsePublishedDescriptor(split("\n", text)))
    )
+
+/**
+ * The descriptor of a repository that is one package at its root, declaring `clauses` — the common
+ * case written out the one way it is written, so a case spells its `dep` lines and nothing else.
+ *
+ * ```eliot
+ * resolved(rootPackage("dep github.com/x/foo v1.2"), publishing("github.com/x/foo@v1.2", rootPackage("")))
+ * ```
+ */
+def rootPackage(clauses: String): String =
+   "package root {\n  at .\n" ++ fold(clauses == "", "", clauses ++ "\n") ++ "}"
 
 private def publicationIn(universe: Universe, key: String): Option[Descriptor] =
    foldOption(None, text -> Some(descriptorOf(text)), universe.publications.lookupOption(key))

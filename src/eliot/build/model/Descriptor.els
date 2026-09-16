@@ -64,8 +64,8 @@ data Plugin(pluginAsset: String, pluginBackend: Option[String], compilerBase: Bo
  * `packageRoot` is the package's **root directory**, relative to the repository root, and the two
  * source roots hang under it: sources at `<packageRoot>/src`, the compile-time overlay at
  * `<packageRoot>/compiler`. It is always populated — the package's own name where the descriptor says
- * nothing, and `.` for the root package — so a consumer reads a directory rather than folding an
- * absence and re-deriving the default at every use. The default is a *reading* of the `at` clause and
+ * nothing, which is why the root package writes `at .` — so a consumer reads a directory rather than
+ * folding an absence and re-deriving the default at every use. The default is a *reading* of the `at` clause and
  * belongs to whoever reads one; by the time a descriptor is a value, where its packages live is
  * settled.
  *
@@ -92,25 +92,17 @@ data BuildPackage(
  * Deliberately absent: the repository's own name (the URL is the identity), its version (the git tag
  * carries it), and a toolchain directive (the toolchain is an ordinary dependency).
  *
- * The **root package** is always among these, whether or not the file writes a block for it — it is
- * what top-level clauses describe, its directory is the repository's own, and it is what a `dep` line
- * carrying no selector selects. A repository whose packages all live in subdirectories simply has a
- * root package nobody mounts.
+ * **A package exists exactly when the file declares it**, the root package among them: `root` is the
+ * one a `dep` line carrying no selector selects, and it is written out like every other package,
+ * `package root { at . … }`. A repository whose packages all live in subdirectories declares no root
+ * package, and a bare `dep` on it names a package it does not declare.
  */
 data Descriptor(packages: List[BuildPackage])
 
 /**
- * The root package's directory: the repository root itself, which is where the descriptor declaring
- * it sits.
+ * The empty descriptor — what a file of nothing but comments means: no packages at all.
  */
-def rootPackageDirectory: String = "."
-
-/**
- * The empty descriptor — what a file of nothing but comments means: one root package, depending on
- * nothing.
- */
-def emptyDescriptor: Descriptor =
-   Descriptor(singleton(BuildPackage(rootPackageName, rootPackageDirectory, true, empty, None, empty)))
+def emptyDescriptor: Descriptor = Descriptor(empty)
 
 /**
  * The package `name` declares, absent where the descriptor declares none — the one lookup every

@@ -9,11 +9,11 @@ import eliot.build.model.Descriptor
  * What a `dep` line names.
  *
  * Every other clause of a descriptor is read at one place in the file, into one thing. `dep` is read
- * at two — the top level, where it describes the root package, and inside any `package` block — and
- * the two readings are the same reading, which is the whole of what dropping the scopes bought. That
- * is what makes it a module rather than a paragraph of `eliot.build.format.PackageFile`: the one
- * clause whose meaning more than one block reader has to agree on, with the rules that are only about
- * it in the same place.
+ * inside every `package` block — and, in a published descriptor, at the top level that once described
+ * the root package — and every reading is the same reading, which is the whole of what dropping the
+ * scopes bought. That is what makes it a module rather than a paragraph of
+ * `eliot.build.format.PackageFile`: the one clause whose meaning more than one block reader has to
+ * agree on, with the rules that are only about it in the same place.
  *
  * Those rules are three. A version token is a **git tag** and is parsed here rather than merely
  * inspected, because the model carries an ordered version from here on and a string never was one.
@@ -52,14 +52,14 @@ def referenceOf(target: String, clause: Clause): {Throw[ClauseProblem]} PackageI
 }
 
 /**
- * The `dep` lines among `clauses` — how the top level of a descriptor reads the root package's
- * dependencies.
+ * The `dep` lines among `clauses` — a block's children, or the top level of a published descriptor
+ * that spelled the root package there.
  */
 def dependenciesIn(clauses: List[Clause]): {Throw[ClauseProblem]} List[Dependency] =
    clausesNamed("dep", clauses).map(dependencyOf)
 
 /**
- * The `dep` lines of a block — a `package`'s dependencies, read exactly as the top level's are.
+ * The `dep` lines of a block — a `package`'s dependencies.
  */
 def dependenciesOf(clause: Clause): {Throw[ClauseProblem]} List[Dependency] = dependenciesIn(clause.children)
 

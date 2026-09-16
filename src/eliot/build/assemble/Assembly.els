@@ -111,11 +111,10 @@ def mountedRoots(selection: Selection): {PackageSource, Throw[ResolutionError]} 
 /**
  * The packages `selection` mounts of a dependency laid out by `descriptor`.
  *
- * A selector naming a package the descriptor does not declare mounts nothing, and so does a bare `dep`
- * on a repository whose root package has no sources — the second is the `src/`-less repository of
- * packages in subdirectories, where the root package exists but nothing was ever put in it. Both are
- * worth a diagnostic at the *author's* build rather than a silent empty mount, and neither is worth a
- * failure here, where the only honest report would name a dependency line this module has never seen.
+ * A selector naming a package the descriptor does not declare mounts nothing — and a bare `dep` on a
+ * repository of packages in subdirectories, which declares no root package, is that case. It is worth
+ * a diagnostic at the *author's* build rather than a silent empty mount, and not worth a failure here,
+ * where the only honest report would name a dependency line this module has never seen.
  */
 private def mountedPackages(selection: Selection, descriptor: Descriptor): List[BuildPackage] =
    descriptor.packages.filter(built -> built.exported && mounts(built.packageName, selection))
@@ -128,8 +127,7 @@ private def sourcesOf(root: Path, built: BuildPackage): Path = under(root, built
 /**
  * A package root is written in the *repository's* path syntax — `lang/eliot`, one string with
  * separators in it — and is resolved a segment at a time, because `/` extends a path by one segment by
- * contract. The root package's `.` names the tree it is already standing in, so it contributes no
- * segment at all.
+ * contract. An `at .` names the tree it is already standing in, so it contributes no segment at all.
  */
 private def under(root: Path, directory: String): Path =
    split("/", directory)
