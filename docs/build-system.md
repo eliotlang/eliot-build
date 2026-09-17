@@ -297,7 +297,7 @@ package's arguments go where `jvm exe-jar -m X` is hard-coded now, and the rest 
 launcher exactly as it already is:
 
 ```
-java -cp <every asset in the closure> …compiler.Main  <the line's arguments>  <current roots> --dependency <dependency roots>  -o target
+java -cp <every asset in the closure> …compiler.Main  <the line's arguments>  <current roots> --dependency <dependency roots>  --progress -o target
 ```
 
 Nothing in a line is a placeholder. There is no `${roots}`, no `${target}`, no environment contract

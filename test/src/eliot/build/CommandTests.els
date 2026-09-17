@@ -94,7 +94,7 @@ private def declaredNames: List[PackageName] =
 private def expectedCompilerCommand: String =
    "/opt/jdk/bin/java -cp /cache/assets/eliot-compiler.zip/* " ++
       "com.vanillasource.eliot.eliotc.compiler.Main run -m eliot.test.Runner " ++
-      "/project/src /project/test -o /project/target"
+      "/project/src /project/test --progress -o /project/target"
 
 /**
  * A compilation running the `compiler` line `line` — its words split at single spaces, the way the

@@ -121,11 +121,11 @@ if [ ! -f "$stage0Jar" ] || [ "$(cat "$stampFile" 2> /dev/null)" != "$stamp" ]; 
    rm -f "$stampFile"
    echo "bootstrap: compiling the launcher from this working tree with eliot $eliotTag" >&2
    # The same invocation `eliot.pkg`'s `launcher` package writes as its `compiler` line, with the backend
-   # named: the mode and `-m` first, the roots, then `-o`. `eliot.build.Command.compilerCommand` is
+   # named: the mode and `-m` first, the roots, then `--progress` and `-o`. `eliot.build.Command.compilerCommand` is
    # where the tool writes the same order down.
    # shellcheck disable=SC2086
    "$java" -cp "$classpath" "$compilerMainClass" jvm exe-jar -m "$launcherModule" \
-      $roots -o "$stage0Directory" ||
+      $roots --progress -o "$stage0Directory" ||
       fail "the launcher did not compile; the compiler's diagnostics are above."
    [ -f "$stage0Jar" ] || fail "the compiler reported success and wrote no $stage0Jar."
    echo "$stamp" > "$stampFile"

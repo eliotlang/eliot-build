@@ -82,6 +82,13 @@ data Compilation(
  * Nothing in a line is a placeholder: the launcher owns the invocation end to end, and the line is only
  * the part of it that varies (`docs/build-system.md`, "What a build runs").
  *
+ * **`--progress` is the launcher's, and always there.** How far along a build is and how long it has
+ * left is a question about the run, never about what a package asked the run to do, so no line says
+ * it and no line can take it away. The compiler writes those lines to stderr, append-only, and picks
+ * their decoration itself — colour on a terminal, the time of day in a log — so there is nothing for
+ * the launcher to decide about where the build is running; stdout stays the `run` mode's program's.
+ * It trails with `-o`, where the compiler's own options are read once the roots have closed the mode.
+ *
  * ```eliot
  * val line = compilerCommand(Compilation("java", plugins, split(" ", "run -m Main"), roots, target))
  * ```
@@ -92,7 +99,7 @@ def compilerCommand(compilation: Compilation): List[String] =
       .withArgument(compilerMainClass)) ++
       compilation.compilerArguments ++
       compilation.compiledRoots.map(show) ++
-      (command("-o").withArgument(show(compilation.outputDirectory)))
+      (command("--progress").withArgument("-o").withArgument(show(compilation.outputDirectory)))
 
 /**
  * The compiler's entry point, by name.
