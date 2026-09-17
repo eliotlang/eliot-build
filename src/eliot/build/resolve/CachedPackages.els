@@ -1,0 +1,48 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.file.File
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.model.Lineage
+import eliot.build.format.PackageFile
+import eliot.build.git.Git
+import eliot.build.git.Cache
+import eliot.build.resolve.PackageSource
+
+/**
+ * The offline `PackageSource`: what the project-model query resolves against.
+ *
+ * `eliot.build.resolve.GitPackages` with the network taken out. It asks the same mirror cache the same
+ * three questions, but through `eliot.build.git.Cache`'s offline questions, so a repository or a
+ * version this machine has not fetched is `NotFetched` rather than a clone or a fetch. That is the
+ * design's rule for the query (`docs/build-system.md`, "IDE integration"): opening an editor must not
+ * block on the network, and fetching is something a user does by building.
+ *
+ * A named implementation for the reason `gitPackages` is one, and bound in the same place — the
+ * launcher's run boundary, and nowhere else.
+ */
+implement cachedPackages: PackageSource {
+   def descriptorAt(
+         version: Version,
+         target: Repository
+      ): {
+         Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched], Throw[DescriptorError]
+      } Option[Descriptor] = {
+      val published = cachedDescriptorTextAt(dependency, version, target)
+
+      foldOption(None, text -> Some(parseDescriptor(split("\n", text))), published)
+   }
+
+   def anchorAt(
+         line: Line,
+         target: Repository
+      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Option[Commit] =
+      cachedAnchorOf(dependency, line, target)
+
+   def sourcesAt(
+         version: Version,
+         target: Repository
+      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Path =
+      cachedSourceTreeAt(dependency, version, target)
+}

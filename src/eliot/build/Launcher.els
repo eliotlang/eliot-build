@@ -13,8 +13,11 @@ import eliot.build.resolve.PackageSource
 import eliot.build.model.PackageId
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.GitPackages
+import eliot.build.resolve.CachedPackages
+import eliot.build.git.Cache
 import eliot.build.assemble.Assembly
 import eliot.build.assemble.Invocation
+import eliot.build.assemble.ProjectModel
 import eliot.build.Command
 
 /**
@@ -43,7 +46,9 @@ import eliot.build.Command
  * the plugin assets those versions ship and runs the compiler over the package's roots once per
  * `compiler` line in the closure. What that amounts to is the lines' business — `eliot test` compiles
  * this project's suite and runs it, `eliot launcher` builds the jar — so the tool has nothing to name
- * a verb after. The lockfile the resolution deserves is the step after this.
+ * a verb after. The lockfile the resolution deserves is the step after this. The one other thing it
+ * answers is `eliot --project-model`, an editor's question rather than a person's: what every package
+ * resolves to, from what is already fetched.
  *
  * **What a build reports is the compiler's own output and the compiler's own exit code.** The
  * subprocess inherits this program's streams rather than being captured, because a compiler's
@@ -79,37 +84,86 @@ private def javaCommandName: {Environment} String = environmentVariable("ELIOT_J
 private def answer(commandLine: List[String], here: Path, java: String): {FileSystem, Process} List[String] =
    catch[IoError, List[String]](
       catch[DescriptorError, List[String]](
-         answered(requested(commandLine), parseDescriptor(readLines(here / descriptorFileName)), here, java),
+         answered(commandLine, parseDescriptor(readLines(here / descriptorFileName)), here, java),
          problem -> reporting(failed("malformed " ++ descriptorFileName, show(problem)) ++ usage(None))
       ),
       problem -> reporting(failed("cannot read " ++ descriptorFileName, show(problem)) ++ usage(None))
    )
 
 /**
- * What the command line asks of `descriptor`: the usage where it names no package, the usage after a
- * refusal where it names one the descriptor does not declare, and the build otherwise.
+ * What the command line asks of `descriptor`: the project model where it asks for that, the usage where
+ * it names no package, the usage after a refusal where it names one the descriptor does not declare,
+ * and the build otherwise.
  *
- * `foldOption` rather than `if..else` for the same reason `eliot.build.Command.requested` gives: an
- * `if..else` over `List[String]` would add a `runAbort` instantiation for nothing.
+ * `fold` and `foldOption` rather than `if..else` for the same reason `eliot.build.Command.requested`
+ * gives: an `if..else` over `List[String]` would add a `runAbort` instantiation for nothing.
  */
 private def answered(
-      name: Option[PackageName],
+      commandLine: List[String],
       descriptor: Descriptor,
       here: Path,
       java: String
    ): {FileSystem, Process} List[String] = {
    val declared = descriptor.packages.map(packageName)
 
-   foldOption(
-      reporting(usage(Some(declared))),
-      named -> foldOption(
-         reporting(unknownPackage(named, declared)),
-         _ -> attempted(named, descriptor, here, java),
-         packageNamed(named, descriptor)
-      ),
-      name
+   fold(
+      modelRequested(commandLine),
+      modelled(descriptor, here),
+      foldOption(
+         reporting(usage(Some(declared))),
+         named -> foldOption(
+            reporting(unknownPackage(named, declared)),
+            _ -> attempted(named, descriptor, here, java),
+            packageNamed(named, descriptor)
+         ),
+         requested(commandLine)
+      )
    )
 }
+
+/**
+ * The project model of every package `descriptor` declares, as the one JSON document an editor reads
+ * (`docs/build-system.md`, "IDE integration").
+ *
+ * **Nothing here fetches.** The model resolves against `cachedPackages`, which answers from the mirror
+ * cache a build left behind and refuses what is not there, so an editor opening a project never waits on
+ * the network and never races a build for it. A package that cannot be modelled from disk is listed with
+ * the reason, and the query itself still succeeds: the model is true about every package it could read.
+ *
+ * The `provide` answers a `String` rather than lines on purpose. `performed` holds the program's one
+ * `provide[Path, List[String]]`, and a second instantiation whose erased JVM descriptor agrees would get
+ * one native between them (`docs/effectful-modules.md` §11.3).
+ */
+private def modelled(descriptor: Descriptor, here: Path): {FileSystem, Process} List[String] =
+   singleton(
+      provide(
+         cacheRoot(here),
+         renderedModel(descriptor.packages.map(built -> modelEntry(built.packageName, Project(here, descriptor))))
+      )
+   )
+
+/**
+ * One package's entry of the model: what it resolves to offline, or the one line saying why it does
+ * not. The channels are `attempted`'s, less the two a model never meets — nothing is downloaded and
+ * nothing is run — plus `NotFetched`, which is the offline cache's.
+ */
+private def modelEntry(name: PackageName, project: Project): {FileSystem, Process, Dep[Path]} ModelEntry =
+   catch[IoError, ModelEntry](
+      catch[GitError, ModelEntry](
+         catch[DescriptorError, ModelEntry](
+            catch[NotFetched, ModelEntry](
+               catch[ResolutionError, ModelEntry](
+                  Modelled(name, modelOf(name, project)) with cachedPackages with shellGit,
+                  problem -> Unmodelled(name, "cannot resolve: " ++ show(problem))
+               ),
+               problem -> Unmodelled(name, show(problem))
+            ),
+            problem -> Unmodelled(name, "malformed " ++ descriptorFileName ++ ": " ++ show(problem))
+         ),
+         problem -> Unmodelled(name, "git refused: " ++ show(problem))
+      ),
+      problem -> Unmodelled(name, "cannot reach this machine: " ++ show(problem))
+   )
 
 /**
  * Lines that say the tool did not do what it was asked, and the exit code that says so to whatever

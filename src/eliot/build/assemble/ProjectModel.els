@@ -1,0 +1,119 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+import eliot.build.assemble.Assembly
+
+/**
+ * The project model: what each package of the project resolves to, as the one answer an editor asks
+ * the tool for (`docs/build-system.md`, "IDE integration").
+ *
+ * The same closure a build reads, read a third way. `Assembly` turns it into the directories a build
+ * compiles from, `Invocation` into what the build runs, and this into what an editor needs to compile
+ * each package the way its build would — which directories are the project's own, which arrived as
+ * dependencies, and which versions were selected — without running anything.
+ *
+ * **One model per package, never one for the project.** Two packages of one project may close over
+ * different platforms, and over different versions of one repository, so a union of their closures
+ * is a build no command line would ever run: an editor compiling it reports errors nobody else sees.
+ * A package that cannot be modelled is listed with the reason, rather than dropped, so an editor can
+ * say why a file has no diagnostics.
+ */
+
+/**
+ * What one package resolves to.
+ *
+ * `ownRoot` is the source root the package itself declares — the one a file must be under to belong
+ * to it. `currentRoots` are every root of the project a build of it compiles from, siblings included,
+ * and `dependencyRoots` every root the closure mounted from elsewhere: together they are exactly
+ * `Assembly.rootsOf`, split where an editor needs them split. `selections` is the closure itself, which
+ * is what says which version of the compiler's own layers the build would compile against.
+ */
+data PackageModel(
+   ownRoot: Path,
+   currentRoots: List[Path],
+   dependencyRoots: List[Path],
+   modelSelections: List[Selection]
+)
+
+/**
+ * One package's line of the model: what it resolved to, or why it could not be resolved from what is
+ * on this machine.
+ */
+data ModelEntry =
+   Modelled(modelledPackage: PackageName, packageModel: PackageModel) |
+   Unmodelled(unmodelledPackage: PackageName, unmodelledBecause: String)
+
+/**
+ * What `name` resolves to in `project`.
+ *
+ * Resolved once and read twice, for the reason `Assembly.rootsOf` takes a resolution rather than
+ * making its own. A package the project does not declare is `NoSuchPackage`, the resolver's own answer.
+ *
+ * ```eliot
+ * val model = modelOf(PackageName("test"), Project(here, descriptor))
+ * ```
+ */
+def modelOf(name: PackageName, project: Project): {PackageSource, Throw[ResolutionError]} PackageModel = {
+   val resolution = resolve(name, project.projectDescriptor)
+
+   PackageModel(
+      foldOption(raise(NoSuchPackage(name)), root -> root, ownRootOf(name, project)),
+      projectRoots(name, project),
+      resolution.selections.flatMap(mountedRoots),
+      resolution.selections
+   )
+}
+
+/**
+ * The model as JSON, one package per line, in the order `entries` lists them:
+ *
+ * ```
+ * {"packages": [
+ *   {"name": "root", "ownRoot": "/p/src", "roots": ["/p/src"], "dependencyRoots": [], "selections": []},
+ *   {"name": "test", "problem": "github.com/x/foo is not fetched …"}
+ * ]}
+ * ```
+ *
+ * A selection is `{"repository": …, "version": …, "packages": [ … ]}`. A package carrying `problem`
+ * carries nothing else: an editor that reads roots off an incomplete package would compile something
+ * no build compiles.
+ */
+def renderedModel(entries: List[ModelEntry]): String =
+   "{\"packages\": [\n" ++ entries.map(renderedEntry).joined(",\n") ++ "\n]}"
+
+private def renderedEntry(entry: ModelEntry): String = entry match {
+   case Modelled(name, model) ->
+      "  {" ++ field("name", quoted(show(name))) ++ ", " ++
+         field("ownRoot", quoted(show(model.ownRoot))) ++ ", " ++
+         field("roots", renderedPaths(model.currentRoots)) ++ ", " ++
+         field("dependencyRoots", renderedPaths(model.dependencyRoots)) ++ ", " ++
+         field("selections", array(model.modelSelections.map(renderedSelection))) ++ "}"
+   case Unmodelled(name, problem) ->
+      "  {" ++ field("name", quoted(show(name))) ++ ", " ++ field("problem", quoted(problem)) ++ "}"
+}
+
+private def renderedSelection(selection: Selection): String =
+   "{" ++ field("repository", quoted(show(selection.selectedRepository))) ++ ", " ++
+      field("version", quoted(show(selection.selectedVersion))) ++ ", " ++
+      field("packages", array(selection.selectedPackages.map(name -> quoted(show(name))))) ++ "}"
+
+private def renderedPaths(paths: List[Path]): String = array(paths.map(each -> quoted(show(each))))
+
+private def field(key: String, value: String): String = quoted(key) ++ ": " ++ value
+
+private def array(items: List[String]): String = "[" ++ items.joined(", ") ++ "]"
+
+/**
+ * A JSON string: the text between quotes, with the characters JSON forbids there escaped. Paths and
+ * git's diagnostics are the only text that reaches here, so the backslash, the quote and the three
+ * whitespace controls a diagnostic can carry are the whole list.
+ */
+private def quoted(text: String): String = "\"" ++ escaped(text) ++ "\""
+
+private def escaped(text: String): String =
+   text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")

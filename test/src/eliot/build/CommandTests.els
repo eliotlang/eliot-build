@@ -36,6 +36,22 @@ def testCases: Test = {
       described(requested(empty)) shouldBe "<none>"
    }
 
+   "modelRequested" should "read the project-model option" in {
+      modelRequested(commandLine("--project-model")).shouldBeTrue
+   }
+   "modelRequested" should "not read a package name as the option" in {
+      modelRequested(commandLine("test")).shouldBeFalse
+   }
+   "modelRequested" should "not read the option with a package after it" in {
+      modelRequested(append(commandLine("--project-model"), "test")).shouldBeFalse
+   }
+   "modelRequested" should "not read an empty command line as the option" in {
+      modelRequested(empty).shouldBeFalse
+   }
+   "requested" should "not read the project-model option as a package" in {
+      described(requested(commandLine("--project-model"))) shouldBe "<none>"
+   }
+
    "compilerCommand" should "put the line's words between the entry point and the first source root" in {
       joined(" ", compilerCommand(compilationOf("run -m eliot.test.Runner"))) shouldBe expectedCompilerCommand
    }
@@ -77,7 +93,9 @@ def testCases: Test = {
 
 private def expectedUsage: String =
    "usage: eliot <package>/" ++
-      "   runs every compiler line in the package's closure over the package's sources"
+      "   runs every compiler line in the package's closure over the package's sources/" ++
+      "usage: eliot --project-model/" ++
+      "   prints what every package resolves to, as JSON, from what is already fetched"
 
 private def expectedListing: String = "/packages in eliot.pkg:/   root/   launcher/   test"
 

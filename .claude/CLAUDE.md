@@ -56,6 +56,7 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
 - **`resolve/`** — `PackageSource` (what the tool asks of somebody else's repository: a descriptor, a
   lineage anchor, and — since assembly — a checked-out tree), `GitPackages` (`gitPackages`, the
   named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
+  `CachedPackages` (`cachedPackages`, the same answers from disk alone — the project-model query's),
   `Configuration` (no type any more — a configuration is a `PackageName`; what is left is
   `configuredPackages`, which closes a build's **sibling edges within one descriptor**, and
   `configuredDependencies`, the foreign requirements that closure places on the graph. Siblings of the
@@ -90,14 +91,20 @@ for it survives: `eliot test` *runs* the suite, because `eliot-test//suite` carr
 eliot.test.Runner`, the compiler's `run` mode executes the jar, and the runner exits 1 on a failing
 case; `eliot launcher` builds the jar. `resolve` and `roots` were removed on 2026-09-16 rather than kept
 as options — questions about a closure belong to the project-model query (`docs/build-system.md`, "IDE
-integration"), which is not built. A second word, no word, or a word starting `-` is the usage and exit
+integration"). That query is the one option: **`eliot --project-model`** prints every declared package's
+model as JSON (`assemble/ProjectModel`: own root, project roots, dependency roots, selections — or a
+`problem`), resolved **offline** through `resolve/CachedPackages` (`cachedPackages`, over `Cache`'s
+`cached*` questions, which raise `NotFetched` instead of cloning or fetching), and always exits 0. The
+LSP runs it through `./eliotw`, so it reaches an editor once a launcher release carrying it is pinned.
+Anything else — a second word, no word, or another word starting `-` — is the usage and exit
 1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
 with that list after the error (the descriptor is read before the command line is looked at, so a
 missing or malformed one is reported first, followed by the bare usage). The lockfile is the step after this.
 
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
-`with gitPackages with shellGit with shellAssets` once, and `ShellGit`/`GitPackages`/`ShellAssets` are
-the three modules nothing but that boundary imports. `test/` mirrors
+`with gitPackages with shellGit with shellAssets` once (and `with cachedPackages with shellGit` for the
+project model), and `ShellGit`/`GitPackages`/`CachedPackages`/`ShellAssets` are the four modules nothing but
+that boundary imports. `test/` mirrors
 the tree package for package under `test/src`, plus `format/DescriptorWriter` and two named implementations of this project's own effects, which the
 framework cannot double: `git/TableGit` and `resolve/TablePackages` (`Assets` needs none: `Invocation` names
 assets without fetching any, and `ShellAssets` is checked under `mocked` like `ShellGit`). **Bind a named implementation with an
@@ -167,7 +174,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 247 green
+./bootstrap test                                             # compiles and runs the suite, 267 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -198,7 +205,7 @@ launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` 
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 247 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 267 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -327,15 +334,6 @@ rather than maintained by hand beside it, and a file that has to be kept in sync
 can be computed is a file that is eventually wrong. `roots` was removed on 2026-09-16 (launcher
 `v0.4`); only the `v0.3` launcher still has it.
 
-The LSP has not learned to ask yet, so until it does it falls back to guessing roots and will not find
-the layers. Regenerating the stopgap is one line with the `v0.3` launcher if the IDE needs it
-meanwhile:
-
-```bash
-java -jar ~/.cache/eliot/launcher/v0.3/eliot-launcher.jar roots test | sed 's/^/runtime /' > eliot.paths
-```
-
-That loses the `compiler` overlay directive, which `eliot roots` deliberately does not print: the
-compile-time overlay is each source root's own sibling and the compiler derives it, so listing it is a
-second place for the two to disagree. `docs/build-system.md` ("IDE integration") is where the query that
-replaces all of this is designed.
+The LSP asks `eliot --project-model` instead (2026-09-17), through the project's `./eliotw`; a
+project pinning a launcher older than the one that has the option falls back to the LSP's guessing,
+which will not find the layers. `docs/build-system.md` ("IDE integration") is the design.

@@ -1,0 +1,92 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.TablePackages
+import eliot.build.assemble.Assembly
+import eliot.build.assemble.ProjectModel
+
+/**
+ * What the project model says about one package, and how it is spelled for an editor.
+ *
+ * Run against `eliot.build.resolve.TablePackages`, as `AssemblyTests` is: the subject is which roots
+ * land in which list, not how a tree got onto disk. The project stands at `/project` and every tree at
+ * `/trees/<url>@<tag>`, so a case reads the split off one line.
+ */
+def testCases: Test = {
+   "modelOf" should "keep the project's roots apart from the ones the closure mounted" in {
+      modelled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.2", rootPackage("")))
+         shouldBe "own /project/src | roots /project/src | deps /trees/github.com/x/foo@v1.2/src | github.com/x/foo v1.2"
+   }
+   "modelOf" should "name a suite's own root, and count the library it deps as the project's" in {
+      modelled("test", rootPackage("") ++ "\npackage test {\n  dep //root\n}", publishing("unused", ""))
+         shouldBe "own /project/test/src | roots /project/test/src, /project/src | deps  | "
+   }
+   "modelOf" should "report a package the project does not declare" in {
+      modelled("nosuch", rootPackage(""), publishing("unused", "")) shouldBe "no package named 'nosuch'"
+   }
+   "modelOf" should "report a selected version whose descriptor cannot be read" in {
+      modelled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.1", rootPackage("")))
+         shouldBe "github.com/x/foo publishes no v1.2"
+   }
+
+   "renderedModel" should "spell a modelled package with its roots and its selections" in {
+      renderedModel(singleton(Modelled(PackageName("root"), exampleModel))) shouldBe expectedModelled
+   }
+   "renderedModel" should "spell a package that could not be modelled with the reason alone" in {
+      renderedModel(singleton(Unmodelled(PackageName("test"), "not fetched")))
+         shouldBe "{\"packages\": [\n  {\"name\": \"test\", \"problem\": \"not fetched\"}\n]}"
+   }
+   "renderedModel" should "separate packages with a comma, one per line" in {
+      renderedModel(append(singleton(Unmodelled(PackageName("a"), "x")), Unmodelled(PackageName("b"), "y")))
+         shouldBe expectedTwoPackages
+   }
+   "renderedModel" should "escape what JSON forbids inside a string" in {
+      renderedModel(singleton(Unmodelled(PackageName("a"), "say \"no\"\n\tat C:\\git")))
+         shouldBe "{\"packages\": [\n  {\"name\": \"a\", \"problem\": \"say \\\"no\\\"\\n\\tat C:\\\\git\"}\n]}"
+   }
+   "renderedModel" should "spell a project with no packages as an empty list" in {
+      renderedModel(empty) shouldBe "{\"packages\": [\n\n]}"
+   }
+}
+
+private def exampleModel: PackageModel =
+   PackageModel(
+      path("/p/src"),
+      singleton(path("/p/src")),
+      singleton(path("/c/eliot@v0.6/lang/eliot/src")),
+      singleton(Selection(Repository("github.com/e/eliot"), Version(Line(0), Some(6)), None, singleton(PackageName("lang"))))
+   )
+
+private def expectedModelled: String =
+   "{\"packages\": [\n  {\"name\": \"root\", \"ownRoot\": \"/p/src\", \"roots\": [\"/p/src\"], " ++
+      "\"dependencyRoots\": [\"/c/eliot@v0.6/lang/eliot/src\"], \"selections\": [{\"repository\": " ++
+      "\"github.com/e/eliot\", \"version\": \"v0.6\", \"packages\": [\"lang\"]}]}\n]}"
+
+private def expectedTwoPackages: String =
+   "{\"packages\": [\n  {\"name\": \"a\", \"problem\": \"x\"},\n  {\"name\": \"b\", \"problem\": \"y\"}\n]}"
+
+/**
+ * The model of `name`, on one line: its own root, the project's roots, the mounted ones and the
+ * selections, each list joined. Rendered inside the `against`, for the reason `AssemblyTests` gives.
+ */
+private def modelled(name: String, rootText: String, universe: List[Pair[String, String]]): String =
+   foldEither(
+      error -> show(error),
+      line -> line,
+      against(
+         universeOf(universe, empty),
+         describedModel(modelOf(PackageName(name), Project(path("/project"), descriptorOf(rootText))))
+      )
+   )
+
+private def describedModel(model: PackageModel): String =
+   "own " ++ show(model.ownRoot) ++ " | roots " ++ model.currentRoots.joined(", ") ++ " | deps " ++
+      model.dependencyRoots.joined(", ") ++ " | " ++ model.modelSelections.joined(", ")
+
+private def publishing(key: String, text: String): List[Pair[String, String]] = append(empty, Pair(key, text))

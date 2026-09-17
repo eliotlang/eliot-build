@@ -57,6 +57,29 @@ def requested(commandLine: List[String]): Option[PackageName] = {
 }
 
 /**
+ * `true` where the command line asks for the project model — `--project-model` and nothing else.
+ *
+ * The one option the tool has, and an option rather than a package name because it is not a build: it
+ * answers what every package resolves to, for an editor, and runs nothing (`docs/build-system.md`, "IDE
+ * integration"). The leading dash `requested` keeps free is what lets it arrive without being read as a
+ * package.
+ *
+ * ```eliot
+ * val modelling = modelRequested(singleton(projectModelOption))
+ * ```
+ */
+def modelRequested(commandLine: List[String]): Bool = {
+   val named = at(0, commandLine) orElse ""
+
+   size(commandLine) == 1 && named == projectModelOption
+}
+
+/**
+ * The option that asks for the project model, spelled once.
+ */
+def projectModelOption: String = "--project-model"
+
+/**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
  * plugins were unpacked into, the words of the `compiler` line being run, the source roots, and where
  * the result goes.
@@ -153,6 +176,8 @@ def failed(doing: String, problem: String): List[String] = singleton("eliot: " +
 def usage(declared: Option[List[PackageName]]): List[String] =
    singleton("usage: eliot <package>") ++
       singleton("   runs every compiler line in the package's closure over the package's sources") ++
+      singleton("usage: eliot " ++ projectModelOption) ++
+      singleton("   prints what every package resolves to, as JSON, from what is already fetched") ++
       foldOption(empty, listed, declared)
 
 /**

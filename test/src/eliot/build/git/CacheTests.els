@@ -129,6 +129,46 @@ def testCases: Test = {
       wasCalledTimes(2, "addWorktree")
       wasCalledOnce("cloneMirror")
    }
+   "cachedAnchorOf" should "answer from a mirror already on disk" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(anchoredAt, offline(renderedCommit(cachedAnchorOf(cacheRoot, Line(1), cached))) with tableGit)
+         shouldBe "aaa1"
+   }
+   "cachedAnchorOf" should "refuse rather than clone a mirror this machine never fetched" in mocked {
+      provide(anchoredAt, offline(renderedCommit(cachedAnchorOf(cacheRoot, Line(1), cached))) with tableGit)
+         shouldBe expectedNotFetched
+
+      wasNeverCalled("cloneMirror")
+   }
+   "cachedDescriptorTextAt" should "read a descriptor the mirror already holds" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(listed, offline(renderedText(cachedDescriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
+         shouldBe "dep github.com/x/bar//root v1.1"
+   }
+   "cachedDescriptorTextAt" should "refuse rather than fetch a version the mirror does not hold" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(listed, offline(renderedText(cachedDescriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached))) with tableGit)
+         shouldBe expectedNotFetched
+
+      wasNeverCalled("fetch")
+   }
+   "cachedSourceTreeAt" should "check a version out of a mirror already on disk" in mocked {
+      withDirectory(mirrorPath)
+
+      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
+         shouldBe "target/cache/github.com/x/foo@v1.2"
+
+      wasCalledOnce("addWorktree")
+   }
+   "cachedSourceTreeAt" should "refuse rather than clone where there is no mirror to check out of" in mocked {
+      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
+         shouldBe expectedNotFetched
+
+      wasNeverCalled("cloneMirror")
+   }
    "the cache" should "clone once and read the mirror it made for every later question" in mocked {
       provide(listed, {
          publishedTags(cacheRoot, cached)
@@ -187,6 +227,16 @@ private def refused: GitError = GitError("git ls-remote --tags target/cache/gith
 
 private def expectedRefusal: String =
    "'git ls-remote --tags target/cache/github.com/x/foo' failed with exit code 128: no such repository"
+
+/**
+ * An offline question's answer, or what it said when it refused — one string, so a case reads both
+ * outcomes the same way.
+ */
+private def offline(answer: {Throw[NotFetched]} String): String = catch[NotFetched, String](answer, show)
+
+private def expectedNotFetched: String =
+   "github.com/x/foo is not fetched at the version this closure selects, " ++
+      "and building a package that depends on it fetches it"
 
 private def cacheRoot: Path = path("target/cache")
 

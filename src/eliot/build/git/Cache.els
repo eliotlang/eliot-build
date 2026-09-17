@@ -19,6 +19,27 @@ import eliot.build.git.Tags
  */
 type Cached[A] = {Git, FileSystem, Throw[IoError], Throw[GitError]} A
 
+/**
+ * What the offline questions run on: `Cached`, plus the one refusal a cache that may not fetch adds —
+ * the answer is somewhere this machine has not fetched yet.
+ */
+type Offline[A] = {Git, FileSystem, Throw[IoError], Throw[GitError], Throw[NotFetched]} A
+
+/**
+ * What an offline question could not answer from disk: `repository`, at the version the question was
+ * about, has never been fetched onto this machine.
+ *
+ * Its own channel rather than a `GitError` or an absent answer, because it is neither: git refused
+ * nothing, and "that version publishes no descriptor" would be a claim about the repository that only a
+ * fetch could make. What the user does about it is build once, which fetches.
+ */
+data NotFetched(unfetchedRepository: Repository)
+
+implement Show[NotFetched] {
+   def show(value: NotFetched): String =
+      show(value.unfetchedRepository) ++ " is not fetched at the version this closure selects, " ++
+         "and building a package that depends on it fetches it"
+}
 
 /**
  * The local mirror of every package a build has looked at, and the questions resolution asks of one.
@@ -138,6 +159,44 @@ def sourceTreeAt(root: Path, version: Version, repository: Repository): Cached[P
 }
 
 /**
+ * `anchorOf`, answered from disk alone: a repository with no mirror yet is `NotFetched` rather than
+ * cloned.
+ *
+ * This and the two below are the project-model query's cache (`docs/build-system.md`, "IDE
+ * integration"): opening an editor must never be what fetches, so every question that would reach the
+ * network refuses instead, and the model marks the package it was asked for incomplete.
+ */
+def cachedAnchorOf(root: Path, line: Line, repository: Repository): Offline[Option[Commit]] =
+   anchorCommit(line, existingMirror(root, repository).tags)
+
+/**
+ * `descriptorTextAt`, answered from disk alone: a version the mirror does not hold is `NotFetched`,
+ * never absent, because only a fetch could say that the repository really publishes nothing there.
+ */
+def cachedDescriptorTextAt(root: Path, version: Version, repository: Repository): Offline[Option[String]] =
+   foldOption(
+      raise(NotFetched(repository)),
+      text -> Some(text),
+      existingMirror(root, repository).fileAt(version, descriptorFileName)
+   )
+
+/**
+ * `sourceTreeAt`, from a mirror that is already here. Checking a tree out of one is local work, so it is
+ * done rather than refused — a build that fetched the mirror may never have been the one that mounted
+ * this version.
+ */
+def cachedSourceTreeAt(root: Path, version: Version, repository: Repository): Offline[Path] = {
+   val directory = sourceDirectory(root, version, repository)
+   val absent = missingDirectory(isDirectory(directory), directory)
+
+   foldOption(
+      directory,
+      missing -> addWorktree(version, missing, existingMirror(root, repository)).worktreeDirectory,
+      absent
+   )
+}
+
+/**
  * Bring `repository`'s mirror up to date with what its remote publishes now, cloning it first if this build
  * has never seen it.
  *
@@ -174,6 +233,15 @@ private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = 
    val absent = missingDirectory(isDirectory(directory), directory)
 
    foldOption(Mirror(directory), missing -> cloned(root, missing, repository), absent)
+}
+
+/**
+ * The mirror of `repository`, where one is already on disk — `ensuredMirror` without the clone.
+ */
+private def existingMirror(root: Path, repository: Repository): Offline[Mirror] = {
+   val directory = cacheDirectory(root, repository)
+
+   fold(isDirectory(directory), Mirror(directory), raise(NotFetched(repository)))
 }
 
 /**

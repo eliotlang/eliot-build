@@ -1443,7 +1443,7 @@ which embeds the compiler in-process (live VFS overlay, unsaved-buffer diagnosti
 cross-vendor interop we do not have. The shape is rust-analyzer/gopls: **the LSP spawns the build
 tool and asks it one question** — the **resolved project model** (runtime roots,
 compiler-overlay roots, dependency checkout paths, packages) — answered as JSON on stdout
-by a machine-facing verb, `eliot project-model` (`cargo metadata`, `go list -json`). This retires
+by a machine-facing option, `eliot --project-model` (`cargo metadata`, `go list -json`). This retires
 the `eliot.paths` stopgap.
 
 **The descriptor and the project model are different artifacts, and only the second has a single
@@ -1472,9 +1472,40 @@ Consequences worth stating:
 - **Shared-state care shrinks to nothing.** Since the LSP never touches the download cache
   itself, only the build tool does, the CLI-vs-LSP race disappears in favour of the tool's own
   lock. The LSP watches `eliot.pkg`/`eliot.lock` and re-queries on change.
-- **Transitional**: until the LSP learns the query, the build tool can *emit* `eliot.paths` as
-  generated output. That is strictly better than today's hand-maintained file, which silently
-  drifts from the CLI invocation it is supposed to mirror, and it deletes cleanly.
+- **One model per package, never one for the project.** Two packages of one project may close
+  over different platforms, and over different versions of one repository, so a union of their
+  closures is a build no command line runs — two platforms' layers collide in the merge, and MVS
+  over the union can pick a version no package selects alone. The IDE therefore runs one compile
+  session per package, and a file belongs to the package whose own root holds it.
+- **The IDE's compiler is its own, and a mismatch is a warning.** The LSP embeds a compiler; the
+  build puts the closure's selected compiler on its classpath. Until the IDE can load the selected
+  one, it compares the eliot version each closure selects with its own and warns when they differ,
+  since the diagnostics it shows are then its compiler's, not the build's.
+
+### What was built (2026-09-17)
+
+`eliot --project-model` prints one JSON document on stdout and exits 0, whatever it finds:
+
+```
+{"packages": [
+  {"name": "root", "ownRoot": "/p/src", "roots": ["/p/src"], "dependencyRoots": ["/p/target/cache/…/eliot@v0.6/stdlib/eliot/src", …],
+   "selections": [{"repository": "github.com/robertbraeutigam/eliot", "version": "v0.6", "packages": ["stdlib", "lang"]}]},
+  {"name": "test", "problem": "github.com/eliotlang/eliot-test is not fetched at the version this closure selects, …"}
+]}
+```
+
+- **Every package the descriptor declares**, each resolved on its own (`assemble/ProjectModel`).
+  `ownRoot` is the package's own `<root>/src`; `roots` is `Assembly.projectRoots` (the project's
+  roots the build opens, siblings included) and `dependencyRoots` the mounted ones — the two lists
+  this document asked `Assembly` for, and the compiler still receives concatenated.
+- **Offline by construction.** It resolves against `cachedPackages`, a named `PackageSource` over
+  `Cache`'s offline questions: a repository with no mirror, or a version its mirror does not hold,
+  is `NotFetched` rather than a clone or a fetch. Checking a version out of a mirror that is there
+  is local and is done. A package that refuses in any channel is listed with `problem` and nothing
+  else, so an editor never compiles half a closure; the fix is to build the package once.
+- **An option, not a package name**, which is what the leading dash was kept free for. Anything
+  after it is the usage and exit 1.
+- **Watching is the editor's.** Nothing here watches `eliot.pkg`; the LSP re-asks when it changes.
 
 ## Lessons from building it
 

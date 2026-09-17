@@ -101,6 +101,21 @@ def mountedRoots(selection: Selection): {PackageSource, Throw[ResolutionError]} 
 }
 
 /**
+ * The source root `name` itself declares in the project — not its siblings' — absent where the project
+ * declares no such package.
+ *
+ * `projectRoots` answers what a build of `name` compiles from, which includes every sibling it reaches;
+ * this answers which of those roots is *its own*, which is what an editor needs to know about a file:
+ * the package it belongs to.
+ */
+def ownRootOf(name: PackageName, project: Project): Option[Path] =
+   foldOption(
+      None,
+      built -> Some(sourcesOf(project.projectDirectory, built)),
+      packageNamed(name, project.projectDescriptor)
+   )
+
+/**
  * The packages `selection` mounts of a dependency laid out by `descriptor`.
  *
  * A selector naming a package the descriptor does not declare mounts nothing — and a bare `dep` on a
