@@ -201,7 +201,10 @@ and `compiler` lines (and eliot's the first compiler with the `run` mode and a d
 `v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow, and
 `v0.6` the first with `--progress`, which `Command.compilerCommand` appends to every compiler it runs (and
 `./bootstrap` to stage 0's): progress lines on stderr, decorated by the compiler for a terminal or a log. A
-launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3` and `v0.4` are published (2026-09-16); `v0.5` is pinned, the first whose usage lists the declared packages.
+launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3`, `v0.4` and `v0.5` are published, and
+`v0.6` — the first that answers `--project-model`, which the IDE reads — is pinned (2026-09-17). From `v0.6` the
+launcher appends `--progress` to every compiler it runs, so a project on it needs eliot `v0.6` or later: an older
+compiler refuses the flag, and until eliot `985b0b66` it then exited 0, making that refusal read as a green build.
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
@@ -235,7 +238,7 @@ package root is `test/`.
 
 There are two ways in. `./eliotw <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.5`; `v0.4` was the first with the
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.6`; `v0.4` was the first with the
 verbless command line), so `./eliotw test` in a checkout holding nothing but the wrapper builds and runs
 this project's suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
