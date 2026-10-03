@@ -47,8 +47,8 @@ implement cachedPackages: PackageSource {
       cachedReleaseCommitOf(dependency, version, target)
 
    def sourcesAt(
-         version: Version,
+         commit: Commit,
          target: Repository
       ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Path =
-      cachedSourceTreeAt(dependency, version, target)
+      cachedSourceTreeAt(dependency, commit, target)
 }

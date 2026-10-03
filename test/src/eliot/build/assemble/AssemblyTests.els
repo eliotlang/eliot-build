@@ -5,17 +5,21 @@ import eliot.test.Test
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
+import eliot.build.model.Lineage
+import eliot.build.model.Lock
+import eliot.build.resolve.PackageSource
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Resolution
 import eliot.build.resolve.TablePackages
 import eliot.build.assemble.Assembly
+import eliot.build.assemble.Locking
 
 /**
  * What a resolution mounts: which directories building one package compiles from, and which it leaves
  * out.
  *
- * Run against `eliot.build.resolve.TablePackages`, whose trees are at `/trees/<url>@<tag>` and exist
- * only as answers — the subject here is the layout read off a descriptor, not how a version got onto
+ * Run against `eliot.build.resolve.TablePackages`, whose trees are at `/trees/<commit>` — and a table's
+ * commit is `<url>@<tag>`, so a line still reads which version was mounted — and exist only as answers — the subject here is the layout read off a descriptor, not how a version got onto
  * disk, which is `eliot.build.git.Cache`'s and `GitTests`' business.
  *
  * **The layout is one rule**: a package's sources are `<package root>/src`, and the root package's
@@ -115,6 +119,18 @@ def testCases: Test = {
       assembled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.1", rootPackage("")))
          shouldBe "github.com/x/foo publishes no v1.2"
    }
+   "rootsOf" should "mount a dependency at the commit the lock pinned, whatever its tag names" in {
+      pinnedAssembled(
+         "root",
+         rootPackage("dep github.com/x/foo//root v1.2"),
+         publishing("github.com/x/foo@v1.2", rootPackage("")),
+         singleton(LockedVersion(Repository("github.com/x/foo"), Version(Line(1), Some(2)), Commit("4b78ab15")))
+      ) shouldBe "/project/src, /trees/4b78ab15/src"
+   }
+   "rootsOf" should "report a selected version the lock does not pin" in {
+      pinnedAssembled("root", rootPackage("dep github.com/x/foo//root v1.2"), publishing("github.com/x/foo@v1.2", rootPackage("")), empty)
+         shouldBe "github.com/x/foo publishes no v1.2"
+   }
    "rootsOf" should "report a package no descriptor declares" in {
       assembled("nosuch", "", publishing("unused", "")) shouldBe "no package named 'nosuch'"
    }
@@ -130,15 +146,33 @@ private def expectedSiblingMount: String =
 
 /**
  * The roots building `name` compiles from, given the project descriptor `rootText` and a `universe` of
- * published ones — one line, so a case says both what is mounted and in what order.
+ * published ones, at the commits the source names for them — as a build mounts them — on one line, so a
+ * case says both what is mounted and in what order.
  */
 private def assembled(name: String, rootText: String, universe: List[Pair[String, String]]): String =
+   rendered(against(universeOf(universe, empty), renderedRoots(lockedRootsOf(PackageName(name), rootText))))
+
+/**
+ * `assembled`, at the commits `pinned` says rather than the ones the source names.
+ */
+private def pinnedAssembled(
+      name: String,
+      rootText: String,
+      universe: List[Pair[String, String]],
+      pinned: List[LockedVersion]
+   ): String =
    rendered(
       against(
          universeOf(universe, empty),
-         renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText))))
+         renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText)), pinned))
       )
    )
+
+private def lockedRootsOf(name: PackageName, rootText: String): {PackageSource, Throw[ResolutionError]} List[Path] = {
+   val resolution = resolve(name, descriptorOf(rootText))
+
+   rootsOf(name, projectOf(rootText), resolution, lockedVersionsOf(resolution))
+}
 
 /**
  * The package being built always stands at `/project`, so a root of the project and a root of a

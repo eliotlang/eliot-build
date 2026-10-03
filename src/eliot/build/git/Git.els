@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.git.Tags
 
 /**
@@ -30,8 +31,9 @@ import eliot.build.git.Tags
  * version. `git worktree` is what does it — a second working tree of the mirror that already holds the
  * objects, so a checkout costs a tree and not a second copy of the history. A *remote* is the address
  * git is given to reach a repository. A *commit* — `eliot.build.model.Lineage`'s, because a content
- * hash is vocabulary before it is git's — is what a tag names. A file is read, and a tree checked out,
- * at a *version*, which git is asked for by the tag it was published as. `fetch` brings a mirror up to date
+ * hash is vocabulary before it is git's — is what a tag names. A file is read at a *version*, which git
+ * is asked for by the tag it was published as; a tree is checked out at a *commit*, because a tree is
+ * what a build compiles and a lockfile pins, and a tag is a ref that can move. `fetch` brings a mirror up to date
  * and touches no working tree; `pull` would merge into a branch and has no meaning in a mirror.
  *
  * **Every operation's subject says where it runs.** Git resolves a relative path against *its* working
@@ -133,7 +135,7 @@ effect Git {
    def fileAt(version: Version, path: String, mirror: Mirror): Option[String]
 
    /**
-    * Check `mirror` out at `version` into `target`, and answer the tree.
+    * Check `mirror` out at `commit` into `target`, and answer the tree.
     *
     * The one operation that leaves files on disk, and it exists because the compiler mounts source
     * *directories*: a resolution is a set of versions and a build is a set of roots, so something has
@@ -141,11 +143,15 @@ effect Git {
     * the objects are already in the mirror — the tree is all that is missing — and because the tree
     * stays tied to the mirror that explains where it came from.
     *
+    * At a commit and not at a tag, because the tag is looked up once — by whoever asked which commit it
+    * names — and checked against the lockfile there. Handing the tag to git a second time would be a
+    * second lookup of a ref that may have moved in between, and a tree that was never checked.
+    *
     * `target` is taken as git resolves it, which is why every caller passes an absolute one: this
     * operation stands *inside* the mirror (it operates on the repository it is in), so a relative
     * target would be read against the mirror's directory rather than against the caller's.
     */
-   def addWorktree(version: Version, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
 }
 
 /**

@@ -623,6 +623,19 @@ package test {
   of the one closure a build resolves, beside the roots and the invocation.
 - **The file is written only when what it says changed**, and CI fails a push whose lockfile its builds
   had to change, which is the read-only mode Go's CI gets from `-mod=readonly` without a flag here.
+- **What is mounted is what was locked** (2026-10-03, the same day). A tree is checked out at the
+  commit `Locking` read and the lock was checked against — `Assembly.rootsOf` takes those commits and
+  `PackageSource.sourcesAt` is asked by commit, never by version — into `<cache>/<url>@<commit>`. Until
+  then the check and the checkout looked the tag up separately, and an existing `<url>@<tag>` directory
+  was reused unlooked-at: a tag that moved upstream, once a fetch brought it into the mirror, passed the
+  check of a project with no line for it, was recorded at its new commit, and mounted the stale tree.
+  Named after the hash, a directory can only ever hold that hash, so finding it is proof of what is in
+  it; a moved tag gets a directory of its own, and two tags naming one commit share one. Verified on the
+  platform with a scratch repository whose tag was moved in the mirror: kept, the lock refuses (exit 1);
+  with the line deleted, the new commit is recorded and mounted beside the old tree and the build
+  compiles it. What the directory name stops saying is which version a tree is; the lockfile and the
+  project model say that. This is also what a cache shared between projects needs, since two projects
+  that disagree about a tag then mount the commit each one locked.
 - **Not locked yet**: the launcher itself. The wrapper fetches it before any Eliot code runs, so its hash
   would be the wrapper's to check, and "The pin" below argues the wrapper should not have the job until
   the rest of the chain is checked — which it now is. `--project-model` neither reads nor writes the lock.
@@ -1156,7 +1169,9 @@ does. Sources and binary cannot skew because they are the same tag.
   implementation downloads with `curl` (or `wget`, where curl is not installed) and unpacks with
   `unzip`, because nothing in `eliot.system` opens a socket or reads a zip — the same reason `git` is a
   program this tool spawns rather than a library it carries. What is cached is the unpacked directory,
-  at `<cache>/assets/<url>@<tag>/<asset>`, beside the mirrors and keyed the same way.
+  at `<cache>/assets/<url>@<tag>/<asset>`, beside the mirrors. (A source tree was keyed the same way
+  until 2026-10-03, and is keyed by commit now — "Lockfile", below. An asset still goes by its tag; its
+  digest is checked against the lock on every build, which is what a commit's name does for a tree.)
 - **`ide/lsp/package.sh` is not the release mechanism**, though an earlier draft of this section implied
   it was. It is the *proof of shape*: it has assembled unmerged per-module jars since before this design
   existed, for the same `META-INF/services` reason. What it builds, though, is a runnable LSP server —
@@ -1614,8 +1629,8 @@ what is left to write rather than only what is written.
 
 *(Two were decided on 2026-09-13 and have moved into the body: the selector narrows the closure as well
 as the mount, and resolved sources reach the compiler as `git worktree add --detach --force` into
-`<cache>/<url>@<tag>` — beside the mirror, checked out once and reused, the objects never copied
-twice.)*
+`<cache>/<url>@<commit>` — beside the mirror, checked out once and reused, the objects never copied
+twice. It was `<url>@<tag>` until the lockfile, "Lockfile" says why it is not.)*
 
 - **Two file-count reductions, proposed and undecided** (a third, the pin as a line of `eliot.pkg`,
   was done 2026-09-16 — as `launcher <tag>`, read by the wrapper alone): a wrapper installed once per machine rather than committed per repository (Go's toolchain

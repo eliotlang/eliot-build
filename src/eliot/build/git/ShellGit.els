@@ -3,6 +3,7 @@ import eliot.file.Path
 import eliot.file.File
 import eliot.system.Process
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.git.Git
 import eliot.build.git.Tags
 
@@ -60,16 +61,16 @@ implement shellGit: Git {
    }
 
    /**
-    * `--detach` because a build checks out a *version*, and a branch checked out twice is a thing git
+    * `--detach` because a build checks out a *commit*, and a branch checked out twice is a thing git
     * refuses; `--force` because the cache is allowed to have been tidied up behind git's back. A tree
     * removed with `rm -rf` leaves the mirror still holding its registration, and the plain `add` then
     * refuses a path nothing occupies — a cache that cannot heal itself from a deleted directory would
     * be a cache a user has to know how to repair.
     */
-   def addWorktree(version: Version, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
       checked(
          command("git").withArgument("worktree").withArgument("add").withArgument("--detach")
-            .withArgument("--force").withArgument(show(target)).withArgument(show(version)),
+            .withArgument("--force").withArgument(show(target)).withArgument(show(commit)),
          mirror.mirrorDirectory
       )
 
