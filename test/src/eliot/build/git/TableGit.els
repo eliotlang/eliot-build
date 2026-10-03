@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.file.File
 import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.test.Mock
 import eliot.build.git.Git
 import eliot.build.git.Tags
@@ -62,8 +63,8 @@ implement tableGit: Git {
       dependency.heldFiles.lookupOption(show(version) ++ ":" ++ path)
    }
 
-   def addWorktree(version: Version, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
-      log("addWorktree " ++ show(version) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
+      log("addWorktree " ++ show(commit) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
       withDirectory(target)
 
       unlessRefused(Worktree(target))

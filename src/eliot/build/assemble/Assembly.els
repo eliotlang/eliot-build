@@ -3,6 +3,8 @@ import eliot.file.Path
 import eliot.build.model.PackageId
 import eliot.build.model.Version
 import eliot.build.model.Descriptor
+import eliot.build.model.Lineage
+import eliot.build.model.Lock
 import eliot.build.resolve.PackageSource
 import eliot.build.resolve.Configuration
 import eliot.build.resolve.Selection
@@ -14,7 +16,7 @@ import eliot.build.resolve.Resolution
  * This is the step between "which versions" and "a build". A resolution is a set of versions and the
  * packages of each that the closure reached; a compiler mounts *directories*. Turning one into the
  * other is two facts and nothing else — where a repository's tree is (the source answers that, by
- * checking the version out), and where inside it the standard layout puts a package's sources.
+ * checking the locked commit out), and where inside it the standard layout puts a package's sources.
  * Neither is a decision this module makes up: the first belongs to whoever holds the cache, and the
  * second is `docs/build-system.md`'s conventional layout, which is the whole reason `src/` and
  * `compiler/` are named rather than configured.
@@ -31,8 +33,13 @@ import eliot.build.resolve.Resolution
  * Moving the overlay under the package root kept that property exactly — `<package root>/compiler` is
  * the sibling of `<package root>/src`.
  *
- * **It runs on `{PackageSource}` and names no git.** The same effect that answers the resolver's two
- * questions answers the third, so nothing here knows whether a tree arrived by clone, by checkout or
+ * **What is mounted is what was locked.** A tree is asked for by the commit `eliot.build.assemble.Locking`
+ * read and `eliot.lock` was checked against — those commits are taken, never asked for again — so no tag
+ * is looked up between the check and the checkout, and a tag that moved in between cannot put an
+ * unchecked tree on the compiler's path.
+ *
+ * **It runs on `{PackageSource}` and names no git.** The same effect that answers the resolver's
+ * questions answers this one, so nothing here knows whether a tree arrived by clone, by checkout or
  * by a test's table — exactly as `eliot.build.resolve.Resolution` does not know how a descriptor was
  * read. The failure channel is the resolver's too: a selected version whose descriptor cannot be read
  * a second time is `Unavailable`, the same fact under a different verb.
@@ -49,9 +56,9 @@ import eliot.build.resolve.Resolution
 data Project(projectDirectory: Path, projectDescriptor: Descriptor)
 
 /**
- * Every source root building `name` compiles from, against the closure `resolution` already is: the
- * project's own packages first, then one per package of each selected dependency, in the resolution's
- * canonical order.
+ * Every source root building `name` compiles from, against the closure `resolution` already is and at
+ * the commits `pinned` locked it to: the project's own packages first, then one per package of each
+ * selected dependency, in the resolution's canonical order.
  *
  * The project first because that is the order a reader expects and the order a command line reads
  * best; within the dependencies, the resolution's own order, so two runs of one graph assemble the
@@ -60,15 +67,16 @@ data Project(projectDirectory: Path, projectDescriptor: Descriptor)
  * closures that merely ought to agree.
  *
  * ```eliot
- * val roots = rootsOf(PackageName("test"), Project(here, descriptor), resolve(name, descriptor))
+ * val roots = rootsOf(PackageName("test"), Project(here, descriptor), resolution, entry.lockedVersions)
  * ```
  */
 def rootsOf(
    name: PackageName,
    project: Project,
-   resolution: Resolution
+   resolution: Resolution,
+   pinned: List[LockedVersion]
 ): {PackageSource, Throw[ResolutionError]} List[Path] =
-   projectRoots(name, project) ++ resolution.selections.flatMap(mountedRoots)
+   projectRoots(name, project) ++ resolution.selections.flatMap(mountedRoots(pinned))
 
 /**
  * The roots the project contributes: the sources of every package building `name` opens.
@@ -86,15 +94,21 @@ def projectRoots(name: PackageName, project: Project): List[Path] =
    )
 
 /**
- * The roots one selected dependency contributes, under the tree its version is checked out into: the
- * sources of each package the closure reached, and nothing else.
+ * The roots one selected dependency contributes, under the tree its locked commit is checked out into:
+ * the sources of each package the closure reached, and nothing else.
+ *
+ * A selection `pinned` has no commit for is `Unavailable`, as one whose descriptor cannot be read back
+ * is: both are a version the closure selected and this step cannot find again, and for pins read off the
+ * same resolution neither can happen.
  */
-def mountedRoots(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Path] = {
-   val tree = sourcesAt(selection.selectedVersion, selection.selectedRepository)
+def mountedRoots(pinned: List[LockedVersion], selection: Selection): {PackageSource, Throw[ResolutionError]} List[Path] = {
+   val unavailable = Unavailable(selection.selectedRepository, selection.selectedVersion)
+   val commit = lockedCommitOf(selection, pinned) orElse raise(unavailable)
+   val tree = sourcesAt(commit, selection.selectedRepository)
    val published = descriptorAt(selection.selectedVersion, selection.selectedRepository)
 
    foldOption(
-      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      raise(unavailable),
       descriptor -> mountedPackages(selection, descriptor).map(built -> sourcesOf(tree, built)),
       published
    )
@@ -125,6 +139,22 @@ def ownRootOf(name: PackageName, project: Project): Option[Path] =
  */
 private def mountedPackages(selection: Selection, descriptor: Descriptor): List[BuildPackage] =
    descriptor.packages.filter(built -> built.exported && mounts(built.packageName, selection))
+
+/**
+ * The commit `pinned` locked `selection` at, absent where it locked no such repository at that version.
+ */
+private def lockedCommitOf(selection: Selection, pinned: List[LockedVersion]): Option[Commit] =
+   foldOption(
+      None,
+      locked -> Some(locked.lockedCommit),
+      pinned.find(locked -> pins(selection, locked))
+   )
+
+/**
+ * `true` when `locked` is the lock line of `selection`: the same repository at the same version.
+ */
+private def pins(selection: Selection, locked: LockedVersion): Bool =
+   locked.lockedRepository == selection.selectedRepository && locked.lockedVersion == selection.selectedVersion
 
 /**
  * Where a package's sources are: `src` under its root directory, which is the whole of the layout.

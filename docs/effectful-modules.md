@@ -1206,3 +1206,33 @@ one compile error worth recording is the parser's, not the backend's — `x shou
 a parenthesised `a ++ b` reads as `shouldBe` and `++` sharing an expression, which they have no
 precedence between. The expected value went into a named definition, which is how the other suites
 already spell a long one.
+
+## 20. Revisited, 2026-10-03 — a tree is checked out at the commit that was locked
+
+Same compiler and framework. 307 cases green, two of them new. `docs/build-system.md`, "Lockfile",
+says what changed and why; this is what it did to the modules.
+
+**One member changed its argument, and the type says which lookup is allowed.** `Git.addWorktree` and
+`PackageSource.sourcesAt` take a `Commit` where they took a `Version`, so a tree cannot be asked for by
+a tag at all: the tag is looked up once, by `commitAt`, and that answer is what is checked against the
+lock and what is checked out. `Cache.sourceDirectory`/`sourceTreeAt`/`cachedSourceTreeAt` follow,
+naming the tree `<url>@<commit>`, which is what makes "the directory is there" proof of what is in it.
+
+**`Assembly` takes the commits rather than asking for them.** `rootsOf(name, project, resolution,
+pinned)` and `mountedRoots(pinned, selection)` read the `LockedVersion`s `Locking` produced — the
+launcher hands over the section it has just checked, `ProjectModel` asks `lockedVersionsOf` of the
+offline source itself — so the commit mounted and the commit recorded are one value, not two lookups
+that ought to agree. A selection with no pin is `Unavailable`, the resolver's own word for a selected
+version this step cannot find again. `assemble` now imports `model/Lock`, which is vocabulary and
+imports nothing of the tool.
+
+**The doubles kept their expectations.** `tablePackages` already named a version's commit
+`<url>@<tag>`, so its tree is `/trees/<commit>` and every assembly line still reads which version was
+mounted; one new case pins a commit that is *not* the table's and sees it mounted, and one pins nothing
+and sees `Unavailable`. `tableGit` logs the commit it checks out.
+
+**Verified on the platform** as §14 requires for `Git`, `Cache`, `Assembly` and the boundary: stage 1
+and stage 2 green, this repository's own trees landing at the commits `eliot.lock` records, and a
+scratch dependency whose tag was moved in the mirror — refused with the lock, and with the line deleted
+recorded, checked out beside the old tree and compiled at its new commit. No §11.3 collision; a
+partially applied `mountedRoots(pinned)` passed to `flatMap` compiled as the bare name did.

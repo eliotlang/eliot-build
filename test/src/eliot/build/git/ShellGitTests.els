@@ -78,21 +78,21 @@ def testCases: Test = {
 
       (shown orElse "<none>") shouldBe "<none>"
    }
-   "addWorktree" should "check out a detached tree, standing inside the mirror the objects are in" in mocked {
-      addWorktree(version("v1.2"), treePath, mirror) with shellGit
+   "addWorktree" should "check out a detached tree at the commit, standing inside the mirror the objects are in" in mocked {
+      addWorktree(Commit("aaa1"), treePath, mirror) with shellGit
 
-      calls shouldBe "/cache/github.com/x/foo$ git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.2"
+      calls shouldBe "/cache/github.com/x/foo$ git worktree add --detach --force /cache/github.com/x/foo@aaa1 aaa1"
    }
    "addWorktree" should "answer the tree it made, at the directory it was asked for" in mocked {
-      val made = addWorktree(version("v1.2"), treePath, mirror) with shellGit
+      val made = addWorktree(Commit("aaa1"), treePath, mirror) with shellGit
 
-      show(made.worktreeDirectory) shouldBe "/cache/github.com/x/foo@v1.2"
+      show(made.worktreeDirectory) shouldBe "/cache/github.com/x/foo@aaa1"
    }
    "addWorktree" should "raise what git said about a revision it could not check out" in mocked {
-      whenSpawning("worktree", failing(128, "invalid reference: v1.9"))
+      whenSpawning("worktree", failing(128, "invalid reference: fff9"))
 
       raising[GitError](expectedCheckoutRefusal, {
-         addWorktree(version("v1.9"), treePath, mirror) with shellGit
+         addWorktree(Commit("fff9"), treePath, mirror) with shellGit
          unit
       })
    }
@@ -110,7 +110,7 @@ private def mirrorPath: Path = path("/cache/github.com/x/foo")
 
 private def mirror: Mirror = Mirror(mirrorPath)
 
-private def treePath: Path = path("/cache/github.com/x/foo@v1.2")
+private def treePath: Path = path("/cache/github.com/x/foo@aaa1")
 
 private def listing: String = "aaa1\trefs/tags/v1.2\nbbb2\trefs/tags/v1.3\n"
 
@@ -118,8 +118,8 @@ private def expectedRefusal: String =
    "'git ls-remote --tags /cache/github.com/x/foo' failed with exit code 128: no such repository"
 
 private def expectedCheckoutRefusal: String =
-   "'git worktree add --detach --force /cache/github.com/x/foo@v1.2 v1.9' failed with exit code 128: " ++
-      "invalid reference: v1.9"
+   "'git worktree add --detach --force /cache/github.com/x/foo@aaa1 fff9' failed with exit code 128: " ++
+      "invalid reference: fff9"
 
 private def renderedTags(refs: List[TagRef]): String =
    refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")

@@ -7,6 +7,7 @@ import eliot.build.resolve.PackageSource
 import eliot.build.resolve.Selection
 import eliot.build.resolve.Resolution
 import eliot.build.assemble.Assembly
+import eliot.build.assemble.Locking
 
 /**
  * The project model: what each package of the project resolves to, as the one answer an editor asks
@@ -54,17 +55,22 @@ data ModelEntry =
  * Resolved once and read twice, for the reason `Assembly.rootsOf` takes a resolution rather than
  * making its own. A package the project does not declare is `NoSuchPackage`, the resolver's own answer.
  *
+ * The trees are mounted at the commits the selected tags name in the mirrors now, asked exactly as a
+ * build asks them — but not checked against `eliot.lock`, which the query neither reads nor writes: an
+ * editor is told what a build would compile, and the build is where a disagreement is refused.
+ *
  * ```eliot
  * val model = modelOf(PackageName("test"), Project(here, descriptor))
  * ```
  */
 def modelOf(name: PackageName, project: Project): {PackageSource, Throw[ResolutionError]} PackageModel = {
    val resolution = resolve(name, project.projectDescriptor)
+   val pinned = lockedVersionsOf(resolution)
 
    PackageModel(
       foldOption(raise(NoSuchPackage(name)), root -> root, ownRootOf(name, project)),
       projectRoots(name, project),
-      resolution.selections.flatMap(mountedRoots),
+      resolution.selections.flatMap(mountedRoots(pinned)),
       resolution.selections
    )
 }

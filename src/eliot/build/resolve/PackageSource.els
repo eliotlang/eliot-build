@@ -13,10 +13,10 @@ import eliot.build.model.Lineage
  * Resolution asks exactly two things — *what does this package require at this version*, and *is this
  * URL a package I already have* — and notably not a third about *versions*: MVS never enumerates what
  * a package offers, so discovering that a newer release exists belongs to `eliot get` rather than
- * here. Assembly asks the one question that is not about the graph at all: *where are this version's
- * sources*, which is what turns a resolution into something a compiler can be pointed at. The lockfile
- * asks the fourth: *which commit does this version's tag name*, the fact a tag cannot promise about
- * itself. Four members, and a caller declares `{PackageSource}` whether it wants the graph, the files or
+ * here. The lockfile asks the third: *which commit does this version's tag name*, the fact a tag cannot
+ * promise about itself. Assembly asks the one question that is not about the graph at all: *where are
+ * this commit's sources*, which is what turns a locked resolution into something a compiler can be
+ * pointed at. Four members, and a caller declares `{PackageSource}` whether it wants the graph, the files or
  * the facts.
  *
  * This used to be a pair of callbacks threaded through every private function of
@@ -52,14 +52,18 @@ effect PackageSource {
    def commitAt(version: Version, target: Repository): Option[Commit]
 
    /**
-    * Where `target`'s sources at `version` are, as a directory that exists: the question assembly
-    * asks once resolution has decided which version that is.
+    * Where `target`'s sources at `commit` are, as a directory that exists: the question assembly asks
+    * once resolution has decided which version that is and `commitAt` has said which commit it names.
+    *
+    * By commit rather than by version, so that what is mounted is what was locked: the tag is looked up
+    * once, by `commitAt`, and the answer is checked against `eliot.lock` before it is handed back here.
+    * A source asked by version would look the tag up a second time, and a tag is a ref that can move.
     *
     * A `Path` and not an `Option[Path]`, because this is the one member that may *make* its answer.
-    * The two above read what a repository already published and answer nothing where it published
-    * nothing; this one is asked about a version the closure has already read a descriptor out of, so
-    * there is no honest absence left — either the sources are put somewhere or the implementation
+    * The three above read what a repository already published and answer nothing where it published
+    * nothing; this one is asked about a commit the source itself just named, so there is no honest
+    * absence left — either the sources are put somewhere or the implementation
     * refuses through a channel of its own.
     */
-   def sourcesAt(version: Version, target: Repository): Path
+   def sourcesAt(commit: Commit, target: Repository): Path
 }

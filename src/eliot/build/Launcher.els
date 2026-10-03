@@ -281,7 +281,9 @@ private def performed(
  * compiler, or locking a third.
  *
  * The lock comes before anything is checked out or run. A tag that moved is refused before its tree is
- * on disk, and the compiler never runs over a closure whose facts disagree with the record.
+ * on disk, and the compiler never runs over a closure whose facts disagree with the record. And the
+ * trees are checked out at the very commits that were checked — `entry`'s, handed to `rootsOf` — so no
+ * tag is looked up a second time between the record and the mount.
  *
  * The lines run in order and the first that fails stops the rest; its code is the tool's. No line reads
  * another's output, so the order is only which failure is reported first.
@@ -301,10 +303,12 @@ private def compiled(
    val resolution = resolve(name, descriptor)
    val invocation = invocationOf(name, descriptor, resolution)
 
-   locked(lockedPackageOf(name, resolution, invocation.invocationAssets), descriptor, here)
+   val entry = lockedPackageOf(name, resolution, invocation.invocationAssets)
+
+   locked(entry, descriptor, here)
 
    val classpath = invocation.invocationAssets.map(assetTree)
-   val roots = rootsOf(name, Project(here, descriptor), resolution)
+   val roots = rootsOf(name, Project(here, descriptor), resolution, entry.lockedVersions)
    val exitCode = invocation.invocationLines.foldLeft(
       0,
       line -> code -> ranAfter(code, Compilation(java, classpath, line, roots, outputRoot(here)), here)

@@ -49,13 +49,14 @@ implement tablePackages: PackageSource {
       )
 
    /**
-    * A table has no repositories to check anything out of, so it answers where a tree *would* be, in
-    * the shape the git-backed source puts one: one directory per package, named by its version. That
-    * is enough for an assembly test, whose subject is what gets mounted under a tree rather than how
-    * the tree got there.
+    * A table has no repositories to check anything out of, so it answers where a tree *would* be: one
+    * directory per commit, named by it, the way the git-backed source names one. A table's commit is
+    * already `<url>@<tag>` (`commitAt` above), so the tree is `/trees/<url>@<tag>` and a case still
+    * reads which version was mounted — and, since the commit is the only thing asked for, that it was
+    * the commit `commitAt` answered. That is enough for an assembly test, whose subject is what gets
+    * mounted under a tree rather than how the tree got there.
     */
-   def sourcesAt(version: Version, target: Repository): Path =
-      path("/trees/" ++ show(target) ++ "@" ++ show(version))
+   def sourcesAt(commit: Commit, target: Repository): Path = path("/trees/" ++ show(commit))
 }
 
 /**

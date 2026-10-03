@@ -108,30 +108,30 @@ def testCases: Test = {
 
       wasNeverCalled("fetch")
    }
-   "sourceDirectory" should "put a tree beside the mirror, named by the version it holds" in {
-      show(sourceDirectory(cacheRoot, Version(Line(1), Some(2)), cached)) shouldBe "target/cache/github.com/x/foo@v1.2"
+   "sourceDirectory" should "put a tree beside the mirror, named by the commit it holds" in {
+      show(sourceDirectory(cacheRoot, Commit("aaa1"), cached)) shouldBe "target/cache/github.com/x/foo@aaa1"
    }
-   "sourceTreeAt" should "clone the mirror it has never seen, then check the version out of it" in mocked {
-      provide(listed, sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached) with tableGit)
+   "sourceTreeAt" should "clone the mirror it has never seen, then check the commit out of it" in mocked {
+      provide(listed, sourceTreeAt(cacheRoot, Commit("aaa1"), cached) with tableGit)
 
       calls shouldBe expectedFirstCheckout
    }
    "sourceTreeAt" should "answer where the tree is" in mocked {
-      show(provide(listed, sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached) with tableGit))
-         shouldBe "target/cache/github.com/x/foo@v1.2"
+      show(provide(listed, sourceTreeAt(cacheRoot, Commit("aaa1"), cached) with tableGit))
+         shouldBe "target/cache/github.com/x/foo@aaa1"
    }
    "sourceTreeAt" should "not check out again what its own checkout left on disk" in mocked {
       provide(listed, {
-         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
-         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
+         sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
+         sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
       } with tableGit)
 
       wasCalledOnce("addWorktree")
    }
-   "sourceTreeAt" should "check out each selected version into a tree of its own" in mocked {
+   "sourceTreeAt" should "check out each commit into a tree of its own" in mocked {
       provide(listed, {
-         sourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached)
-         sourceTreeAt(cacheRoot, Version(Line(1), Some(3)), cached)
+         sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
+         sourceTreeAt(cacheRoot, Commit("bbb2"), cached)
       } with tableGit)
 
       wasCalledTimes(2, "addWorktree")
@@ -169,16 +169,16 @@ def testCases: Test = {
 
       wasNeverCalled("fetch")
    }
-   "cachedSourceTreeAt" should "check a version out of a mirror already on disk" in mocked {
+   "cachedSourceTreeAt" should "check a commit out of a mirror already on disk" in mocked {
       withDirectory(mirrorPath)
 
-      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
-         shouldBe "target/cache/github.com/x/foo@v1.2"
+      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Commit("aaa1"), cached))) with tableGit)
+         shouldBe "target/cache/github.com/x/foo@aaa1"
 
       wasCalledOnce("addWorktree")
    }
    "cachedSourceTreeAt" should "refuse rather than clone where there is no mirror to check out of" in mocked {
-      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
+      provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Commit("aaa1"), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("cloneMirror")
@@ -228,10 +228,10 @@ private def expectedListing: String = "log tags target/cache/github.com/x/foo"
  * first verb to want a tree may well be the first to want the package at all.
  */
 private def expectedFirstCheckout: String =
-   "isDirectory target/cache/github.com/x/foo@v1.2; " ++ expectedPresenceCheck ++
+   "isDirectory target/cache/github.com/x/foo@aaa1; " ++ expectedPresenceCheck ++
       "; createDirectories target/cache; " ++
       "log cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
-      "log addWorktree v1.2 target/cache/github.com/x/foo@v1.2 target/cache/github.com/x/foo"
+      "log addWorktree aaa1 target/cache/github.com/x/foo@aaa1 target/cache/github.com/x/foo"
 
 private def expectedFetch: String = "log fetch target/cache/github.com/x/foo"
 
