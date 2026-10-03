@@ -5,6 +5,8 @@ import eliot.system.Process
 import eliot.system.Environment
 import eliot.build.model.Descriptor
 import eliot.build.format.PackageFile
+import eliot.build.format.LockFile
+import eliot.build.model.Lock
 import eliot.build.git.Git
 import eliot.build.git.ShellGit
 import eliot.build.assets.Assets
@@ -18,6 +20,7 @@ import eliot.build.git.Cache
 import eliot.build.assemble.Assembly
 import eliot.build.assemble.Invocation
 import eliot.build.assemble.ProjectModel
+import eliot.build.assemble.Locking
 import eliot.build.Command
 
 /**
@@ -46,7 +49,8 @@ import eliot.build.Command
  * the plugin assets those versions ship and runs the compiler over the package's roots once per
  * `compiler` line in the closure. What that amounts to is the lines' business — `eliot test` compiles
  * this project's suite and runs it, `eliot launcher` builds the jar — so the tool has nothing to name
- * a verb after. The lockfile the resolution deserves is the step after this. The one other thing it
+ * a verb after. Before anything runs, what the closure fetched is checked against `eliot.lock` and
+ * recorded in it, so a tag that moved or an asset that changed stops the build. The one other thing it
  * answers is `eliot --project-model`, an editor's question rather than a person's: what every package
  * resolves to, from what is already fetched.
  *
@@ -184,14 +188,16 @@ private def reporting(lines: List[String]): {Process} List[String] = {
 /**
  * What building `name` answers, or the single line naming what refused.
  *
- * **Six channels meet here, and keeping them apart is the point.** A repository git said no to, a
+ * **Eight channels meet here, and keeping them apart is the point.** A repository git said no to, a
  * release asset that would not download, a machine that will not run a program or make a directory, a
- * descriptor that will not parse, a graph that will not close and a closure that describes nothing
- * to run are six different things for a user to do something about, so each is discharged separately
- * and reports as itself. The design said this boundary would carry four or five; the two the build
- * build added are both about the half of a dependency that is not sources.
+ * descriptor that will not parse, a graph that will not close, a closure that describes nothing to
+ * run, a lockfile that will not parse and a fetch that contradicts it are eight different things for a
+ * user to do something about, so each is discharged separately and reports as itself. The design said
+ * this boundary would carry four or five; the two the build added are both about the half of a
+ * dependency that is not sources, and the two the lockfile added are about whether what was fetched is
+ * what was fetched before.
  *
- * Every one is spelled out, and has to be: the row names `Throw` six times, so nothing but the call
+ * Every one is spelled out, and has to be: the row names `Throw` eight times, so nothing but the call
  * can say which of them a given `catch` is for.
  */
 private def attempted(
@@ -206,7 +212,15 @@ private def attempted(
             catch[DescriptorError, List[String]](
                catch[ResolutionError, List[String]](
                   catch[InvocationError, List[String]](
-                     performed(name, descriptor, here, java),
+                     catch[LockFileError, List[String]](
+                        catch[LockConflict, List[String]](
+                           performed(name, descriptor, here, java),
+                           problem -> reporting(failed("refusing what was fetched", show(problem)))
+                        ),
+                        problem -> reporting(
+                           failed("malformed " ++ lockFileName ++ ", which only eliot writes", show(problem))
+                        )
+                     ),
                      problem -> reporting(
                         failed("cannot build '" ++ show(name) ++ "'", show(problem))
                      )
@@ -250,7 +264,7 @@ private def performed(
       java: String
    ): {
       FileSystem, Process, Throw[IoError], Throw[GitError], Throw[AssetError], Throw[DescriptorError],
-      Throw[ResolutionError], Throw[InvocationError]
+      Throw[ResolutionError], Throw[InvocationError], Throw[LockFileError], Throw[LockConflict]
    } List[String] =
    provide(
       cacheRoot(here),
@@ -258,12 +272,16 @@ private def performed(
    )
 
 /**
- * The build: one closure, read twice — once for what to compile and once for what to run over
- * it — then the assets on disk and the compiler once per line.
+ * The build: one closure, read three times — for what to run, for what to lock and for what to
+ * compile — then the assets on disk and the compiler once per line.
  *
- * Twice from *one* resolution, which is why `rootsOf` takes one rather than making its own: the roots
- * and the invocation are two readings of the same selected versions, and two closures that merely
- * ought to agree would be a build compiling one version's sources with another version's compiler.
+ * Three times from *one* resolution, which is why `rootsOf` takes one rather than making its own: the
+ * roots, the invocation and the lock are readings of the same selected versions, and two closures that
+ * merely ought to agree would be a build compiling one version's sources with another version's
+ * compiler, or locking a third.
+ *
+ * The lock comes before anything is checked out or run. A tag that moved is refused before its tree is
+ * on disk, and the compiler never runs over a closure whose facts disagree with the record.
  *
  * The lines run in order and the first that fails stops the rest; its code is the tool's. No line reads
  * another's output, so the order is only which failure is reported first.
@@ -277,10 +295,14 @@ private def compiled(
       here: Path,
       java: String
    ): {
-      Assets, PackageSource, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError]
+      Assets, PackageSource, FileSystem, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError],
+      Throw[LockFileError], Throw[LockConflict]
    } List[String] = {
    val resolution = resolve(name, descriptor)
    val invocation = invocationOf(name, descriptor, resolution)
+
+   locked(lockedPackageOf(name, resolution, invocation.invocationAssets), descriptor, here)
+
    val classpath = invocation.invocationAssets.map(assetTree)
    val roots = rootsOf(name, Project(here, descriptor), resolution)
    val exitCode = invocation.invocationLines.foldLeft(
@@ -292,6 +314,31 @@ private def compiled(
 
    empty
 }
+
+/**
+ * `entry` checked against `eliot.lock` and recorded in it.
+ *
+ * The file is written only when what it says changed, so a build of an already-locked closure leaves it
+ * untouched — and a project whose builds reach no repository never gets one, since the empty lockfile
+ * renders the same before as after. A conflict raises before anything is written, so the record a build
+ * refused is the record the next build is checked against.
+ */
+private def locked(
+      entry: LockedPackage,
+      descriptor: Descriptor,
+      here: Path
+   ): {FileSystem, Throw[IoError], Throw[LockFileError], Throw[LockConflict]} Unit = {
+   val previous = previousLock(here)
+   val text = renderLockFile(recorded(entry, descriptor.packages.map(packageName), previous))
+
+   fold(text == renderLockFile(previous), unit, writeFile(text, here / lockFileName))
+}
+
+/**
+ * What `eliot.lock` says, or the empty lockfile where there is none yet.
+ */
+private def previousLock(here: Path): {FileSystem, Throw[IoError], Throw[LockFileError]} Lockfile =
+   fold(exists(here / lockFileName), parseLockFile(readLines(here / lockFileName)), emptyLockfile)
 
 /**
  * One line's compiler, unless an earlier one already failed — in which case that failure is the answer

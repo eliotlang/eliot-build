@@ -61,6 +61,14 @@ def testCases: Test = {
    "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked {
       provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, Line(3), cached)) with tableGit) shouldBe "<none>"
    }
+   "releaseCommitOf" should "answer the commit the version's tag names" in mocked {
+      provide(anchoredAt, renderedCommit(releaseCommitOf(cacheRoot, Version(Line(1), Some(0)), cached)) with tableGit)
+         shouldBe "aaa1"
+   }
+   "releaseCommitOf" should "answer nothing for a version the mirror holds no tag for" in mocked {
+      provide(anchoredAt, renderedCommit(releaseCommitOf(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
+         shouldBe "<none>"
+   }
    "refreshed" should "fetch the mirror it found" in mocked {
       withDirectory(mirrorPath)
 
@@ -137,6 +145,12 @@ def testCases: Test = {
    }
    "cachedAnchorOf" should "refuse rather than clone a mirror this machine never fetched" in mocked {
       provide(anchoredAt, offline(renderedCommit(cachedAnchorOf(cacheRoot, Line(1), cached))) with tableGit)
+         shouldBe expectedNotFetched
+
+      wasNeverCalled("cloneMirror")
+   }
+   "cachedReleaseCommitOf" should "refuse rather than clone a mirror this machine never fetched" in mocked {
+      provide(anchoredAt, offline(renderedCommit(cachedReleaseCommitOf(cacheRoot, Version(Line(1), Some(0)), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("cloneMirror")

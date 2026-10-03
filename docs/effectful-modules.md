@@ -1168,3 +1168,41 @@ a `GIT_CONFIG_GLOBAL` with `insteadOf` rewrites to scratch clones carrying the t
 cache pre-filled from `scripts/package-assets.sh`, made `build test`, `build launcher`, a stage-2 build,
 a failing case (exit 1), a syntax error (exit 1, the compiler's diagnostics) and `./bootstrap` itself
 all run exactly as they will against GitHub (`.claude/CLAUDE.md` has the recipe).
+
+## 19. Revisited, 2026-10-03 — the lockfile, and two effects that grew a question each
+
+Same compiler (eliot `v0.6`) and framework (eliot-test `v0.2`) as the pin. 305 cases green, 38 of them
+new. `docs/build-system.md`, "Lockfile", is the design and what was built; this is what it did to the
+modules.
+
+**Three new modules, one per package the lock touches, and none of them above where it belongs.**
+`model/Lock` is the vocabulary — `Lockfile`, `LockedPackage`, `LockedVersion`, `LockedAsset`, `Digest` —
+and the one decision about it, `recorded`: a pure function of the new section and what is on record,
+raising `LockConflict` (`MovedTag`, `ChangedAsset`). `format/LockFile` is the file, read through
+`Clause` and `ClauseReader` exactly as the descriptor is, with its own `LockFileError` so a malformed lock
+never reports as a malformed `eliot.pkg`. `assemble/Locking` is the asking — `commitAt` of the source,
+`assetDigest` of the assets — over the resolution and assets the build already has. `DescriptorWriter`
+stays under `test/`: the lockfile did not need it, since nothing it writes is a descriptor.
+
+**The effects grew by one question each, and neither grew a row.** `PackageSource.commitAt(version,
+target): Option[Commit]` is the fact a tag cannot promise about itself; `gitPackages` answers it from the
+mirror's tags (`Cache.releaseCommitOf`), `cachedPackages` from the mirror alone, and `tablePackages`
+names a published version's commit after it, so a case reads which version a commit came from.
+`Assets.assetDigest(asset): Digest` is the archive's sha256; `shellAssets` computes it before unpacking,
+writes it beside the directory last and reads it back on a cache hit. Both members declare no row, for
+the reason every member here declares none: how an implementation fails is charged where it is bound.
+
+**The launcher's channels went from six to eight**, `LockFileError` and `LockConflict` each reporting as
+itself, and the lock is checked between the invocation and the checkout, so a moved tag is refused
+before its tree is on disk and the compiler never runs over a closure whose facts disagree with the
+record. Verified on the platform the way §14 says a change to `Assets`, `Cache` or the boundary must be:
+stage 1 and stage 2 against GitHub, a deleted cache, a cache from before digests (re-fetched, as
+designed), and each refusal — a rewritten commit, a rewritten digest, an unclosed block and an unknown
+clause in the lock — exiting 1 with the lock left as it was. The digests recorded match the sha256s
+eliot's `v0.6` release notes print.
+
+**No §11.3 collision this time**, though `recorded` maps and flat-maps over three new element types; the
+one compile error worth recording is the parser's, not the backend's — `x shouldBe` ending a line before
+a parenthesised `a ++ b` reads as `shouldBe` and `++` sharing an expression, which they have no
+precedence between. The expected value went into a named definition, which is how the other suites
+already spell a long one.

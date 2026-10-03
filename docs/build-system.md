@@ -36,9 +36,12 @@ the `build`/`run`/`test` verbs go with it ("What a build runs", below). Implemen
 but the two root lists ("What was built", below): `eliot test` compiles the suite *and runs it*,
 because the framework's `suite` package carries the line. Amended 2026-09-16: **the tool has no verbs
 at all** — `build` was renamed away to `eliot <package>`, and `resolve` and `roots` were removed rather
-than kept beside it ("What was built", below).
+than kept beside it ("What was built", below). Amended 2026-10-03: **the lockfile exists** —
+`eliot.lock`, a section per built package recording the commit each selected tag named and the sha256
+of each fetched asset, checked by every build before anything runs; the tree hash is cut as a second
+spelling of the commit ("Lockfile", below).
 
-**Where the implementation stands** (2026-09-16, 264 tests):
+**Where the implementation stands** (2026-10-03, 305 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -56,7 +59,7 @@ than kept beside it ("What was built", below).
 | `Launcher` | the `main`, the composition, the failure channels | `eliot <package>`, one run per line |
 | `Command` | what a command line names, how the compiler is spelled | done |
 | `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
-| — | lockfile | not started |
+| `Lock` / `LockFile` / `Locking` | `eliot.lock`: the facts, the file, the asking | done 2026-10-03 |
 | — | the `compiler` line: every line in the closure | done 2026-09-16 |
 | — | `build` renamed to `eliot <package>`; `resolve` and `roots` removed | done 2026-09-16 |
 | — | the two root lists | not started |
@@ -99,8 +102,8 @@ its streams and registering its exit code as the tool's own. Run in `../eliot-te
 `Runner.jar` whose 96 cases pass. Nobody typed a path, a coordinate or a compiler version: the tag a
 `dep` line selected decided the sources *and* the binaries that compiled them.
 
-What is still missing: nothing records what it resolved, so there is no lockfile and no hash is ever
-checked (the design already says where both go). The verb set is three of its eventual size — no
+What was still missing then: nothing recorded what it resolved, so there was no lockfile and no hash
+was ever checked — closed 2026-10-03 ("Lockfile", below). The verb set is three of its eventual size — no
 `test`, `run`, `get`, `init` or compat check — and the tool cannot yet build *itself*, because the
 launcher performs a standard-library member published after `v0.1` was tagged.
 
@@ -580,6 +583,50 @@ content hash detects a rewritten or substituted remote). Since resolution is per
 configuration (below), the lock records **per-configuration resolutions**. With MVS the lock is
 nearly redundant for resolution; it survives as the integrity record.
 
+#### What was built (2026-10-03)
+
+```
+-- Written by eliot: the commit every selected tag named and the digest of every fetched asset.
+-- Commit it, and do not edit it; a build refuses to go on when what it fetches disagrees.
+
+package test {
+  version github.com/eliotlang/eliot-test v0.2 4b78ab15bf3adf48ee3eeb480cc7e7ee9fcd9eca
+  version github.com/robertbraeutigam/eliot v0.6 ab1a39739378eba5b3303f902de105361d9b8468
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip bb2990b1ee16b204fe066d9a80504b50022f66269a3ff0c79e94f9b613fd443f
+}
+```
+
+- **A section per package, which is what "per configuration" became** once a configuration was a
+  package name. A build of `test` rewrites `test`'s section whole and leaves the others alone; sections
+  come out in the descriptor's declaration order, a section for a package the descriptor no longer
+  declares is dropped, and a closure that reaches no repository writes none — a project with no foreign
+  dependencies has no lockfile at all.
+- **What is pinned is the commit, and only the commit.** The tree hash above is go.sum's, where it
+  exists because a Go module is a zip and not a commit. A git commit names its tree by hash already, so
+  a second hash of the same tree is a second spelling of one fact, computed by the same function; it
+  could disagree with the commit only where the commit's own hash had been broken first. Cut.
+- **Asset digests are of the archive**, the file the publisher released and whose sha256 eliot's release
+  notes print, so a lock line is checkable by hand against the release page. `ShellAssets` hashes the
+  download with `sha256sum` (`shasum -a 256` where that will not start) before unpacking it, and writes
+  the digest beside the unpacked directory *last* — so the digest file, not the directory, is the proof a
+  fetch finished, which closes the killed-`unzip` hole the cache had, and heals a cache from before
+  digests existed by fetching it again.
+- **The check is against every section, the write is of one.** `github.com/x/foo v1.2` names one commit
+  whichever package asked, so a fact contradicting any section's record refuses the build — before
+  anything is checked out or run, and before the file is touched, so the record that refused is the one
+  the next build is checked against. A raised minimum is a different tag and no conflict; `v1` and `v1.0`
+  are one tag spelled twice and compared as one. Trust on first use, exactly go.sum's: the remedy the
+  refusal names is deleting the line.
+- **The resolver still never reads it.** MVS answers the same without a lock, so a lock decides nothing
+  about which version is selected and `Resolution` does not import it. The commit is a fourth
+  `PackageSource` question, `commitAt`, asked after resolution by `assemble/Locking` — the third reading
+  of the one closure a build resolves, beside the roots and the invocation.
+- **The file is written only when what it says changed**, and CI fails a push whose lockfile its builds
+  had to change, which is the read-only mode Go's CI gets from `-mod=readonly` without a flag here.
+- **Not locked yet**: the launcher itself. The wrapper fetches it before any Eliot code runs, so its hash
+  would be the wrapper's to check, and "The pin" below argues the wrapper should not have the job until
+  the rest of the chain is checked — which it now is. `--project-model` neither reads nor writes the lock.
+
 ### Location drift and availability — registry-free indirection
 
 Identity answers "same package?"; it does not keep repos findable or alive. Two mechanisms,
@@ -841,10 +888,11 @@ a package here rather than a repository of its own, so the toolchain is one repo
 `package jvm-test { dep //test,
 dep //jvm }` (no sources), `package examples { internal, dep //jvm }`.
 
-The lockfile uses the same clause style, machine-written: `lock <url> <tag> <commit> <tree-hash>` per
-resolved dependency per package, `lock-jar <url> <tag> <asset> <sha256>` for plugin binaries — which is
-where a plugin's hash lives, since it cannot live in the tag that produced it (see "Compiler plugins").
-Its exact format is tool-owned output, not hand-polished here.
+The lockfile uses the same clause style, machine-written: a `package <name> { … }` block per built
+package, holding `version <url> <tag> <commit>` per selected version and `asset <url> <tag> <asset>
+<sha256>` per fetched plugin archive — which is where a plugin's hash lives, since it cannot live in the
+tag that produced it (see "Compiler plugins"). It is read as strictly as the descriptor, unknown
+keywords fatal ("Lockfile", "What was built").
 
 **Retired keywords are refused like any unknown one** (2026-09-16). `module`, `test`, `artifact`, a
 bare top level and a selector-less `dep` are what the format spelled before, and for a day the
@@ -1091,7 +1139,7 @@ does. Sources and binary cannot skew because they are the same tag.
 - **The hash moves to the lockfile.** A jar is built from the tagged tree *after* the tag exists, so its
   hash cannot be inside the commit the tag names — a chicken-and-egg Maven did not have, since a
   coordinate is written after the artifact is published. `eliot.lock` is already the home for facts
-  (`lock-jar <url> <tag> <asset> <sha256>`, recorded on first fetch, go.sum's trust-on-first-use). This
+  (`asset <url> <tag> <asset> <sha256>`, recorded on first fetch, go.sum's trust-on-first-use). This
   also deletes the ugliest step of the Maven plan: the author shelling to coursier at release time to
   compute a flat closure.
 - **The closure ships inside the asset**, which is what made Maven's POM metadata unnecessary. This is
@@ -1321,7 +1369,7 @@ here.
   promise whoever publishes keeps, and it is worth more than a check consumers mostly would not run,
   because it also covers the consumers who never pinned anything.
 - **There is already one home for asset hashes, and it is not a hand-edited file.** `eliot.lock`
-  records `lock-jar <url> <tag> <asset> <sha256>` on first fetch for exactly the reason the plugin
+  records `asset <url> <tag> <asset> <sha256>` on first fetch for exactly the reason the plugin
   hash moved there: no asset's hash can live in the commit its tag names. The launcher's hash is the
   same kind of fact, so when the lockfile lands this is where it goes, tool-written, alongside every
   other one rather than in a file a person maintains.

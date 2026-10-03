@@ -7,6 +7,7 @@ import eliot.test.Test
 import eliot.test.Mock
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lock
 import eliot.build.assets.Assets
 import eliot.build.assets.ShellAssets
 
@@ -49,11 +50,40 @@ def testCases: Test = {
       wasCalledOnce("createDirectories target/cache/assets/github.com/e/eliot@v1.2")
    }
    "assetTree" should "fetch nothing at all for an asset this machine already unpacked" in mocked {
-      withDirectory(path(expectedTree))
+      withFile(path(expectedDigestFile), "beef\n")
 
       answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
 
       wasNeverCalled("curl")
+   }
+   "assetTree" should "fetch again an asset whose directory has no digest beside it, as a fetch that never finished" in mocked {
+      withDirectory(path(expectedTree))
+
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wasCalledOnce(expectedDownload)
+   }
+   "assetTree" should "hash the archive before unpacking it" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wereCalledInOrder(append(singleton(expectedHashing), expectedUnpacking))
+   }
+   "assetTree" should "write the digest beside the directory only once the archive is unpacked" in mocked {
+      answered(rendered(assetTree(jvmAsset)) with shellAssets)
+
+      wereCalledInOrder(append(singleton(expectedUnpacking), "writeFile " ++ expectedDigestFile))
+   }
+   "assetDigest" should "answer the digest of the archive that was fetched" in mocked {
+      whenSpawning("sha256sum", succeeding("beef  " ++ expectedTree ++ ".download\n"))
+
+      answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
+   }
+   "assetDigest" should "read a cached asset's digest back without fetching or hashing it" in mocked {
+      withFile(path(expectedDigestFile), "beef\n")
+
+      answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
+
+      wasNeverCalled("sha256sum")
    }
    "assetTree" should "raise what the downloader said about an asset that is not published" in mocked {
       whenSpawning("curl", failing(22, "The requested URL returned error: 404"))
@@ -67,6 +97,15 @@ def testCases: Test = {
       whenSpawning("unzip", failing(9, "cannot find zipfile directory"))
 
       raising[AssetError](expectedUnpackingRefusal, {
+         answered(rendered(assetTree(jvmAsset)) with shellAssets)
+         unit
+      })
+   }
+
+   "assetTree" should "raise what the hasher said about an archive it could not read" in mocked {
+      whenSpawning("sha256sum", failing(1, "No such file or directory"))
+
+      raising[AssetError]("'" ++ expectedHashing ++ "' failed with exit code 1: No such file or directory", {
          answered(rendered(assetTree(jvmAsset)) with shellAssets)
          unit
       })
@@ -87,6 +126,10 @@ private def jvmAsset: Asset =
 
 private def expectedTree: String = "target/cache/assets/github.com/e/eliot@v1.2/eliot-jvm.zip"
 
+private def expectedDigestFile: String = expectedTree ++ ".sha256"
+
+private def expectedHashing: String = "sha256sum " ++ expectedTree ++ ".download"
+
 private def expectedDownload: String =
    "curl --fail --location --silent --show-error --output " ++ expectedTree ++ ".download " ++
       "https://github.com/e/eliot/releases/download/v1.2/eliot-jvm.zip"
@@ -106,6 +149,8 @@ private def expectedUnpackingRefusal: String =
  * a `String` result is the one every suite here already uses.
  */
 private def rendered(tree: Path): String = show(tree)
+
+private def renderedDigest(digest: Digest): String = show(digest)
 
 /**
  * The one thing the bound implementation asks for rather than takes: the root it caches under. A named

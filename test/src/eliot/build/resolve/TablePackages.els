@@ -37,6 +37,18 @@ implement tablePackages: PackageSource {
       )
 
    /**
+    * A table has no history either, so a version it publishes is said to be at a commit named after
+    * it — `github.com/x/foo@v1.2` — which is as stable as a real tag is supposed to be and lets a case
+    * read which version a commit came from.
+    */
+   def commitAt(version: Version, target: Repository): {Dep[Universe]} Option[Commit] =
+      foldOption(
+         None,
+         _ -> Some(Commit(show(target) ++ "@" ++ show(version))),
+         dependency.publications.lookupOption(show(target) ++ "@" ++ show(version))
+      )
+
+   /**
     * A table has no repositories to check anything out of, so it answers where a tree *would* be, in
     * the shape the git-backed source puts one: one directory per package, named by its version. That
     * is enough for an assembly test, whose subject is what gets mounted under a tree rather than how

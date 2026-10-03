@@ -53,6 +53,17 @@ def testCases: Test = {
 
       answered(renderedCommit(anchorAt(Line(2), cached)) with gitPackages with tableGit) shouldBe "<none>"
    }
+   "commitAt" should "answer the commit the version's tag names" in mocked {
+      withDirectory(mirrorPath)
+
+      answered(renderedCommit(commitAt(Version(Line(1), Some(2)), cached)) with gitPackages with tableGit) shouldBe "bbb2"
+   }
+   "commitAt" should "answer nothing for a version the mirror holds no tag for" in mocked {
+      withDirectory(mirrorPath)
+
+      answered(renderedCommit(commitAt(Version(Line(1), Some(9)), cached)) with gitPackages with tableGit)
+         shouldBe "<none>"
+   }
 }
 
 /**

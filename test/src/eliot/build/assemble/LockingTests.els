@@ -1,0 +1,73 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Descriptor
+import eliot.build.model.Lock
+import eliot.build.resolve.Configuration
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+import eliot.build.resolve.TablePackages
+import eliot.build.assemble.Locking
+
+/**
+ * What a build asks before it records a lock: the commit behind every version its closure selected.
+ *
+ * Run against `eliot.build.resolve.TablePackages`, which says a version it publishes is at a commit named
+ * after it — so a line reads which version its commit came from, and the subject is which versions are
+ * asked about and in what order, never what git answers.
+ */
+def testCases: Test = {
+   "lockedVersionsOf" should "lock every version the closure selected, in the resolution's order" in {
+      locked(suite, frameworkUniverse) shouldBe expectedSuiteLock
+   }
+   "lockedVersionsOf" should "lock nothing for a closure that reaches no repository" in {
+      locked("package test {\n}", frameworkUniverse) shouldBe ""
+   }
+   "lockedVersionsOf" should "refuse a selected version whose tag the source cannot find" in {
+      rendered(against(frameworkUniverse, renderedVersions(lockedVersionsOf(unpublished))))
+         shouldBe "github.com/e/nowhere publishes no v1.0"
+   }
+}
+
+/**
+ * The versions building `test` out of `rootText` locks, one `<url> <tag> <commit>` per selection.
+ */
+private def locked(rootText: String, universe: Universe): String =
+   rendered(
+      against(universe, renderedVersions(lockedVersionsOf(resolve(PackageName("test"), descriptorOf(rootText)))))
+   )
+
+/**
+ * Rendered *inside* the `against`, as every resolving suite here renders, for the reason
+ * `ResolutionTests` records: one `provide[Universe, String]` for the whole program.
+ */
+private def rendered(outcome: Either[ResolutionError, String]): String =
+   foldEither(error -> show(error), text -> text, outcome)
+
+private def renderedVersions(versions: List[LockedVersion]): String =
+   versions.map(fact -> show(fact.lockedRepository) ++ " " ++ show(fact.lockedVersion) ++ " " ++ show(fact.lockedCommit))
+      .joined(" | ")
+
+private def expectedSuiteLock: String =
+   "github.com/e/eliot v1.2 github.com/e/eliot@v1.2 | github.com/e/eliot-test v1.0 github.com/e/eliot-test@v1.0"
+
+private def suite: String =
+   "package test {\n  dep github.com/e/eliot-test//root v1.0\n  dep github.com/e/eliot//jvm v1.2\n}"
+
+private def frameworkUniverse: Universe =
+   universeOf(
+      append(
+         singleton(Pair("github.com/e/eliot-test@v1.0", rootPackage("dep github.com/e/eliot//stdlib v1.1"))),
+         Pair("github.com/e/eliot@v1.2", "package stdlib {\n}\npackage jvm {\n  dep //stdlib\n}")
+      ),
+      empty
+   )
+
+/**
+ * A resolution naming a repository the universe does not publish — which no real resolution can be, and
+ * which is why the refusal is the resolver's own.
+ */
+private def unpublished: Resolution =
+   Resolution(singleton(Selection(Repository("github.com/e/nowhere"), Version(Line(1), Some(0)), None, singleton(PackageName("root")))))

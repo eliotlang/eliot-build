@@ -1,0 +1,17 @@
+-- Written by eliot: the commit every selected tag named and the digest of every fetched asset.
+-- Commit it, and do not edit it; a build refuses to go on when what it fetches disagrees.
+
+package launcher {
+  version github.com/robertbraeutigam/eliot v0.6 ab1a39739378eba5b3303f902de105361d9b8468
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-compiler.zip 02b90823f9abad7792be0702964cd3f2e55703d4b74926e71bfe190f51bc3bac
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-stdlib.zip 423f1635eabf1fd7fe7dc8ac78dc33dd94c3fd6873e215da7feee02c2444d68c
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip bb2990b1ee16b204fe066d9a80504b50022f66269a3ff0c79e94f9b613fd443f
+}
+
+package test {
+  version github.com/eliotlang/eliot-test v0.2 4b78ab15bf3adf48ee3eeb480cc7e7ee9fcd9eca
+  version github.com/robertbraeutigam/eliot v0.6 ab1a39739378eba5b3303f902de105361d9b8468
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-compiler.zip 02b90823f9abad7792be0702964cd3f2e55703d4b74926e71bfe190f51bc3bac
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-stdlib.zip 423f1635eabf1fd7fe7dc8ac78dc33dd94c3fd6873e215da7feee02c2444d68c
+  asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip bb2990b1ee16b204fe066d9a80504b50022f66269a3ff0c79e94f9b613fd443f
+}
