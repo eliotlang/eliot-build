@@ -1,0 +1,164 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+
+/**
+ * What a build found the world to be: the commit every selected tag named and the digest of every asset
+ * it fetched, recorded so the next build — on this machine or any other — can tell whether the world
+ * still says the same thing.
+ *
+ * **The descriptor is intent and this is fact** (`docs/build-system.md`, "Lockfile"). MVS answers the
+ * same versions on every machine without consulting anything, so a lock decides nothing about *which*
+ * version a build selects. What it adds is the one thing a tag cannot say about itself: that it still
+ * names what it named. A tag is a mutable ref and a release asset is a file at a URL, and the two
+ * promises that keep them still — a published tag never moves, a published asset is never replaced —
+ * are promises a publisher keeps. This is where a consumer checks them.
+ *
+ * **One section per package, because resolution is per package.** Two packages of one project may
+ * close over different versions of one repository, so a single list would hold whichever build ran
+ * last. A build of `test` rewrites `test`'s section and leaves every other package's alone, which is
+ * also why a section is replaced whole rather than merged: what it records is one closure, and an
+ * entry the closure stopped reaching is not a fact about it any more.
+ *
+ * **A conflict is checked against every section, because a fact about a tag is not a package's.**
+ * `github.com/x/foo v1.2` names one commit whichever package's build asked, so a build of `launcher`
+ * that sees it name another refuses even when the commit on record is `test`'s.
+ *
+ * **What is pinned is the commit, not a second hash of the tree under it.** The design proposed both,
+ * after go.sum — where the content hash exists because a Go module is a zip, not a commit. A git commit
+ * already names its tree by hash, so a tree hash would be a second spelling of the same fact, computed
+ * by the same function, and could disagree with the commit only where the commit's own hash had already
+ * been broken.
+ */
+
+/**
+ * A SHA-256 digest, as the lowercase hex every tool that computes one prints.
+ */
+data Digest(digestHex: String)
+
+implement Eq[Digest] {
+   def equals(a: Digest, b: Digest): Bool = a.digestHex == b.digestHex
+}
+
+implement Show[Digest] {
+   def show(value: Digest): String = value.digestHex
+}
+
+/**
+ * A selected version, and the commit its tag named when this was recorded.
+ */
+data LockedVersion(lockedRepository: Repository, lockedVersion: Version, lockedCommit: Commit)
+
+/**
+ * A fetched release asset — the repository, the version and the name that locate it — and the digest
+ * of the archive that was downloaded.
+ */
+data LockedAsset(lockedAssetRepository: Repository, lockedAssetVersion: Version, lockedAssetName: String, lockedDigest: Digest)
+
+/**
+ * What one build of one package recorded: every version its closure selected, in the resolution's
+ * canonical order, and every asset it fetched, in the order they went on the classpath.
+ */
+data LockedPackage(lockedPackageName: PackageName, lockedVersions: List[LockedVersion], lockedAssets: List[LockedAsset])
+
+/**
+ * Everything `eliot.lock` says: a section per package that has been built.
+ */
+data Lockfile(lockedPackages: List[LockedPackage])
+
+/**
+ * Why a build refused to go on: something it fetched is not what the lockfile says the same name was
+ * when it was recorded.
+ *
+ * Each constructor names the thing that changed and both values, because the only two explanations are
+ * a publisher who broke a promise and a remote that is not the repository that was locked, and telling
+ * them apart is the user's to do with the two hashes in hand.
+ */
+data LockConflict =
+   MovedTag(movedRepository: Repository, movedVersion: Version, commitOnRecord: Commit, commitNow: Commit) |
+   ChangedAsset(changedAsset: LockedAsset, digestOnRecord: Digest)
+
+implement Show[LockConflict] {
+   def show(value: LockConflict): String = value match {
+      case MovedTag(repository, version, recorded, now) ->
+         show(repository) ++ " " ++ show(version) ++ " is locked at commit " ++ show(recorded) ++
+            " but the tag now names " ++ show(now) ++ "; a published tag never moves" ++ remedy
+      case ChangedAsset(fetched, recorded) ->
+         show(fetched.lockedAssetRepository) ++ "@" ++ show(fetched.lockedAssetVersion) ++ "/" ++
+            fetched.lockedAssetName ++ " is locked at sha256 " ++ show(recorded) ++
+            " but what was fetched hashes to " ++ show(fetched.lockedDigest) ++
+            "; a published asset is never replaced" ++ remedy
+   }
+}
+
+/**
+ * The lockfile of a project that has never been built.
+ */
+def emptyLockfile: Lockfile = Lockfile(empty)
+
+/**
+ * `lockfile` with `entry` recorded as its package's section, provided nothing in it contradicts a fact
+ * already on record.
+ *
+ * `declared` is every package the descriptor declares, in its order, and it decides what survives: the
+ * sections come out in declaration order, so a lockfile has one canonical form whatever order its
+ * packages were built in, and a section for a package the descriptor no longer declares is dropped. A
+ * section with nothing in it — a package whose closure reaches no repository — is not written at all.
+ *
+ * ```eliot
+ * val locked = recorded(lockedPackageOf(name, resolution, assets), declared, previous)
+ * ```
+ */
+def recorded(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfile): {Throw[LockConflict]} Lockfile = {
+   entry.lockedVersions.foreach(fact -> agreedVersion(fact, lockfile))
+   entry.lockedAssets.foreach(fact -> agreedAsset(fact, lockfile))
+
+   Lockfile(declared.flatMap(name -> sectionFor(name, entry, lockfile)))
+}
+
+/**
+ * What every conflict tells the user to do once they have decided the change is one they trust.
+ */
+private def remedy: String = "; if the change is trusted, delete the line from eliot.lock and build again"
+
+private def agreedVersion(fact: LockedVersion, lockfile: Lockfile): {Throw[LockConflict]} Unit =
+   foldOption(
+      unit,
+      locked -> raise(MovedTag(fact.lockedRepository, fact.lockedVersion, locked.lockedCommit, fact.lockedCommit)),
+      lockfile.lockedPackages.flatMap(lockedVersions).find(locked -> contradicts(locked, fact))
+   )
+
+private def agreedAsset(fact: LockedAsset, lockfile: Lockfile): {Throw[LockConflict]} Unit =
+   foldOption(
+      unit,
+      locked -> raise(ChangedAsset(fact, locked.lockedDigest)),
+      lockfile.lockedPackages.flatMap(lockedAssets).find(locked -> assetContradicts(locked, fact))
+   )
+
+/**
+ * The same tag of the same repository, naming another commit. Versions compare as the ordering sees
+ * them, so a `v1` on record and a `v1.0` selected now are one tag spelled twice.
+ */
+private def contradicts(locked: LockedVersion, fact: LockedVersion): Bool =
+   locked.lockedRepository == fact.lockedRepository && locked.lockedVersion == fact.lockedVersion &&
+      locked.lockedCommit != fact.lockedCommit
+
+private def assetContradicts(locked: LockedAsset, fact: LockedAsset): Bool =
+   locked.lockedAssetRepository == fact.lockedAssetRepository &&
+      locked.lockedAssetVersion == fact.lockedAssetVersion &&
+      locked.lockedAssetName == fact.lockedAssetName && locked.lockedDigest != fact.lockedDigest
+
+/**
+ * The section `name` has after this build: the new one for the package just built, and whatever was on
+ * record for every other.
+ */
+private def sectionFor(name: PackageName, entry: LockedPackage, lockfile: Lockfile): List[LockedPackage] =
+   fold(
+      name == entry.lockedPackageName,
+      fold(isEmptySection(entry), empty, singleton(entry)),
+      lockfile.lockedPackages.filter(section -> section.lockedPackageName == name)
+   )
+
+private def isEmptySection(entry: LockedPackage): Bool =
+   isEmpty(entry.lockedVersions) && isEmpty(entry.lockedAssets)

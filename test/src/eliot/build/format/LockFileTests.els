@@ -1,0 +1,94 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.model.Lock
+import eliot.build.format.LockFile
+
+/**
+ * The `eliot.lock` file: what one looks like, that every fact in it survives being read back, and that
+ * it is read as strictly as the descriptor is — a lock is tool-written, so a line the reader does not
+ * understand is either damage or a newer launcher's, and neither is a line to skip.
+ */
+def testCases: Test = {
+   "renderLockFile" should "write a block per package, a line per fact" in {
+      renderLockFile(Lockfile(singleton(sample))) shouldBe sampleText
+   }
+   "renderLockFile" should "write the empty lockfile as its header alone" in {
+      renderLockFile(emptyLockfile) shouldBe header
+   }
+   "parseLockFile" should "read back every fact it was written with" in {
+      parsed(sampleText) shouldBe sampleText
+   }
+   "parseLockFile" should "read back every package's section, in order" in {
+      parsed(twoSections) shouldBe twoSections
+   }
+   "parseLockFile" should "read the empty lockfile as no sections" in {
+      parsed(header) shouldBe header
+   }
+   "parseLockFile" should "refuse a clause it does not know, as a newer launcher's" in {
+      parsed("package test {\n  checksum github.com/e/eliot v1.2 abc\n}")
+         shouldBe "unknown clause 'checksum'; this file may need a newer eliot in 'checksum github.com/e/eliot v1.2 abc'"
+   }
+   "parseLockFile" should "refuse a version line that does not say its commit" in {
+      parsed("package test {\n  version github.com/e/eliot v1.2\n}")
+         shouldBe "a locked version needs the commit its tag named in 'version github.com/e/eliot v1.2'"
+   }
+   "parseLockFile" should "refuse an asset line that does not say its digest" in {
+      parsed("package test {\n  asset github.com/e/eliot v1.2 eliot-jvm.zip\n}")
+         shouldBe "a locked asset needs the digest it was fetched at in 'asset github.com/e/eliot v1.2 eliot-jvm.zip'"
+   }
+   "parseLockFile" should "refuse a tag that is not a version" in {
+      parsed("package test {\n  version github.com/e/eliot latest aaa1\n}")
+         shouldBe "a locked tag must be a version like 'v1.3' in 'version github.com/e/eliot latest aaa1'"
+   }
+   "parseLockFile" should "refuse a line saying more than a fact" in {
+      parsed("package test {\n  version github.com/e/eliot v1.2 aaa1 extra\n}")
+         shouldBe "too many arguments in 'version github.com/e/eliot v1.2 aaa1 extra'"
+   }
+   "parseLockFile" should "refuse a file that is not a clause file" in {
+      parsed("package test {\n  version github.com/e/eliot v1.2 aaa1")
+         shouldBe "line 2: unclosed '{' in ''"
+   }
+   "lockFileName" should "be eliot.lock, beside eliot.pkg" in {
+      lockFileName shouldBe "eliot.lock"
+   }
+}
+
+/**
+ * The lockfile `text` spells, rendered back out — or the error it fails with, so both outcomes are
+ * asserted the same way.
+ */
+private def parsed(text: String): String =
+   foldEither(
+      error -> show(error),
+      lockfile -> renderLockFile(lockfile),
+      runThrow[LockFileError](parseLockFile(split("\n", text)))
+   )
+
+private def sample: LockedPackage =
+   LockedPackage(
+      PackageName("test"),
+      append(
+         singleton(LockedVersion(Repository("github.com/e/eliot"), Version(Line(1), Some(2)), Commit("aaa1"))),
+         LockedVersion(Repository("github.com/e/eliot-test"), Version(Line(1), None), Commit("bbb2"))
+      ),
+      singleton(LockedAsset(Repository("github.com/e/eliot"), Version(Line(1), Some(2)), "eliot-jvm.zip", Digest("beef")))
+   )
+
+private def sampleText: String =
+   header ++ "\npackage test {\n" ++
+      "  version github.com/e/eliot v1.2 aaa1\n" ++
+      "  version github.com/e/eliot-test v1 bbb2\n" ++
+      "  asset github.com/e/eliot v1.2 eliot-jvm.zip beef\n" ++
+      "}\n"
+
+private def twoSections: String =
+   header ++ "\npackage launcher {\n  version github.com/e/eliot v1.2 aaa1\n}\n" ++
+      "\npackage test {\n  version github.com/e/eliot v1.3 ccc3\n}\n"
+
+private def header: String =
+   "-- Written by eliot: the commit every selected tag named and the digest of every fetched asset.\n" ++
+      "-- Commit it, and do not edit it; a build refuses to go on when what it fetches disagrees.\n"

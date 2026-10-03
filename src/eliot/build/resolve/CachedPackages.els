@@ -14,7 +14,7 @@ import eliot.build.resolve.PackageSource
  * The offline `PackageSource`: what the project-model query resolves against.
  *
  * `eliot.build.resolve.GitPackages` with the network taken out. It asks the same mirror cache the same
- * three questions, but through `eliot.build.git.Cache`'s offline questions, so a repository or a
+ * four questions, but through `eliot.build.git.Cache`'s offline questions, so a repository or a
  * version this machine has not fetched is `NotFetched` rather than a clone or a fetch. That is the
  * design's rule for the query (`docs/build-system.md`, "IDE integration"): opening an editor must not
  * block on the network, and fetching is something a user does by building.
@@ -39,6 +39,12 @@ implement cachedPackages: PackageSource {
          target: Repository
       ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Option[Commit] =
       cachedAnchorOf(dependency, line, target)
+
+   def commitAt(
+         version: Version,
+         target: Repository
+      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Option[Commit] =
+      cachedReleaseCommitOf(dependency, version, target)
 
    def sourcesAt(
          version: Version,

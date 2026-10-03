@@ -1,0 +1,57 @@
+import eliot.collection.List
+import eliot.build.model.PackageId
+import eliot.build.model.Lock
+import eliot.build.assets.Assets
+import eliot.build.resolve.PackageSource
+import eliot.build.resolve.Selection
+import eliot.build.resolve.Resolution
+
+/**
+ * What one build of a package has to record: the commit behind every version its closure selected, and
+ * the digest of every asset it fetched — the section of `eliot.lock` that build owns.
+ *
+ * The third reading of one closure, beside `eliot.build.assemble.Assembly`'s roots and
+ * `eliot.build.assemble.Invocation`'s lines, and for the reason they are two: the lock must be of the
+ * closure that is about to be compiled, never of a second resolution that merely ought to agree. So the
+ * resolution and the assets are taken, not worked out.
+ *
+ * Nothing here decides whether the facts are acceptable. That is `eliot.build.model.Lock.recorded`'s, a
+ * pure function of the facts and what is on record, and what this module does is ask — `commitAt` of
+ * the source, `assetDigest` of the assets — so a test of the asking binds a table and a test of the
+ * deciding binds nothing at all.
+ */
+
+/**
+ * The section building `name` writes, out of the closure it resolved to and the assets it is about to
+ * put on the classpath.
+ *
+ * ```eliot
+ * val entry = lockedPackageOf(name, resolution, invocation.invocationAssets)
+ * ```
+ */
+def lockedPackageOf(
+      name: PackageName,
+      resolution: Resolution,
+      assets: List[Asset]
+   ): {Assets, PackageSource, Throw[ResolutionError]} LockedPackage =
+   LockedPackage(name, lockedVersionsOf(resolution), assets.map(lockedAssetOf))
+
+/**
+ * Every selected version at the commit its tag names now, in the resolution's canonical order.
+ *
+ * A selected version whose tag the source cannot find is `Unavailable` — the resolver's own error, the
+ * same fact `Assembly` reports when the same version's descriptor cannot be read back, and for a build
+ * that has just read that descriptor out of the same mirror it cannot happen.
+ */
+def lockedVersionsOf(resolution: Resolution): {PackageSource, Throw[ResolutionError]} List[LockedVersion] =
+   resolution.selections.map(lockedVersionOf)
+
+private def lockedVersionOf(selection: Selection): {PackageSource, Throw[ResolutionError]} LockedVersion =
+   foldOption(
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
+      commit -> LockedVersion(selection.selectedRepository, selection.selectedVersion, commit),
+      commitAt(selection.selectedVersion, selection.selectedRepository)
+   )
+
+private def lockedAssetOf(asset: Asset): {Assets} LockedAsset =
+   LockedAsset(asset.assetRepository, asset.assetVersion, asset.assetName, assetDigest(asset))

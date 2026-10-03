@@ -16,7 +16,7 @@ meta-information.
 
 Two source roots, six packages each. `src/eliot/build/` is the tool, split by what a file is allowed
 to know — `assemble` → `resolve` → `assets` → `git` → `format` → `model`, and `model` imports nothing of
-the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
+the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18, §19):
 
 - **`model/`** — the vocabulary, no syntax and no effects. `Version` (with `Line`, the compatibility
   line, and `firstRelease`), `PackageId` (`Repository` is what is cloned, cached and selected; a
@@ -28,7 +28,12 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
   git at all), and `Descriptor` — **a list of `BuildPackage` and nothing else**: a package exists
   exactly where a block declares it, and is a root directory, deps, an optional `compiler` line (the
   words a build passes to the compiler, verbatim) and the release assets it ships, and a `Dependency` is a `SiblingDependency` or a `Requirement` with a mandatory minimum.
-- **`format/`** — the `eliot.pkg` file. `Clause` is the generic clause tree and its parser
+  `Lock` is what `eliot.lock` records — a `LockedPackage` section per built package, each a list of
+  `LockedVersion` (repository, tag, the `Commit` it named) and `LockedAsset` (repository, tag, name, the
+  archive's sha256 `Digest`) — and `recorded`, the one decision about it: a pure function that refuses a
+  fact contradicting **any** section (`LockConflict`: `MovedTag`, `ChangedAsset`), then replaces the built
+  package's section whole, keeps the others, drops undeclared ones and writes no empty one.
+- **`format/`** — the `eliot.pkg` file, and `eliot.lock` beside it. `Clause` is the generic clause tree and its parser
   (`clausesNamed` asks of a file what `childrenNamed` asks of a block); `ClauseReader` is the checked
   access to one clause and the `ClauseProblem` it complains with; `DependencyClause` is the `dep` line
   (`<url>//<package> <version>` or `//<package>`, the selector never optional); `PackageFile` owns the
@@ -38,7 +43,10 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
   line in one block is refused too — a package that wants two things is two packages. It reads the project's
   own file and every mirror's alike — there is one spelling of the format and no older one is read.
   Nothing in the tool writes a descriptor, so `DescriptorWriter` lives under `test/` as the suites'
-  renderer; it moves back when the lockfile needs it.
+  renderer — the lockfile did not need it. `LockFile` is the one file the tool writes: `lockFileName`,
+  `parseLockFile` (same clause syntax, read as strictly — an unknown keyword is fatal) and
+  `renderLockFile`, `package <name> { version <url> <tag> <commit> … asset <url> <tag> <asset> <sha256> … }`
+  under a two-line header, with its own `LockFileError` so a bad lock never reports as a bad `eliot.pkg`.
 - **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror` and `Worktree`, git's own
   vocabulary, reading and checking out at a `Version`; a mirror is a bare `--mirror` clone, every *question* is answered from its object
   database, and the one thing ever checked out is a worktree, because a compiler mounts
@@ -47,14 +55,18 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
   (`shellGit`, the *named* implementation that spawns and alone decides which directory each command
   stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories and
   checking versions out beside them at `<url>@<tag>`, on `{Git, FileSystem}`).
-- **`assets/`** — the other half of what a `dep` line buys. `Assets` (`effect Assets` — one question,
-  `assetTree(asset)`, plus `Asset` itself, the repository/version/name triple a release asset *is*, and
+- **`assets/`** — the other half of what a `dep` line buys. `Assets` (`effect Assets` — two questions,
+  `assetTree(asset)` and `assetDigest(asset)`, the archive's sha256 for the lock, plus `Asset` itself, the repository/version/name triple a release asset *is*, and
   `assetUrlOf`, the one concatenation its location is derived by) and `ShellAssets` (`shellAssets`, the
   named implementation that spawns `curl`, falls back to `wget` where curl will not start, unpacks with
-  `unzip`, and caches the result at `<root>/assets/<url>@<tag>/<asset>`). It imports `git` for one thing
+  `unzip`, and caches the result at `<root>/assets/<url>@<tag>/<asset>`, hashing the archive with
+  `sha256sum` — `shasum -a 256` where that will not start — before unpacking, and writing
+  `<asset>.sha256` beside the directory *last*: that file, not the directory, is what says a fetch
+  finished, so a directory without one is fetched again). It imports `git` for one thing
   — `remoteOf`, the single place the scheme is decided — and knows nothing about resolutions.
 - **`resolve/`** — `PackageSource` (what the tool asks of somebody else's repository: a descriptor, a
-  lineage anchor, and — since assembly — a checked-out tree), `GitPackages` (`gitPackages`, the
+  lineage anchor, a checked-out tree since assembly, and — since the lockfile — `commitAt`, the commit a
+  selected version's tag names; the resolver never reads a lock, since MVS answers the same without one), `GitPackages` (`gitPackages`, the
   named git-backed answer, which asks `{Dep[Path]}` for the cache root rather than knowing one),
   `CachedPackages` (`cachedPackages`, the same answers from disk alone — the project-model query's),
   `Configuration` (no type any more — a configuration is a `PackageName`; what is left is
@@ -67,18 +79,20 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18):
   the mount).
 - **`assemble/`** — `Assembly` (a resolution plus the standard layout become the source roots one build
   compiles from; **one rule — a package's sources are `<package root>/src`** — pure but for
-  `{PackageSource}`, and it names no git) and `Invocation` (the same closure read the other way:
+  `{PackageSource}`, and it names no git), `Invocation` (the same closure read the other way:
   every asset the mounted packages ship, for one classpath, and **every `compiler` line in the
   closure** — the project's own opened packages first, then the dependencies' in resolution order —
   which is how a suite gets the framework's `run` line and an executable its own `exe-jar` line.
   There are no roles: nothing marks the compiler asset or a backend word, the line says it whole.
   `InvocationError` has one constructor, `NothingToRun`, because a closure with no line is only a
-  fact across a resolution; `docs/build-system.md`, "What a build runs").
+  fact across a resolution; `docs/build-system.md`, "What a build runs") and `Locking` (the third
+  reading of the same closure: `lockedPackageOf` asks `commitAt` per selection and `assetDigest` per asset
+  and answers the section this build owns, deciding nothing — `Lock.recorded` decides).
 
 Above the six, two files at `src/eliot/build/` are the tool itself: **`Launcher`** — the one `main`,
 the run boundary, the one place writing `with gitPackages with shellGit with shellAssets` and the
 `provide` that tells
-the source where mirrors live, and where the six failure channels are discharged separately, each
+the source where mirrors live, and where the eight failure channels are discharged separately, each
 reporting as itself and every one of them registering a non-zero exit code — and **`Command`**, the
 half that is about text rather than about running
 (the package a command line names, how the compiler is spelled, the usage), split out
@@ -99,7 +113,12 @@ LSP runs it through `./eliotw`, so it reaches an editor once a launcher release 
 Anything else — a second word, no word, or another word starting `-` — is the usage and exit
 1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
 with that list after the error (the descriptor is read before the command line is looked at, so a
-missing or malformed one is reported first, followed by the bare usage). The lockfile is the step after this.
+missing or malformed one is reported first, followed by the bare usage). **Every build checks and
+records `eliot.lock`** between working out what to run and checking anything out: a selected tag naming
+another commit than the one on record, or an asset hashing to another digest, refuses the build (exit 1,
+the lock untouched — trust on first use, and the remedy is deleting the line); otherwise the built
+package's section is written, and the file only when what it says changed. Commit it; CI fails a push
+whose builds had to change it (`docs/build-system.md`, "Lockfile").
 
 Neither `Git`, `Assets` nor `PackageSource` has a default: the run boundary in `Launcher` writes
 `with gitPackages with shellGit with shellAssets` once (and `with cachedPackages with shellGit` for the
@@ -119,7 +138,7 @@ doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15, §16, §17 and §18 of it first**, and read them
+`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15, §16, §17, §18 and §19 of it first**, and read them
 before touching `Git`, `Assets`, `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
@@ -128,7 +147,8 @@ came from and what was deliberately left whole; §16 is what the packages under 
 `eliotw` is allowed to know, and two findings recorded rather than fixed. §17 is the verb that
 compiles: the sixth package, the toolchain read off a closure, and the three compiler workarounds the
 build verb cost — one of which is why §16's "a failed build exits 0" is now closed. §18 is the
-`compiler` line: `Toolchain` replaced by `Invocation`, and one more §11.3 collision.
+`compiler` line: `Toolchain` replaced by `Invocation`, and one more §11.3 collision. §19 is the lockfile:
+three modules, one question added to each of `PackageSource` and `Assets`, and two more launcher channels.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
@@ -174,7 +194,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 267 green
+./bootstrap test                                             # compiles and runs the suite, 305 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -208,7 +228,7 @@ compiler refuses the flag, and until eliot `985b0b66` it then exited 0, making t
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 267 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 305 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -318,7 +338,7 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `docs/effectful-modules.md` §14).
 
 What that means for a change: **do not read a green suite as evidence the tool runs** — the suite and the
-launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Invocation` or
+launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Invocation`, `Locking` or
 the boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the
 rest.

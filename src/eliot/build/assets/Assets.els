@@ -2,6 +2,7 @@ import eliot.collection.List
 import eliot.file.Path
 import eliot.build.model.PackageId
 import eliot.build.model.Version
+import eliot.build.model.Lock
 import eliot.build.git.Git
 
 /**
@@ -11,7 +12,7 @@ import eliot.build.git.Git
  * which version of them; a package that ships a compiler plugin also publishes a *binary* of it as a
  * release asset of that same repository at that same tag, and a build that is going to run the
  * compiler has to have the binary on disk. So the vocabulary is one triple — repository, version,
- * asset name — and the effect is one question asked of it.
+ * asset name — and the effect is two questions asked of it: where it is, and what it hashed to.
  *
  * **There is no coordinate, and that is the design.** The location of an asset is derived from facts
  * the consumer already holds: it has chosen a repository and a version, and the descriptor at that
@@ -61,8 +62,8 @@ implement Eq[Asset] {
 }
 
 /**
- * Where a build's binaries come from: one question, asked of an asset the consumer has already
- * identified.
+ * Where a build's binaries come from: two questions, asked of an asset the consumer has already
+ * identified — where its contents are, and what the archive they came out of hashed to.
  *
  * Declared as an effect for the reason `eliot.build.resolve.PackageSource` is one — what answers it is
  * the run boundary's business, and a test binds a table instead of a network. The member declares no
@@ -78,6 +79,16 @@ effect Assets {
     * or the implementation refuses through a channel of its own.
     */
    def assetTree(asset: Asset): Path
+
+   /**
+    * The SHA-256 of the archive `asset` was published as — what `eliot.lock` records on the first fetch
+    * and checks on every one after, since no hash of an asset can live in the commit its tag names.
+    *
+    * Of the *archive*, not of what it unpacked into: the archive is what the publisher released and
+    * what the release notes print a sha256 of, so the digest a lockfile holds is one a person can check
+    * by hand against the release page.
+    */
+   def assetDigest(asset: Asset): Digest
 }
 
 /**

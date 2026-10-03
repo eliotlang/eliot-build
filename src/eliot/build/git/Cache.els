@@ -117,6 +117,16 @@ def anchorOf(root: Path, line: Line, repository: Repository): Cached[Option[Comm
    anchorCommit(line, publishedTags(root, repository))
 
 /**
+ * The commit `repository`'s tag for `version` names — what a lockfile records and checks — or nothing
+ * where the mirror holds no such tag.
+ *
+ * Read from the mirror's tags, which by the time a lockfile asks are as new as the descriptor the
+ * resolver read at the same version: that read fetched if the tag was missing.
+ */
+def releaseCommitOf(root: Path, version: Version, repository: Repository): Cached[Option[Commit]] =
+   commitOf(version, publishedTags(root, repository))
+
+/**
  * What `repository`'s descriptor said at `version`, or nothing where the version publishes none.
  *
  * Absence is an ordinary answer here rather than a failure, and both ways of being absent give it: a
@@ -168,6 +178,12 @@ def sourceTreeAt(root: Path, version: Version, repository: Repository): Cached[P
  */
 def cachedAnchorOf(root: Path, line: Line, repository: Repository): Offline[Option[Commit]] =
    anchorCommit(line, existingMirror(root, repository).tags)
+
+/**
+ * `releaseCommitOf`, answered from disk alone: a repository with no mirror yet is `NotFetched`.
+ */
+def cachedReleaseCommitOf(root: Path, version: Version, repository: Repository): Offline[Option[Commit]] =
+   commitOf(version, existingMirror(root, repository).tags)
 
 /**
  * `descriptorTextAt`, answered from disk alone: a version the mirror does not hold is `NotFetched`,

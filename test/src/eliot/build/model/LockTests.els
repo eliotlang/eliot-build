@@ -1,0 +1,132 @@
+import eliot.collection.List
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.model.Lock
+import eliot.build.format.LockFile
+
+/**
+ * What a build records in `eliot.lock`, and what it refuses: a section per package, rewritten whole by
+ * that package's build, and a fact that contradicts one already on record — in any section — stopping
+ * the build instead of overwriting it.
+ *
+ * Asserted on the rendered file rather than on the model, which has no `Eq`, so a case says what the
+ * user would see in a diff.
+ */
+def testCases: Test = {
+   "recorded" should "write a first build's section into a lockfile that has none" in {
+      recordedText(testSection(singleton(eliotAt("aaa1"))), testAndLauncher, emptyLockfile)
+         shouldBe (header ++ "\npackage test {\n" ++ eliotLine("aaa1") ++ "\n}\n")
+   }
+   "recorded" should "replace the section of the package just built, whole" in {
+      recordedText(testSection(singleton(eliotAt("aaa1"))), testAndLauncher, lockfileOf(singleton(testSection(both))))
+         shouldBe (header ++ "\npackage test {\n" ++ eliotLine("aaa1") ++ "\n}\n")
+   }
+   "recorded" should "leave every other package's section as it was" in {
+      recordedText(testSection(singleton(eliotAt("aaa1"))), testAndLauncher, lockfileOf(singleton(launcherSection)))
+         shouldBe expectedBothSections
+   }
+   "recorded" should "write the sections in the order the descriptor declares the packages" in {
+      recordedText(testSection(singleton(eliotAt("aaa1"))), launcherAndTest, lockfileOf(singleton(launcherSection)))
+         shouldBe expectedBothSectionsLauncherFirst
+   }
+   "recorded" should "drop the section of a package the descriptor no longer declares" in {
+      recordedText(testSection(singleton(eliotAt("aaa1"))), singleton(PackageName("test")), lockfileOf(singleton(launcherSection)))
+         shouldBe (header ++ "\npackage test {\n" ++ eliotLine("aaa1") ++ "\n}\n")
+   }
+   "recorded" should "write no section for a closure that reaches no repository" in {
+      recordedText(testSection(empty), testAndLauncher, emptyLockfile) shouldBe header
+   }
+   "recorded" should "accept facts that agree with the ones on record" in {
+      recordedText(testSection(both), testAndLauncher, lockfileOf(singleton(testSection(both))))
+         shouldBe recordedText(testSection(both), testAndLauncher, emptyLockfile)
+   }
+   "recorded" should "accept a raised minimum, which is another tag rather than a moved one" in {
+      recordedText(testSection(singleton(eliotAtVersion(Version(Line(1), Some(3)), "ddd4"))), testAndLauncher, lockfileOf(singleton(testSection(both))))
+         shouldBe (header ++ "\npackage test {\n  version github.com/e/eliot v1.3 ddd4\n}\n")
+   }
+   "recorded" should "refuse a tag that names another commit than the one on record" in {
+      recordedText(testSection(singleton(eliotAt("eee5"))), testAndLauncher, lockfileOf(singleton(testSection(both))))
+         shouldBe movedTag("v1.2", "aaa1", "eee5")
+   }
+   "recorded" should "refuse it when the commit on record is another package's" in {
+      recordedText(testSection(singleton(eliotAt("eee5"))), testAndLauncher, lockfileOf(singleton(launcherSection)))
+         shouldBe movedTag("v1.2", "aaa1", "eee5")
+   }
+   "recorded" should "read two spellings of one tag as one tag" in {
+      recordedText(
+         testSection(singleton(eliotAtVersion(Version(Line(1), Some(0)), "eee5"))),
+         testAndLauncher,
+         lockfileOf(singleton(testSection(singleton(eliotAtVersion(Version(Line(1), None), "aaa1")))))
+      ) shouldBe movedTag("v1.0", "aaa1", "eee5")
+   }
+   "recorded" should "refuse an asset whose digest is not the one on record" in {
+      recordedText(
+         LockedPackage(PackageName("test"), empty, singleton(jvmAssetAt("f00d"))),
+         testAndLauncher,
+         lockfileOf(singleton(launcherSection))
+      ) shouldBe expectedChangedAsset
+   }
+}
+
+/**
+ * The lockfile `recorded` answers, rendered — or the conflict it raised, so both outcomes are asserted
+ * the same way.
+ */
+private def recordedText(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfile): String =
+   foldEither(
+      conflict -> show(conflict),
+      locked -> renderLockFile(locked),
+      runThrow[LockConflict](recorded(entry, declared, lockfile))
+   )
+
+private def lockfileOf(sections: List[LockedPackage]): Lockfile = Lockfile(sections)
+
+private def testSection(versions: List[LockedVersion]): LockedPackage = LockedPackage(PackageName("test"), versions, empty)
+
+/**
+ * The launcher's build, which locked the same eliot tag at the same commit and fetched one asset.
+ */
+private def launcherSection: LockedPackage =
+   LockedPackage(PackageName("launcher"), singleton(eliotAt("aaa1")), singleton(jvmAssetAt("beef")))
+
+private def both: List[LockedVersion] =
+   append(singleton(eliotAt("aaa1")), LockedVersion(Repository("github.com/e/eliot-test"), Version(Line(1), Some(0)), Commit("bbb2")))
+
+private def eliotAt(hash: String): LockedVersion = eliotAtVersion(Version(Line(1), Some(2)), hash)
+
+private def eliotAtVersion(version: Version, hash: String): LockedVersion =
+   LockedVersion(Repository("github.com/e/eliot"), version, Commit(hash))
+
+private def jvmAssetAt(hex: String): LockedAsset =
+   LockedAsset(Repository("github.com/e/eliot"), Version(Line(1), Some(2)), "eliot-jvm.zip", Digest(hex))
+
+private def testAndLauncher: List[PackageName] = append(singleton(PackageName("test")), PackageName("launcher"))
+
+private def launcherAndTest: List[PackageName] = append(singleton(PackageName("launcher")), PackageName("test"))
+
+private def eliotLine(hash: String): String = "  version github.com/e/eliot v1.2 " ++ hash
+
+private def launcherText: String =
+   "\npackage launcher {\n" ++ eliotLine("aaa1") ++ "\n  asset github.com/e/eliot v1.2 eliot-jvm.zip beef\n}"
+
+private def expectedBothSections: String =
+   header ++ "\npackage test {\n" ++ eliotLine("aaa1") ++ "\n}\n" ++ launcherText ++ "\n"
+
+private def expectedBothSectionsLauncherFirst: String =
+   header ++ launcherText ++ "\n\npackage test {\n" ++ eliotLine("aaa1") ++ "\n}\n"
+
+private def expectedChangedAsset: String =
+   "github.com/e/eliot@v1.2/eliot-jvm.zip is locked at sha256 beef but what was fetched hashes to f00d; " ++
+      "a published asset is never replaced; if the change is trusted, delete the line from eliot.lock and build again"
+
+private def movedTag(tag: String, recordedHash: String, nowHash: String): String =
+   "github.com/e/eliot " ++ tag ++ " is locked at commit " ++ recordedHash ++ " but the tag now names " ++
+      nowHash ++ "; a published tag never moves; if the change is trusted, delete the line from eliot.lock and build again"
+
+/**
+ * What every rendered lockfile starts with — the empty lockfile is exactly this.
+ */
+private def header: String = renderLockFile(emptyLockfile)

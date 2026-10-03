@@ -44,3 +44,14 @@ jobs:
         run: |
           rm -f target/Runner.jar
           java -jar out/Launcher.jar test
+
+      # Every build above checked what it fetched against `eliot.lock` and recorded what it found there.
+      # A lockfile the builds had to change is one a push forgot to commit — a raised `dep` line whose
+      # facts nobody recorded — so it fails here rather than being rewritten silently on every runner.
+      - name: The committed lockfile is what the builds recorded
+        run: |
+          if [ -n "$(git status --porcelain eliot.lock)" ]; then
+             git diff eliot.lock
+             echo "::error::eliot.lock is not what the builds recorded; build locally and commit it"
+             exit 1
+          fi

@@ -1,0 +1,145 @@
+import eliot.collection.List
+import eliot.build.format.Clause
+import eliot.build.format.ClauseReader
+import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.model.Lock
+
+/**
+ * The `eliot.lock` file: the one file the tool writes, in the clause syntax `eliot.pkg` is read in.
+ *
+ * ```
+ * package test {
+ *   version github.com/robertbraeutigam/eliot v0.6 8a9f94f87d45f39289b70ce1b2de6eaae66d2491
+ *   asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip 3b1f…
+ * }
+ * ```
+ *
+ * A block per package that has been built, and in it one line per fact: `version <url> <tag> <commit>`
+ * for each selected version, `asset <url> <tag> <asset> <sha256>` for each fetched asset. The lines are
+ * flat and complete — every line names its repository and tag in full — so a diff of the file reads as a
+ * list of facts that changed, and `grep` answers "which commit is this build on" without a parser.
+ *
+ * **Tool-owned, committed, never edited**, and read as strictly as the descriptor: an unknown keyword is
+ * fatal for the same reason, since a lock written by a newer launcher may record a fact this one would
+ * silently stop checking. What is not here is anything a reader could want to change — no comments are
+ * kept and none are needed, because the file is rewritten whole and the header says where it came from.
+ *
+ * The two error channels meet the way they meet in `eliot.build.format.PackageFile`, into one type of
+ * this file's own: a malformed lock is reported as the lock's, never as the descriptor's.
+ */
+
+/**
+ * Why `eliot.lock` could not be read: it is not a clause file, or it is one that says something this
+ * launcher does not understand.
+ */
+data LockFileError = MalformedLock(lockSyntax: ClauseError) | UnreadableLock(lockProblem: ClauseProblem)
+
+implement Show[LockFileError] {
+   def show(value: LockFileError): String = value match {
+      case MalformedLock(syntax) -> show(syntax)
+      case UnreadableLock(problem) -> show(problem)
+   }
+}
+
+/**
+ * The lockfile's name, beside `eliot.pkg` at the root of the repository it locks.
+ */
+def lockFileName: String = "eliot.lock"
+
+/**
+ * The lockfile `lines` spell.
+ *
+ * ```eliot
+ * val previous = parseLockFile(readLines(here / lockFileName))
+ * ```
+ */
+def parseLockFile(lines: List[String]): {Throw[LockFileError]} Lockfile =
+   foldEither(
+      error -> raise(MalformedLock(error)),
+      clauses -> interpretedLock(clauses),
+      runThrow[ClauseError](parseClauses(lines))
+   )
+
+/**
+ * `lockfile` written out, header first and a block per package. The empty lockfile is the header alone,
+ * which is never written: a project whose builds reach no repository has no lockfile.
+ */
+def renderLockFile(lockfile: Lockfile): String =
+   (header ++ lockfile.lockedPackages.map(renderSection)).joined("\n") ++ "\n"
+
+private def header: List[String] =
+   singleton("-- Written by eliot: the commit every selected tag named and the digest of every fetched asset.") ++
+      singleton("-- Commit it, and do not edit it; a build refuses to go on when what it fetches disagrees.")
+
+private def renderSection(section: LockedPackage): String =
+   "\npackage " ++ show(section.lockedPackageName) ++ " {\n" ++
+      (section.lockedVersions.map(renderVersion) ++ section.lockedAssets.map(renderAsset)).joined("\n") ++
+      "\n}"
+
+private def renderVersion(locked: LockedVersion): String =
+   "  version " ++ show(locked.lockedRepository) ++ " " ++ show(locked.lockedVersion) ++ " " ++
+      show(locked.lockedCommit)
+
+private def renderAsset(locked: LockedAsset): String =
+   "  asset " ++ show(locked.lockedAssetRepository) ++ " " ++ show(locked.lockedAssetVersion) ++ " " ++
+      locked.lockedAssetName ++ " " ++ show(locked.lockedDigest)
+
+private def interpretedLock(clauses: List[Clause]): {Throw[LockFileError]} Lockfile =
+   foldEither(
+      problem -> raise(UnreadableLock(problem)),
+      lockfile -> lockfile,
+      runThrow[ClauseProblem](lockOf(clauses))
+   )
+
+private def lockOf(clauses: List[Clause]): {Throw[ClauseProblem]} Lockfile = {
+   knownClauses(singleton("package"), clauses)
+
+   Lockfile(clauses.map(sectionOf))
+}
+
+private def sectionOf(clause: Clause): {Throw[ClauseProblem]} LockedPackage = {
+   val name = required(0, "a locked package needs its name", clause)
+
+   atMostArguments(1, clause)
+   knownChildren(append(singleton("version"), "asset"), clause)
+   LockedPackage(
+      PackageName(name),
+      clause.childrenNamed("version").map(versionLine),
+      clause.childrenNamed("asset").map(assetLine)
+   )
+}
+
+/**
+ * `version <url> <tag> <commit>`.
+ */
+private def versionLine(clause: Clause): {Throw[ClauseProblem]} LockedVersion = {
+   val url = required(0, "a locked version needs its repository", clause)
+   val tag = required(1, "a locked version needs its tag", clause)
+   val commit = required(2, "a locked version needs the commit its tag named", clause)
+
+   atMostArguments(3, clause)
+   knownChildren(empty, clause)
+   LockedVersion(Repository(url), lockedTag(tag, clause), Commit(commit))
+}
+
+/**
+ * `asset <url> <tag> <asset> <sha256>`.
+ */
+private def assetLine(clause: Clause): {Throw[ClauseProblem]} LockedAsset = {
+   val url = required(0, "a locked asset needs its repository", clause)
+   val tag = required(1, "a locked asset needs its tag", clause)
+   val asset = required(2, "a locked asset needs its name", clause)
+   val digest = required(3, "a locked asset needs the digest it was fetched at", clause)
+
+   atMostArguments(4, clause)
+   knownChildren(empty, clause)
+   LockedAsset(Repository(url), lockedTag(tag, clause), asset, Digest(digest))
+}
+
+private def lockedTag(tag: String, clause: Clause): {Throw[ClauseProblem]} Version = {
+   val parsed: Option[Version] = runAbort(parseVersion(tag))
+
+   foldOption(raise(problemIn("a locked tag must be a version like 'v1.3'", clause)), version -> version, parsed)
+}

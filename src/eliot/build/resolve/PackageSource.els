@@ -14,8 +14,10 @@ import eliot.build.model.Lineage
  * URL a package I already have* — and notably not a third about *versions*: MVS never enumerates what
  * a package offers, so discovering that a newer release exists belongs to `eliot get` rather than
  * here. Assembly asks the one question that is not about the graph at all: *where are this version's
- * sources*, which is what turns a resolution into something a compiler can be pointed at. Three
- * members, and a caller declares `{PackageSource}` whether it wants the graph or the files.
+ * sources*, which is what turns a resolution into something a compiler can be pointed at. The lockfile
+ * asks the fourth: *which commit does this version's tag name*, the fact a tag cannot promise about
+ * itself. Four members, and a caller declares `{PackageSource}` whether it wants the graph, the files or
+ * the facts.
  *
  * This used to be a pair of callbacks threaded through every private function of
  * `eliot.build.resolve.Resolution`. Declaring it as an effect is what removed the plumbing: the algorithm
@@ -39,6 +41,15 @@ effect PackageSource {
     * The commit `target`'s `line` starts at, absent where that line has no first release.
     */
    def anchorAt(line: Line, target: Repository): Option[Commit]
+
+   /**
+    * The commit `target`'s tag for `version` names, absent where it publishes no such version.
+    *
+    * The question a lockfile asks once resolution is done: not which version — that is MVS's, and the
+    * same everywhere — but what the tag a build selected is *pointing at* today, which a tag, being a
+    * ref, cannot promise about itself.
+    */
+   def commitAt(version: Version, target: Repository): Option[Commit]
 
    /**
     * Where `target`'s sources at `version` are, as a directory that exists: the question assembly

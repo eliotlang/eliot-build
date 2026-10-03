@@ -110,4 +110,4 @@ private def problemUnless(condition: Bool, problem: String): Option[String] =
  * exactly how the format is allowed to grow without a version field.
  */
 private def unknownReason(clause: Clause): String =
-   "unknown clause '" ++ clause.keyword ++ "'; this descriptor may need a newer eliot"
+   "unknown clause '" ++ clause.keyword ++ "'; this file may need a newer eliot"

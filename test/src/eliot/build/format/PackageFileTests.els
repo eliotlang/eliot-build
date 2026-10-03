@@ -127,7 +127,7 @@ def testCases: Test = {
    }
    "parseDescriptor" should "refuse a launcher pin inside a package, where it pins nothing" in {
       parsed("package root {\n  launcher v0.2\n}")
-         shouldBe "unknown clause 'launcher'; this descriptor may need a newer eliot in 'launcher v0.2'"
+         shouldBe "unknown clause 'launcher'; this file may need a newer eliot in 'launcher v0.2'"
    }
    "parseDescriptor" should "refuse a dep outside a package block, naming the block it belongs in" in {
       parsed("dep github.com/x/foo//root v1") shouldBe belongsInside("dep", "dep github.com/x/foo//root v1")
@@ -140,35 +140,35 @@ def testCases: Test = {
    }
    "parseDescriptor" should "refuse a retired 'main', which a compiler line says whole now" in {
       parsed("package launcher {\n  main Hello\n}")
-         shouldBe "unknown clause 'main'; this descriptor may need a newer eliot in 'main Hello'"
+         shouldBe "unknown clause 'main'; this file may need a newer eliot in 'main Hello'"
    }
    "parseDescriptor" should "refuse a retired 'plugin', which is an asset now" in {
       parsed("package jvm {\n  plugin eliot-jvm.zip {\n    backend jvm\n  }\n}")
-         shouldBe ("unknown clause 'plugin'; this descriptor may need a newer eliot in " ++
+         shouldBe ("unknown clause 'plugin'; this file may need a newer eliot in " ++
             "'plugin eliot-jvm.zip {\n  backend jvm\n}'")
    }
    "parseDescriptor" should "refuse a retired 'module' block in a descriptor written today" in {
       parsed("module lang {\n  dep //stdlib\n}")
-         shouldBe "unknown clause 'module'; this descriptor may need a newer eliot in 'module lang {\n  dep //stdlib\n}'"
+         shouldBe "unknown clause 'module'; this file may need a newer eliot in 'module lang {\n  dep //stdlib\n}'"
    }
    "parseDescriptor" should "refuse a retired 'test' block, which is a package like any other now" in {
       parsed("test {\n  dep //root\n}")
-         shouldBe "unknown clause 'test'; this descriptor may need a newer eliot in 'test {\n  dep //root\n}'"
+         shouldBe "unknown clause 'test'; this file may need a newer eliot in 'test {\n  dep //root\n}'"
    }
    "parseDescriptor" should "refuse a 'test' clause inside a package, which nothing would read" in {
       parsed("package root {\n  test\n}")
-         shouldBe "unknown clause 'test'; this descriptor may need a newer eliot in 'test'"
+         shouldBe "unknown clause 'test'; this file may need a newer eliot in 'test'"
    }
    "parseDescriptor" should "give no name a meaning: a package at the root may be called anything" in {
       roundTrip("package core {\n  at .\n  dep github.com/x/foo//core v1\n}")
    }
    "parseDescriptor" should "reject an unknown top-level clause, pointing at the upgrade" in {
       parsed("registry https://example.com")
-         shouldBe "unknown clause 'registry'; this descriptor may need a newer eliot in 'registry https://example.com'"
+         shouldBe "unknown clause 'registry'; this file may need a newer eliot in 'registry https://example.com'"
    }
    "parseDescriptor" should "reject an unknown clause inside a package" in {
       parsed("package lang {\n   exports everything\n}")
-         shouldBe "unknown clause 'exports'; this descriptor may need a newer eliot in 'exports everything'"
+         shouldBe "unknown clause 'exports'; this file may need a newer eliot in 'exports everything'"
    }
    "parseDescriptor" should "reject a dependency URL carrying a scheme" in {
       parsed(inRoot("dep https://github.com/x/foo v1"))
@@ -226,12 +226,12 @@ def testCases: Test = {
    }
    "parseDescriptor" should "reject anything under an asset, which says nothing about what it is" in {
       parsed("package lang {\n  asset eliot-lang.zip {\n    jar c:d:2 sha256 9f2ca9b1\n  }\n}")
-         shouldBe ("unknown clause 'jar'; this descriptor may need a newer eliot in " ++
+         shouldBe ("unknown clause 'jar'; this file may need a newer eliot in " ++
             "'jar c:d:2 sha256 9f2ca9b1'")
    }
    "parseDescriptor" should "reject a replacement, which the resolver has no way to honour" in {
       parsed("replace github.com/x/foo with ../foo-local")
-         shouldBe ("unknown clause 'replace'; this descriptor may need a newer eliot in " ++
+         shouldBe ("unknown clause 'replace'; this file may need a newer eliot in " ++
             "'replace github.com/x/foo with ../foo-local'")
    }
    "parseDescriptor" should "report a syntax error as such" in {
