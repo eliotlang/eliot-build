@@ -39,13 +39,6 @@ import eliot.build.model.PackageId
  * is *not* refused here is a package no descriptor declares: that is a fact about a descriptor this
  * function has not seen, and `unknownPackage` is what the launcher answers once it has read one.
  *
- * Written with `fold` rather than `if..else`, and the reason is a compiler finding rather than a
- * preference: a complete `if..else` discharges an `Abort`, and `runAbort[Option[PackageName]]` erases
- * to the same JVM descriptor as the `runAbort[Option[String]]` that `eliot.system.Environment` needs to
- * read a variable. Two instantiations, one emitted native (`docs/effectful-modules.md` §11.3) — and what
- * died was reading `ELIOT_JAVA`, in a module that never mentions one. `fold` introduces no `Abort`, so
- * there is nothing to collide. Undo this once the compiler emits both.
- *
  * ```eliot
  * val name = requested(singleton("controller-jvm"))
  * ```
@@ -53,7 +46,7 @@ import eliot.build.model.PackageId
 def requested(commandLine: List[String]): Option[PackageName] = {
    val named = at(0, commandLine) orElse ""
 
-   fold(size(commandLine) == 1 && named != "" && !startsWith("-", named), Some(PackageName(named)), None)
+   someIf(size(commandLine) == 1 && named != "" && !startsWith("-", named)) PackageName(named)
 }
 
 /**
@@ -178,7 +171,7 @@ def usage(declared: Option[List[PackageName]]): List[String] =
       singleton("   runs every compiler line in the package's closure over the package's sources") ++
       singleton("usage: eliot " ++ projectModelOption) ++
       singleton("   prints what every package resolves to, as JSON, from what is already fetched") ++
-      foldOption(empty, listed, declared)
+      (declared.mapOption(listed) orElse empty)
 
 /**
  * A command line naming a package the descriptor does not declare: that, and then the usage listing
@@ -197,8 +190,5 @@ def unknownPackage(name: PackageName, declared: List[PackageName]): List[String]
  * saying there are none.
  */
 private def listed(declared: List[PackageName]): List[String] =
-   fold(
-      isEmpty(declared),
-      singleton(descriptorFileName ++ " declares no packages"),
-      singleton("packages in " ++ descriptorFileName ++ ":") ++ declared.map(name -> "   " ++ show(name))
-   )
+   if(isEmpty(declared)) singleton(descriptorFileName ++ " declares no packages")
+   else singleton("packages in " ++ descriptorFileName ++ ":") ++ declared.map(name -> "   " ++ show(name))

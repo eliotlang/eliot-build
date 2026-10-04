@@ -123,17 +123,13 @@ def recorded(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfi
 private def remedy: String = "; if the change is trusted, delete the line from eliot.lock and build again"
 
 private def agreedVersion(fact: LockedVersion, lockfile: Lockfile): {Throw[LockConflict]} Unit =
-   foldOption(
-      unit,
-      locked -> raise(MovedTag(fact.lockedRepository, fact.lockedVersion, locked.lockedCommit, fact.lockedCommit)),
-      lockfile.lockedPackages.flatMap(lockedVersions).find(locked -> contradicts(locked, fact))
+   lockfile.lockedPackages.flatMap(lockedVersions).find(locked -> contradicts(locked, fact)).foreachOption(locked ->
+      raise(MovedTag(fact.lockedRepository, fact.lockedVersion, locked.lockedCommit, fact.lockedCommit))
    )
 
 private def agreedAsset(fact: LockedAsset, lockfile: Lockfile): {Throw[LockConflict]} Unit =
-   foldOption(
-      unit,
-      locked -> raise(ChangedAsset(fact, locked.lockedDigest)),
-      lockfile.lockedPackages.flatMap(lockedAssets).find(locked -> assetContradicts(locked, fact))
+   lockfile.lockedPackages.flatMap(lockedAssets).find(locked -> assetContradicts(locked, fact)).foreachOption(locked ->
+      raise(ChangedAsset(fact, locked.lockedDigest))
    )
 
 /**
@@ -154,11 +150,10 @@ private def assetContradicts(locked: LockedAsset, fact: LockedAsset): Bool =
  * record for every other.
  */
 private def sectionFor(name: PackageName, entry: LockedPackage, lockfile: Lockfile): List[LockedPackage] =
-   fold(
-      name == entry.lockedPackageName,
-      fold(isEmptySection(entry), empty, singleton(entry)),
+   if(name != entry.lockedPackageName) {
       lockfile.lockedPackages.filter(section -> section.lockedPackageName == name)
-   )
+   } else if(isEmptySection(entry)) empty
+   else singleton(entry)
 
 private def isEmptySection(entry: LockedPackage): Bool =
    isEmpty(entry.lockedVersions) && isEmpty(entry.lockedAssets)

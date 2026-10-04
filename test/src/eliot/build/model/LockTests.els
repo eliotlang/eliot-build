@@ -76,11 +76,7 @@ def testCases: Test = {
  * the same way.
  */
 private def recordedText(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfile): String =
-   foldEither(
-      conflict -> show(conflict),
-      locked -> renderLockFile(locked),
-      runThrow[LockConflict](recorded(entry, declared, lockfile))
-   )
+   catch[LockConflict, String](renderLockFile(recorded(entry, declared, lockfile)), conflict -> show(conflict))
 
 private def lockfileOf(sections: List[LockedPackage]): Lockfile = Lockfile(sections)
 

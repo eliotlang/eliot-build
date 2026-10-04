@@ -69,27 +69,20 @@ def testCases: Test = {
  * are written the same way as the successful ones.
  */
 private def parsed(text: String): String =
-   runThrow[ClauseError](parseClauses(split("\n", text)))
-      .foldEither(error -> show(error), clauses -> clauses.map(render).joined("\n"))
+   catch[ClauseError, String](parseClauses(split("\n", text)).map(render).joined("\n"), error -> show(error))
 
-private def firstClause(text: String): Option[Clause] =
-   foldEither(_ -> None, clauses -> clauses.head, clausesOf(text))
-
-private def clausesOf(text: String): Either[ClauseError, List[Clause]] =
-   runThrow[ClauseError](parseClauses(split("\n", text)))
+private def firstClause(text: String): Option[Clause] = (parseClauses(split("\n", text)) catch (_ -> empty)).head
 
 /**
  * The `index`-th argument of `text`'s first clause. The `{Abort}` discharge sits in its own
- * definition rather than inside the `foldOption` arm, which the carrier model could not reconcile.
- * Under effects v6 the arm would discharge locally and this could be inlined; it stays split because
- * a named discharge says what `"<absent>"` means.
+ * definition because a named discharge says what `"<absent>"` means.
  */
 private def argumentOf(index: Int, text: String): String =
-   foldOption("<none>", clause -> argumentText(index, clause), firstClause(text))
+   firstClause(text).mapOption(clause -> argumentText(index, clause)) orElse "<none>"
 
 private def argumentText(index: Int, clause: Clause): String = argument(index, clause) else "<absent>"
 
 private def depNames(text: String): String =
-   foldOption("<none>", clause -> clause.childrenNamed("dep").map(firstArgument).joined(","), firstClause(text))
+   firstClause(text).mapOption(clause -> clause.childrenNamed("dep").map(firstArgument).joined(",")) orElse "<none>"
 
 private def firstArgument(clause: Clause): String = argument(0, clause) else "?"

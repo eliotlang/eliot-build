@@ -60,7 +60,7 @@ def testCases: Test = {
  */
 private def canonical(text: String): String = show(packageId(text)) else "<no package>"
 
-private def same(a: String, b: String): String = fold(idOf(a) == idOf(b), "same", "different")
+private def same(a: String, b: String): String = if(idOf(a) == idOf(b)) "same" else "different"
 
 private def kindOfReference(text: String): String = idOf(text) match {
    case Sibling(_) -> "sibling"

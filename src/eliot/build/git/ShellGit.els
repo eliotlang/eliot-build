@@ -57,7 +57,7 @@ implement shellGit: Git {
          mirror.mirrorDirectory
       )
 
-      fold(shown.exitCode == 0, Some(shown.standardOutput), None)
+      someIf(shown.exitCode == 0, shown.standardOutput)
    }
 
    /**
@@ -106,14 +106,7 @@ private def lsRemoteTags(target: String): List[String] =
  */
 private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[IoError], Throw[GitError]} String = {
    val result = run(arguments, workingDirectory)
-   val failure = failureOf(arguments, result)
 
-   foldOption(result.standardOutput, error -> raise(error), failure)
+   unless(result.exitCode == 0) raise(GitError(arguments.joined(" "), result.exitCode, result.standardError))
+   result.standardOutput
 }
-
-private def failureOf(arguments: List[String], result: ProcessResult): Option[GitError] =
-   fold(
-      result.exitCode == 0,
-      None,
-      Some(GitError(arguments.joined(" "), result.exitCode, result.standardError))
-   )

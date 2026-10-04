@@ -61,23 +61,18 @@ private def siblingDependencyOf(
    name: PackageName,
    version: Option[Version],
    clause: Clause
-): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      SiblingDependency(name),
-      _ -> raise(problemIn("a sibling package versions with its repository and carries no version", clause)),
-      version
-   )
+): {Throw[ClauseProblem]} Dependency = {
+   when(isSome(version)) raise(problemIn("a sibling package versions with its repository and carries no version", clause))
+
+   SiblingDependency(name)
+}
 
 private def requirementOf(
    package: Package,
    version: Option[Version],
    clause: Clause
 ): {Throw[ClauseProblem]} Dependency =
-   foldOption(
-      raise(problemIn("a foreign dependency needs a minimum version", clause)),
-      minimum -> Requirement(package, minimum),
-      version
-   )
+   Requirement(package, version orElse raise(problemIn("a foreign dependency needs a minimum version", clause)))
 
 /**
  * Every version token is a git tag, spelled as the tag is: there is no `>=` to write and no range to
@@ -86,13 +81,10 @@ private def requirementOf(
  * resolution needs and what the string never was.
  */
 private def versionOf(token: Option[String], clause: Clause): {Throw[ClauseProblem]} Option[Version] =
-   foldOption(None, tag -> Some(checkedVersion(tag, clause)), token)
+   token.mapOption(tag -> checkedVersion(tag, clause))
 
-private def checkedVersion(tag: String, clause: Clause): {Throw[ClauseProblem]} Version = {
-   val parsed: Option[Version] = runAbort(parseVersion(tag))
-
-   foldOption(raise(problemIn("a version must be a tag like 'v1.3'", clause)), version -> version, parsed)
-}
+private def checkedVersion(tag: String, clause: Clause): {Throw[ClauseProblem]} Version =
+   parseVersion(tag) else raise(problemIn("a version must be a tag like 'v1.3'", clause))
 
 private def checkSchemeless(target: String, clause: Clause): {Throw[ClauseProblem]} Unit =
    requireThat(!contains("://", target), "a dependency URL carries no scheme", clause)

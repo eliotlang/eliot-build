@@ -62,11 +62,7 @@ def testCases: Test = {
  * asserted the same way.
  */
 private def parsed(text: String): String =
-   foldEither(
-      error -> show(error),
-      lockfile -> renderLockFile(lockfile),
-      runThrow[LockFileError](parseLockFile(split("\n", text)))
-   )
+   catch[LockFileError, String](renderLockFile(parseLockFile(split("\n", text))), error -> show(error))
 
 private def sample: LockedPackage =
    LockedPackage(

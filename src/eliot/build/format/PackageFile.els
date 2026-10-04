@@ -78,22 +78,14 @@ def descriptorFileName: String = "eliot.pkg"
  * ```
  */
 def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
-   foldEither(
-      error -> raise(Malformed(error)),
-      clauses -> interpreted(clauses),
-      runThrow[ClauseError](parseClauses(lines))
-   )
+   interpreted(parseClauses(lines) catch (error -> raise(Malformed(error))))
 
 /**
  * What `clauses` mean, with the reader's complaints answered as descriptor errors — the second of the
  * two channels the modules underneath raise on, and the only place either becomes a `DescriptorError`.
  */
 private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
-   foldEither(
-      problem -> raise(Unreadable(problem)),
-      descriptor -> descriptor,
-      runThrow[ClauseProblem](interpret(clauses))
-   )
+   interpret(clauses) catch (problem -> raise(Unreadable(problem)))
 
 /**
  * The descriptor `clauses` spell: every package the file declares a block for.
@@ -193,8 +185,9 @@ private def insideRepository(directory: String): Bool =
 private def compilerOf(clause: Clause): {Throw[ClauseProblem]} Option[List[String]] = {
    val lines = clause.childrenNamed("compiler")
 
-   foldOption(unit, second -> raise(problemIn(oneCompilerLine, second)), lines.at(1))
-   foldOption(None, line -> Some(compilerClause(line)), lines.head)
+   lines.at(1).foreachOption(second -> raise(problemIn(oneCompilerLine, second)))
+
+   lines.head.mapOption(compilerClause)
 }
 
 private def compilerClause(clause: Clause): {Throw[ClauseProblem]} List[String] = {

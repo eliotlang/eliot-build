@@ -87,5 +87,8 @@ def refusingWith(error: GitError): Mirrors = Mirrors(empty, empty, Some(error))
  * `answer`, unless the table says every operation is refused — the one decision the three raising
  * clauses share.
  */
-private def unlessRefused[A](answer: A): {Dep[Mirrors], Throw[GitError]} A =
-   foldOption(answer, error -> raise(error), dependency.refusal)
+private def unlessRefused[A](answer: A): {Dep[Mirrors], Throw[GitError]} A = {
+   dependency.refusal.foreachOption(error -> raise(error))
+
+   answer
+}

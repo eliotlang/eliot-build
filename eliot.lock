@@ -2,16 +2,16 @@
 -- Commit it, and do not edit it; a build refuses to go on when what it fetches disagrees.
 
 package launcher {
-  version github.com/robertbraeutigam/eliot v0.6 ab1a39739378eba5b3303f902de105361d9b8468
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-compiler.zip 02b90823f9abad7792be0702964cd3f2e55703d4b74926e71bfe190f51bc3bac
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-stdlib.zip 423f1635eabf1fd7fe7dc8ac78dc33dd94c3fd6873e215da7feee02c2444d68c
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip bb2990b1ee16b204fe066d9a80504b50022f66269a3ff0c79e94f9b613fd443f
+  version github.com/robertbraeutigam/eliot v0.7 141230fb0c3efbecb9df89547ecfaee5385a2ca1
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-compiler.zip dccf8808e1159ed07bd904068c31c954ea14c965d5330a2e25ca98edd08a8b06
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-stdlib.zip ddc3fe5c1c3681bac4533cca530b1fbf062bd08fdd1c918741c5cd255779587a
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-jvm.zip 4dd95639feabac673079d633e0a6fb2afa2ca0eb86ff35a62dc93d3aed88ceed
 }
 
 package test {
   version github.com/eliotlang/eliot-test v0.2 4b78ab15bf3adf48ee3eeb480cc7e7ee9fcd9eca
-  version github.com/robertbraeutigam/eliot v0.6 ab1a39739378eba5b3303f902de105361d9b8468
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-compiler.zip 02b90823f9abad7792be0702964cd3f2e55703d4b74926e71bfe190f51bc3bac
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-stdlib.zip 423f1635eabf1fd7fe7dc8ac78dc33dd94c3fd6873e215da7feee02c2444d68c
-  asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip bb2990b1ee16b204fe066d9a80504b50022f66269a3ff0c79e94f9b613fd443f
+  version github.com/robertbraeutigam/eliot v0.7 141230fb0c3efbecb9df89547ecfaee5385a2ca1
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-compiler.zip dccf8808e1159ed07bd904068c31c954ea14c965d5330a2e25ca98edd08a8b06
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-stdlib.zip ddc3fe5c1c3681bac4533cca530b1fbf062bd08fdd1c918741c5cd255779587a
+  asset github.com/robertbraeutigam/eliot v0.7 eliot-jvm.zip 4dd95639feabac673079d633e0a6fb2afa2ca0eb86ff35a62dc93d3aed88ceed
 }

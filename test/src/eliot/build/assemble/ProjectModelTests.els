@@ -73,16 +73,12 @@ private def expectedTwoPackages: String =
 
 /**
  * The model of `name`, on one line: its own root, the project's roots, the mounted ones and the
- * selections, each list joined. Rendered inside the `against`, for the reason `AssemblyTests` gives.
+ * selections, each list joined.
  */
 private def modelled(name: String, rootText: String, universe: List[Pair[String, String]]): String =
-   foldEither(
-      error -> show(error),
-      line -> line,
-      against(
-         universeOf(universe, empty),
-         describedModel(modelOf(PackageName(name), Project(path("/project"), descriptorOf(rootText))))
-      )
+   against(
+      universeOf(universe, empty),
+      describedModel(modelOf(PackageName(name), Project(path("/project"), descriptorOf(rootText))))
    )
 
 private def describedModel(model: PackageModel): String =

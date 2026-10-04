@@ -112,20 +112,15 @@ private def assetsFor(name: String, rootText: String): String =
    described(PackageName(name), rootText, shownAssets)
 
 /**
- * Rendered *inside* the `against`, as every resolving case in this project is and for the reason
- * `eliot.build.resolve.ResolutionTests` records: two `provide[Universe, _]` instantiations whose JVM
- * descriptors agree get one native between them.
- *
- * `InvocationError` is discharged in here too rather than travelling out, because `against` answers
- * the resolver's channel alone and a refusal here is a line a user reads, not a second `Either` for a
- * test to unfold.
+ * `InvocationError` is discharged in here rather than travelling out, because `against` answers the
+ * resolver's channel alone and a refusal here is a line a user reads, just as a resolution error is.
  */
 private def described(
    name: PackageName,
    rootText: String,
    rendering: Invocation => String
 ): String =
-   rendered(against(universe, catching(rendering, name, descriptorOf(rootText))))
+   against(universe, catching(rendering, name, descriptorOf(rootText)))
 
 private def catching(
    rendering: Invocation => String,
@@ -136,9 +131,6 @@ private def catching(
       rendering(invocationOf(name, descriptor, resolve(name, descriptor))),
       problem -> show(problem)
    )
-
-private def rendered(outcome: Either[ResolutionError, String]): String =
-   foldEither(error -> show(error), found -> found, outcome)
 
 private def shownLines(invocation: Invocation): String =
    invocation.invocationLines.map(line -> line.joined(" ")).joined(" | ")

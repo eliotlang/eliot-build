@@ -150,11 +150,7 @@ def releaseCommitOf(root: Path, version: Version, repository: Repository): Cache
  * genuinely cannot satisfy, paid only on the path that is about to fail anyway.
  */
 def descriptorTextAt(root: Path, version: Version, repository: Repository): Cached[Option[String]] =
-   foldOption(
-      refetched(root, version, repository),
-      text -> Some(text),
-      ensuredMirror(root, repository).fileAt(version, descriptorFileName)
-   )
+   ensuredMirror(root, repository).fileAt(version, descriptorFileName).foldOption(refetched(root, version, repository), some)
 
 /**
  * The sources of `repository` at `commit`, on disk: the directory a compiler can be pointed at.
@@ -173,9 +169,8 @@ def descriptorTextAt(root: Path, version: Version, repository: Repository): Cach
  */
 def sourceTreeAt(root: Path, commit: Commit, repository: Repository): Cached[Path] = {
    val directory = sourceDirectory(root, commit, repository)
-   val absent = missingDirectory(isDirectory(directory), directory)
 
-   foldOption(directory, missing -> checkedOut(root, missing, commit, repository), absent)
+   if(isDirectory(directory)) directory else checkedOut(root, directory, commit, repository)
 }
 
 /**
@@ -200,11 +195,7 @@ def cachedReleaseCommitOf(root: Path, version: Version, repository: Repository):
  * never absent, because only a fetch could say that the repository really publishes nothing there.
  */
 def cachedDescriptorTextAt(root: Path, version: Version, repository: Repository): Offline[Option[String]] =
-   foldOption(
-      raise(NotFetched(repository)),
-      text -> Some(text),
-      existingMirror(root, repository).fileAt(version, descriptorFileName)
-   )
+   some(existingMirror(root, repository).fileAt(version, descriptorFileName) orElse raise(NotFetched(repository)))
 
 /**
  * `sourceTreeAt`, from a mirror that is already here. Checking a tree out of one is local work, so it is
@@ -213,13 +204,9 @@ def cachedDescriptorTextAt(root: Path, version: Version, repository: Repository)
  */
 def cachedSourceTreeAt(root: Path, commit: Commit, repository: Repository): Offline[Path] = {
    val directory = sourceDirectory(root, commit, repository)
-   val absent = missingDirectory(isDirectory(directory), directory)
 
-   foldOption(
-      directory,
-      missing -> addWorktree(commit, missing, existingMirror(root, repository)).worktreeDirectory,
-      absent
-   )
+   if(isDirectory(directory)) directory
+   else addWorktree(commit, directory, existingMirror(root, repository)).worktreeDirectory
 }
 
 /**
@@ -256,9 +243,8 @@ def refreshed(root: Path, repository: Repository): Cached[Mirror] = {
  */
 private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = {
    val directory = cacheDirectory(root, repository)
-   val absent = missingDirectory(isDirectory(directory), directory)
 
-   foldOption(Mirror(directory), missing -> cloned(root, missing, repository), absent)
+   if(isDirectory(directory)) Mirror(directory) else cloned(root, directory, repository)
 }
 
 /**
@@ -267,14 +253,8 @@ private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = 
 private def existingMirror(root: Path, repository: Repository): Offline[Mirror] = {
    val directory = cacheDirectory(root, repository)
 
-   fold(isDirectory(directory), Mirror(directory), raise(NotFetched(repository)))
+   if(isDirectory(directory)) Mirror(directory) else raise(NotFetched(repository))
 }
-
-/**
- * `ensuredMirror`'s and `sourceTreeAt`'s shared step: the directory to make, where there is no
- * directory yet.
- */
-private def missingDirectory(present: Bool, directory: Path): Option[Path] = fold(present, None, Some(directory))
 
 /**
  * `descriptorTextAt`'s second attempt: bring the mirror up to date and read once more. Separate so that

@@ -219,19 +219,15 @@ private def resolvedWithAnchors(
    universe: List[Pair[String, String]],
    lineages: List[Pair[String, String]]
 ): String =
-   reported(
-      against(
-         universeOf(universe, lineages),
-         renderedSelections(resolve(PackageName("root"), descriptorOf(rootText)))
-      )
+   against(
+      universeOf(universe, lineages),
+      renderedSelections(resolve(PackageName("root"), descriptorOf(rootText)))
    )
 
 private def resolvedFor(name: String, rootText: String, universe: List[Pair[String, String]]): String =
-   reported(
-      against(
-         universeOf(universe, empty),
-         renderedSelections(resolve(PackageName(name), descriptorOf(rootText)))
-      )
+   against(
+      universeOf(universe, empty),
+      renderedSelections(resolve(PackageName(name), descriptorOf(rootText)))
    )
 
 /**
@@ -239,32 +235,16 @@ private def resolvedFor(name: String, rootText: String, universe: List[Pair[Stri
  * half of a selection that decides what a build mounts and whose edges the closure follows.
  */
 private def mounted(url: String, rootText: String, universe: List[Pair[String, String]]): String =
-   reported(
-      against(
-         universeOf(universe, empty),
-         renderedPackages(Repository(url), resolve(PackageName("root"), descriptorOf(rootText)))
-      )
+   against(
+      universeOf(universe, empty),
+      renderedPackages(Repository(url), resolve(PackageName("root"), descriptorOf(rootText)))
    )
 
 private def renderedPackages(repository: Repository, resolution: Resolution): String =
-   foldOption(
-      "<unselected>",
-      selection -> selection.selectedPackages.map(name -> "//" ++ show(name)).joined(", "),
-      resolution.selections.find(selection -> selection.selectedRepository == repository)
-   )
-
-/**
- * The answer on one line, or the error instead — both outcomes asserted the same way.
- *
- * Every case renders *inside* the `against`, so the only `provide[Universe, _]` this suite and
- * `AssemblyTests` between them instantiate is the one answering a `String`. Not by preference: as of
- * compiler `ea3e27ed` two `provide` instantiations whose JVM descriptors agree get one
- * `withCellInternal` native between them, and the other fails at run time with `NoSuchMethodError`
- * (`docs/effectful-modules.md` §11.3). Two suites resolving into two different result types is exactly
- * that case. Undo once the compiler emits both.
- */
-private def reported(outcome: Either[ResolutionError, String]): String =
-   foldEither(error -> show(error), rendered -> rendered, outcome)
+   resolution.selections
+      .find(selection -> selection.selectedRepository == repository)
+      .mapOption(selection -> selection.selectedPackages.map(name -> "//" ++ show(name)).joined(", "))
+      orElse "<unselected>"
 
 private def renderedSelections(resolution: Resolution): String = resolution.selections.joined(", ")
 

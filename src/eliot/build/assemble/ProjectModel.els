@@ -68,7 +68,7 @@ def modelOf(name: PackageName, project: Project): {PackageSource, Throw[Resoluti
    val pinned = lockedVersionsOf(resolution)
 
    PackageModel(
-      foldOption(raise(NoSuchPackage(name)), root -> root, ownRootOf(name, project)),
+      ownRootOf(name, project) orElse raise(NoSuchPackage(name)),
       projectRoots(name, project),
       resolution.selections.flatMap(mountedRoots(pinned)),
       resolution.selections

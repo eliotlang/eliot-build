@@ -26,7 +26,7 @@ def testCases: Test = {
       locked("package test {\n}", frameworkUniverse) shouldBe ""
    }
    "lockedVersionsOf" should "refuse a selected version whose tag the source cannot find" in {
-      rendered(against(frameworkUniverse, renderedVersions(lockedVersionsOf(unpublished))))
+      against(frameworkUniverse, renderedVersions(lockedVersionsOf(unpublished)))
          shouldBe "github.com/e/nowhere publishes no v1.0"
    }
 }
@@ -35,16 +35,7 @@ def testCases: Test = {
  * The versions building `test` out of `rootText` locks, one `<url> <tag> <commit>` per selection.
  */
 private def locked(rootText: String, universe: Universe): String =
-   rendered(
-      against(universe, renderedVersions(lockedVersionsOf(resolve(PackageName("test"), descriptorOf(rootText)))))
-   )
-
-/**
- * Rendered *inside* the `against`, as every resolving suite here renders, for the reason
- * `ResolutionTests` records: one `provide[Universe, String]` for the whole program.
- */
-private def rendered(outcome: Either[ResolutionError, String]): String =
-   foldEither(error -> show(error), text -> text, outcome)
+   against(universe, renderedVersions(lockedVersionsOf(resolve(PackageName("test"), descriptorOf(rootText)))))
 
 private def renderedVersions(versions: List[LockedVersion]): String =
    versions.map(fact -> show(fact.lockedRepository) ++ " " ++ show(fact.lockedVersion) ++ " " ++ show(fact.lockedCommit))

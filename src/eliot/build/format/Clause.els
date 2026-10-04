@@ -83,16 +83,13 @@ private def closed(state: ClauseState): Either[ClauseError, List[Clause]] =
    state.failure.foldOption(closedStack(state), error -> Left(error))
 
 private def closedStack(state: ClauseState): Either[ClauseError, List[Clause]] =
-   fold(
-      state.stack.size <= 1,
-      Right(state.stack.last.foldOption(empty, root -> root.children)),
-      Left(ClauseError(state.atLine, "", "unclosed '{'"))
-   )
+   if(state.stack.size <= 1) Right(state.stack.last.mapOption(children) orElse empty)
+   else Left(ClauseError(state.atLine, "", "unclosed '{'"))
 
 private def stepLine(line: String, state: ClauseState): ClauseState = {
    val advanced = ClauseState(state.stack, state.atLine + 1, None)
 
-   state.failure.foldOption(stepContent(line, advanced), _ -> state)
+   if(isSome(state.failure)) state else stepContent(line, advanced)
 }
 
 /**
@@ -105,18 +102,12 @@ private def stepLine(line: String, state: ClauseState): ClauseState = {
 private def stepContent(line: String, state: ClauseState): ClauseState = {
    val content = before("-- ", replace("\t", " ", line) ++ " ").trim
 
-   fold(content == "", state, stepClause(content, state))
+   if(content == "") state
+   else if(content == "}") closeBlock(content, state)
+   else if(endsWith("{", content)) openBlock(content, state)
+   else if(contains("{", content)) inlineBlock(content, state)
+   else leafClause(content, state)
 }
-
-private def stepClause(content: String, state: ClauseState): ClauseState =
-   fold(content == "}", closeBlock(content, state), openClause(content, state))
-
-private def openClause(content: String, state: ClauseState): ClauseState =
-   fold(
-      content.endsWith("{"),
-      openBlock(content, state),
-      fold(content.contains("{"), inlineBlock(content, state), leafClause(content, state))
-   )
 
 /**
  * `keyword args {` — push a clause that later lines will fill.
@@ -124,11 +115,8 @@ private def openClause(content: String, state: ClauseState): ClauseState =
 private def openBlock(content: String, state: ClauseState): ClauseState = {
    val header = words(before("{", content))
 
-   fold(
-      isEmpty(header),
-      failedAt("a block needs a keyword", content, state),
-      ClauseState(append(state.stack, clauseOf(header, empty)), state.atLine, None)
-   )
+   if(isEmpty(header)) failedAt("a block needs a keyword", content, state)
+   else ClauseState(append(state.stack, clauseOf(header, empty)), state.atLine, None)
 }
 
 /**
@@ -140,11 +128,9 @@ private def inlineBlock(content: String, state: ClauseState): ClauseState = {
    val inner = before("}", after("{", content))
    val subClauses = split(",", inner).map(words).filter(tokens -> !isEmpty(tokens)).map(tokens -> clauseOf(tokens, empty))
 
-   fold(
-      !endsWith("}", content) || isEmpty(header),
-      failedAt("an inline block must read 'keyword args { sub, sub }'", content, state),
-      attached(clauseOf(header, subClauses), state)
-   )
+   if(!endsWith("}", content) || isEmpty(header)) {
+      failedAt("an inline block must read 'keyword args { sub, sub }'", content, state)
+   } else attached(clauseOf(header, subClauses), state)
 }
 
 /**
@@ -157,11 +143,8 @@ private def leafClause(content: String, state: ClauseState): ClauseState =
  * `}` — pop the innermost open clause and hang it under its parent.
  */
 private def closeBlock(content: String, state: ClauseState): ClauseState =
-   fold(
-      state.stack.size <= 1,
-      failedAt("unmatched '}'", content, state),
-      ClauseState(withChild(state.stack.last, state.stack.dropLast), state.atLine, None)
-   )
+   if(state.stack.size <= 1) failedAt("unmatched '}'", content, state)
+   else ClauseState(withChild(state.stack.last, state.stack.dropLast), state.atLine, None)
 
 /**
  * `state` with `clause` hung under the innermost open clause.
@@ -179,7 +162,7 @@ private def parentWith(child: Clause, stack: List[Clause]): Clause =
    stack.last.foldOption(child, parent -> Clause(parent.keyword, parent.arguments, append(parent.children, child)))
 
 private def clauseOf(tokens: List[String], children: List[Clause]): Clause =
-   Clause(tokens.head.foldOption("", keyword -> keyword), tokens.tail, children)
+   Clause(tokens.head orElse "", tokens.tail, children)
 
 private def failedAt(reason: String, content: String, state: ClauseState): ClauseState =
    ClauseState(state.stack, state.atLine, Some(ClauseError(state.atLine, content, reason)))
@@ -201,9 +184,9 @@ private def header(depth: Int, clause: Clause): String =
    indent(depth) ++ clause.keyword ++ argumentText(clause)
 
 private def block(depth: Int, rendered: List[String]): String =
-   fold(isEmpty(rendered), "", " {\n" ++ rendered.joined("\n") ++ "\n" ++ indent(depth) ++ "}")
+   if(isEmpty(rendered)) "" else " {\n" ++ rendered.joined("\n") ++ "\n" ++ indent(depth) ++ "}"
 
 private def argumentText(clause: Clause): String =
-   fold(isEmpty(clause.arguments), "", " " ++ clause.arguments.joined(" "))
+   if(isEmpty(clause.arguments)) "" else " " ++ clause.arguments.joined(" ")
 
 private def indent(depth: Int): String = "  ".repeat(depth)

@@ -98,9 +98,6 @@ private def answer(commandLine: List[String], here: Path, java: String): {FileSy
  * What the command line asks of `descriptor`: the project model where it asks for that, the usage where
  * it names no package, the usage after a refusal where it names one the descriptor does not declare,
  * and the build otherwise.
- *
- * `fold` and `foldOption` rather than `if..else` for the same reason `eliot.build.Command.requested`
- * gives: an `if..else` over `List[String]` would add a `runAbort` instantiation for nothing.
  */
 private def answered(
       commandLine: List[String],
@@ -110,18 +107,12 @@ private def answered(
    ): {FileSystem, Process} List[String] = {
    val declared = descriptor.packages.map(packageName)
 
-   fold(
-      modelRequested(commandLine),
-      modelled(descriptor, here),
-      foldOption(
-         reporting(usage(Some(declared))),
-         named -> foldOption(
-            reporting(unknownPackage(named, declared)),
-            _ -> attempted(named, descriptor, here, java),
-            packageNamed(named, descriptor)
-         ),
-         requested(commandLine)
-      )
+   if(modelRequested(commandLine)) modelled(descriptor, here)
+   else requested(commandLine).foldOption(
+      reporting(usage(Some(declared))),
+      named ->
+         if(isSome(packageNamed(named, descriptor))) attempted(named, descriptor, here, java)
+         else reporting(unknownPackage(named, declared))
    )
 }
 
@@ -133,10 +124,6 @@ private def answered(
  * cache a build left behind and refuses what is not there, so an editor opening a project never waits on
  * the network and never races a build for it. A package that cannot be modelled from disk is listed with
  * the reason, and the query itself still succeeds: the model is true about every package it could read.
- *
- * The `provide` answers a `String` rather than lines on purpose. `performed` holds the program's one
- * `provide[Path, List[String]]`, and a second instantiation whose erased JVM descriptor agrees would get
- * one native between them (`docs/effectful-modules.md` §11.3).
  */
 private def modelled(descriptor: Descriptor, here: Path): {FileSystem, Process} List[String] =
    singleton(
@@ -253,9 +240,7 @@ private def attempted(
  * the one place that answers, because where a build caches what it fetched is a property of the machine
  * it runs on rather than of anything the resolver knows.
  *
- * The build runs *inside* it, and there is one `provide[Path, List[String]]` in the program — two
- * instantiations whose JVM descriptors agree are the compiler finding in `docs/effectful-modules.md`
- * §11.3, which a second `provide` of the same shape would walk into.
+ * The build runs *inside* it.
  */
 private def performed(
       name: PackageName,
@@ -335,14 +320,14 @@ private def locked(
    val previous = previousLock(here)
    val text = renderLockFile(recorded(entry, descriptor.packages.map(packageName), previous))
 
-   fold(text == renderLockFile(previous), unit, writeFile(text, here / lockFileName))
+   unless(text == renderLockFile(previous)) writeFile(text, here / lockFileName)
 }
 
 /**
  * What `eliot.lock` says, or the empty lockfile where there is none yet.
  */
 private def previousLock(here: Path): {FileSystem, Throw[IoError], Throw[LockFileError]} Lockfile =
-   fold(exists(here / lockFileName), parseLockFile(readLines(here / lockFileName)), emptyLockfile)
+   if(exists(here / lockFileName)) parseLockFile(readLines(here / lockFileName)) else emptyLockfile
 
 /**
  * One line's compiler, unless an earlier one already failed — in which case that failure is the answer

@@ -150,7 +150,7 @@ private def expectedSiblingMount: String =
  * case says both what is mounted and in what order.
  */
 private def assembled(name: String, rootText: String, universe: List[Pair[String, String]]): String =
-   rendered(against(universeOf(universe, empty), renderedRoots(lockedRootsOf(PackageName(name), rootText))))
+   against(universeOf(universe, empty), renderedRoots(lockedRootsOf(PackageName(name), rootText)))
 
 /**
  * `assembled`, at the commits `pinned` says rather than the ones the source names.
@@ -161,11 +161,9 @@ private def pinnedAssembled(
       universe: List[Pair[String, String]],
       pinned: List[LockedVersion]
    ): String =
-   rendered(
-      against(
-         universeOf(universe, empty),
-         renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText)), pinned))
-      )
+   against(
+      universeOf(universe, empty),
+      renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText)), pinned))
    )
 
 private def lockedRootsOf(name: PackageName, rootText: String): {PackageSource, Throw[ResolutionError]} List[Path] = {
@@ -179,14 +177,6 @@ private def lockedRootsOf(name: PackageName, rootText: String): {PackageSource, 
  * dependency are told apart by reading a line rather than by counting.
  */
 private def projectOf(rootText: String): Project = Project(path("/project"), descriptorOf(rootText))
-
-/**
- * Rendered *inside* the `against`, as every case of `ResolutionTests` is and for the reason recorded
- * there: two `provide[Universe, _]` instantiations whose JVM descriptors agree get one native between
- * them, so both suites answer a `String` and there is one instantiation to emit.
- */
-private def rendered(outcome: Either[ResolutionError, String]): String =
-   foldEither(error -> show(error), roots -> roots, outcome)
 
 private def renderedRoots(roots: List[Path]): String = roots.joined(", ")
 

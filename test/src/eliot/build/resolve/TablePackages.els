@@ -30,11 +30,7 @@ implement tablePackages: PackageSource {
       publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
    def anchorAt(line: Line, target: Repository): {Dep[Universe]} Option[Commit] =
-      foldOption(
-         None,
-         hash -> Some(Commit(hash)),
-         dependency.lineages.lookupOption(show(target) ++ "@" ++ branchName(line))
-      )
+      dependency.lineages.lookupOption(show(target) ++ "@" ++ branchName(line)).mapOption(hash -> Commit(hash))
 
    /**
     * A table has no history either, so a version it publishes is said to be at a commit named after
@@ -42,11 +38,8 @@ implement tablePackages: PackageSource {
     * read which version a commit came from.
     */
    def commitAt(version: Version, target: Repository): {Dep[Universe]} Option[Commit] =
-      foldOption(
-         None,
-         _ -> Some(Commit(show(target) ++ "@" ++ show(version))),
-         dependency.publications.lookupOption(show(target) ++ "@" ++ show(version))
-      )
+      dependency.publications.lookupOption(show(target) ++ "@" ++ show(version))
+         .mapOption(_ -> Commit(show(target) ++ "@" ++ show(version)))
 
    /**
     * A table has no repositories to check anything out of, so it answers where a tree *would* be: one
@@ -66,17 +59,19 @@ def universeOf(publications: List[Pair[String, String]], lineages: List[Pair[Str
    Universe(publications, lineages)
 
 /**
- * What `computation` answers against `universe` — the selections, or the error resolution raised.
+ * What `computation` answers against `universe` — a case's rendering of what it resolved, or the error
+ * resolution raised, shown — so both outcomes are asserted the same way, as one line.
  *
  * The one place the test source is chosen, and the one place its table is supplied: `with
  * tablePackages` binds the slot's `PackageSource`, and `provide` answers the `Dep[Universe]` those
- * clauses declare. Production code inside `computation` names neither.
+ * clauses declare. Production code inside `computation` names neither. The `catch`'s type arguments are
+ * spelled because the computation is a parameter, whose declaration cannot say which `Throw` it raises.
  */
-def against[A](
+def against(
       universe: Universe,
-      computation: {PackageSource, Throw[ResolutionError]} A with tablePackages
-   ): Either[ResolutionError, A] =
-   provide(universe, runThrow[ResolutionError, A](computation))
+      computation: {PackageSource, Throw[ResolutionError]} String with tablePackages
+   ): String =
+   provide(universe, catch[ResolutionError, String](computation, error -> show(error)))
 
 /**
  * The descriptor `text` spells, read as a mirror's is, and taken as empty where it spells nothing
@@ -84,11 +79,7 @@ def against[A](
  * subject, and nothing here is about it.
  */
 def descriptorOf(text: String): Descriptor =
-   foldEither(
-      _ -> Descriptor(empty),
-      descriptor -> descriptor,
-      runThrow[DescriptorError, Descriptor](parseDescriptor(split("\n", text)))
-   )
+   parseDescriptor(split("\n", text)) catch (_ -> Descriptor(empty))
 
 /**
  * The descriptor of a repository that is one package at its root, declaring `clauses` — the common
@@ -99,7 +90,7 @@ def descriptorOf(text: String): Descriptor =
  * ```
  */
 def rootPackage(clauses: String): String =
-   "package root {\n  at .\n" ++ fold(clauses == "", "", clauses ++ "\n") ++ "}"
+   "package root {\n  at .\n" ++ (if(clauses == "") "" else clauses ++ "\n") ++ "}"
 
 private def publicationIn(universe: Universe, key: String): Option[Descriptor] =
-   foldOption(None, text -> Some(descriptorOf(text)), universe.publications.lookupOption(key))
+   universe.publications.lookupOption(key).mapOption(descriptorOf)

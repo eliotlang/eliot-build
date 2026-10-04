@@ -73,7 +73,7 @@ def testCases: Test = {
       show(firstRelease(Line(2))) shouldBe "v2.0"
    }
    "firstRelease" should "order where a bare major does" in {
-      fold(firstRelease(Line(1)) == versionOf("v1"), "same", "different") shouldBe "same"
+      (if(firstRelease(Line(1)) == versionOf("v1")) "same" else "different") shouldBe "same"
    }
    "branchName" should "name the branch a bare major already is" in {
       branchName(versionOf("v2").major) shouldBe "v2"
@@ -85,21 +85,21 @@ def testCases: Test = {
  * absence, so a refusal is asserted the same way a reading is.
  */
 private def parsed(text: String): String =
-   foldOption("<not a version>", version -> show(version), runAbort(parseVersion(text)))
+   show(parseVersion(text)) else "<not a version>"
 
 /**
  * The version `text` spells, for the assertions that are about ordering rather than about parsing.
  * An unreadable token answers `v0`, which every one of those assertions would visibly fail on.
  */
 private def versionOf(text: String): Version =
-   foldOption(Version(Line(0), None), version -> version, runAbort(parseVersion(text)))
+   parseVersion(text) else Version(Line(0), None)
 
 private def larger(a: String, b: String): String = show(max(versionOf(a), versionOf(b)))
 
 private def smaller(a: String, b: String): String = show(min(versionOf(a), versionOf(b)))
 
 private def sameVersion(a: String, b: String): String =
-   fold(versionOf(a) == versionOf(b), "same", "different")
+   if(versionOf(a) == versionOf(b)) "same" else "different"
 
 private def oneLine(a: String, b: String): String =
-   fold(sameLine(versionOf(a), versionOf(b)), "one line", "two lines")
+   if(sameLine(versionOf(a), versionOf(b))) "one line" else "two lines"
