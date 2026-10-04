@@ -72,7 +72,7 @@ def digestFile(root: Path, asset: Asset): Path = versionDirectory(root, asset) /
 private def fetchedTree(root: Path, asset: Asset): {Process, FileSystem, Throw[IoError], Throw[AssetError]} Path = {
    val directory = assetDirectory(root, asset)
 
-   fold(exists(digestFile(root, asset)), directory, unpacked(root, asset, directory))
+   if(exists(digestFile(root, asset))) directory else unpacked(root, asset, directory)
 }
 
 private def versionDirectory(root: Path, asset: Asset): Path =
@@ -173,16 +173,9 @@ private def checked(arguments: List[String]): {Process, Throw[IoError], Throw[As
  */
 private def output(arguments: List[String]): {Process, Throw[IoError], Throw[AssetError]} String = {
    val result = run(arguments, here)
-   val failure = failureOf(arguments, result)
 
-   foldOption(result.standardOutput, error -> raise(error), failure)
+   unless(result.exitCode == 0) raise(AssetError(arguments.joined(" "), result.exitCode, result.standardError))
+   result.standardOutput
 }
 
 private def here: Path = path(".")
-
-private def failureOf(arguments: List[String], result: ProcessResult): Option[AssetError] =
-   fold(
-      result.exitCode == 0,
-      None,
-      Some(AssetError(arguments.joined(" "), result.exitCode, result.standardError))
-   )

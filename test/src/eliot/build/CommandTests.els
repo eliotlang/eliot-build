@@ -127,6 +127,6 @@ private def compilationOf(line: String): Compilation =
       path("/project/target")
    )
 
-private def described(name: Option[PackageName]): String = foldOption("<none>", show, name)
+private def described(name: Option[PackageName]): String = name.mapOption(show) orElse "<none>"
 
 private def commandLine(argument: String): List[String] = singleton(argument)

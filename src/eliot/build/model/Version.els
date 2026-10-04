@@ -67,14 +67,14 @@ def sameLine(a: Version, b: Version): Bool = a.major == b.major
  * where `v1.0` does — which is what makes `dep … v1` mean "anywhere on the v1 line" instead of
  * something unordered.
  */
-def orderedMinor(version: Version): Int = version.minor.foldOption(0, part -> part)
+def orderedMinor(version: Version): Int = version.minor orElse 0
 
 /**
  * The tag the version was written as, which is the tag a remote is asked for.
  */
 implement Show[Version] {
    def show(value: Version): String =
-      branchName(value.major) ++ value.minor.foldOption("", part -> "." ++ show(part))
+      branchName(value.major) ++ (value.minor.mapOption(part -> "." ++ show(part)) orElse "")
 }
 
 implement Eq[Line] {
@@ -100,7 +100,7 @@ implement Eq[Version] {
  */
 implement Compare[Version] {
    def lessThanOrEqual(a: Version, b: Version): Bool =
-      fold(a.major == b.major, orderedMinor(a) <= orderedMinor(b), a.major < b.major)
+      if(a.major == b.major) (orderedMinor(a) <= orderedMinor(b)) else a.major < b.major
 }
 
 /**
@@ -109,15 +109,13 @@ implement Compare[Version] {
 private def versionBody(text: String): {Abort} String = if(startsWith("v", text)) drop(1, text)
 
 /**
- * The minor part, absent when the body names a line rather than a release on it. Written as an
- * `Option` eliminator rather than an `if..else`: `else` would discharge the `Abort` of the *parse*
+ * The minor part, absent when the body names a line rather than a release on it. Mapped over the
+ * `Option` rather than written as an `if..else`: `else` would discharge the `Abort` of the *parse*
  * along with the one the `if` introduces, quietly turning a malformed minor into an absent one.
  */
-private def minorOf(body: String): {Abort} Option[Int] =
-   foldOption(None, part -> Some(natural(part)), minorText(body))
+private def minorOf(body: String): {Abort} Option[Int] = minorText(body).mapOption(natural)
 
-private def minorText(body: String): Option[String] =
-   fold(contains(".", body), Some(after(".", body)), None)
+private def minorText(body: String): Option[String] = someIf(contains(".", body)) after(".", body)
 
 /**
  * `text` read as a non-negative whole number with no redundant spelling. A sign is refused because

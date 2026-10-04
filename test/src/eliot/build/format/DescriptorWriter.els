@@ -59,19 +59,19 @@ private def renderDependency(dependency: Dependency): String = dependency match 
  * has already said so, and writing it out would spell a convention as though it were an override.
  */
 private def renderAt(built: BuildPackage): List[String] =
-   fold(built.packageRoot == show(built.packageName), empty, singleton("at " ++ built.packageRoot))
+   if(built.packageRoot == show(built.packageName)) empty else singleton("at " ++ built.packageRoot)
 
 private def renderInternal(built: BuildPackage): List[String] =
-   fold(built.exported, empty, singleton("internal"))
+   if(built.exported) empty else singleton("internal")
 
 private def renderCompiler(built: BuildPackage): List[String] =
-   foldOption(empty, words -> singleton("compiler " ++ words.joined(" ")), built.packageCompiler)
+   built.packageCompiler.mapOption(words -> "compiler " ++ words.joined(" ")).toList
 
 /**
  * A `{ … }` block holding `lines`, each indented one level.
  */
 private def renderBlock(lines: List[String]): String =
-   fold(isEmpty(lines), "", " {\n" ++ lines.map(indented).joined("\n") ++ "\n}")
+   if(isEmpty(lines)) "" else " {\n" ++ lines.map(indented).joined("\n") ++ "\n}"
 
 private def indented(text: String): String = split("\n", text).map(indentLine).joined("\n")
 

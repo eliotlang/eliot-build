@@ -75,7 +75,7 @@ private def parsed(output: String): String = renderedTags(parseTagRefs(output))
 private def renderedTags(refs: List[TagRef]): String =
    refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
 
-private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
+private def renderedCommit(commit: Option[Commit]): String = commit.mapOption(show) orElse "<none>"
 
 private def commit(tag: String, output: String): String =
    renderedCommit(commitOf(version(tag), parseTagRefs(output)))

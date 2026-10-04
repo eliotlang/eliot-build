@@ -1236,3 +1236,35 @@ and stage 2 green, this repository's own trees landing at the commits `eliot.loc
 scratch dependency whose tag was moved in the mirror — refused with the lock, and with the line deleted
 recorded, checked out beside the old tree and compiled at its new commit. No §11.3 collision; a
 partially applied `mountedRoots(pinned)` passed to `flatMap` compiled as the bare name did.
+
+## 21. Revisited, 2026-10-04 — the collision fixed, and the eliminators named
+
+§11.3's second finding is fixed in the compiler, and it was never about JVM descriptors. `used` dedups
+its walk over monomorphic instances on a *codegen projection* of their type arguments, and the
+projection kept a type argument's head and dropped what was inside it: `else[Option[Name]]` and
+`else[Option[String]]` merged, both were emitted, only one was walked — and each one's body names its
+callee by its own full type argument (`runAbort$Option$Name`), so the other's callee never was. Every
+instance of the finding here — `provide[Universe, _]` across two suites, `provide[Mirrors, Option[_]]`,
+two `flatMap`s over one pair type, `Command.requested`'s `fold` — was that. The projection now erases the
+way the backend mangles (eliot `NestedInstantiationIntegrationTest`).
+
+With it gone, and with eliot `v0.7`'s base naming what this tool spelled by hand, the sources were swept:
+
+- **A check is `unless`/`when`.** `ShellGit.checked`, `ShellAssets.output`, `ClauseReader.requireThat`,
+  `Resolution.merged`/`completed`, `Invocation`'s nothing-to-run and `Launcher.locked` raise or write
+  under a condition; the `Option` of an error each built first (`failureOf`, `problemUnless`,
+  `conflictBetween`, `missingDirectory`) is deleted.
+- **An absence that is an error is `orElse raise(…)`**, and a parse that is one is `else raise(…)` —
+  `parseVersion(tag) else raise(…)` rather than `runAbort` and a `foldOption` back out.
+- **A projection is `mapOption`**, which could not compile before `v0.7`; an `Option` built under a
+  condition is `someIf`; a lookup that raises on a hit is `foreachOption`.
+- **A `Bool` `fold` is an `if..else`**, `Clause`'s state machine one chain of them. A `foldOption`
+  remains only where both arms are real work, written subject first.
+- **Error translation is `catch`**: `parseDescriptor`/`parseLockFile` re-raise through it, and the
+  suites' `runThrow`/`foldEither` pairs are one `catch` each. `TablePackages.against` answers the line a
+  case asserts, so the five `rendered`/`reported` helpers are gone.
+
+Two parsing facts the sweep met, both about juxtaposition binding tighter than any operator: an `if`'s
+first arm `if(c) a.f` is `(if(c) a).f` (equivalent, since the `if` aborts first, but not what it reads
+as), and `someIf(c) x.f` is `(someIf(c) x).f` — a type error, so `someIf(c, x.f)`. An `if` whose arm
+does not fit on its line takes a block, since a line ending in `)` does not join the next.

@@ -87,10 +87,8 @@ def rootsOf(
  * and is refused by the resolver, which is the caller that holds the error.
  */
 def projectRoots(name: PackageName, project: Project): List[Path] =
-   foldOption(
-      empty,
-      opened -> opened.map(built -> sourcesOf(project.projectDirectory, built)),
-      configuredPackages(name, project.projectDescriptor)
+   (configuredPackages(name, project.projectDescriptor) orElse empty).map(built ->
+      sourcesOf(project.projectDirectory, built)
    )
 
 /**
@@ -105,13 +103,9 @@ def mountedRoots(pinned: List[LockedVersion], selection: Selection): {PackageSou
    val unavailable = Unavailable(selection.selectedRepository, selection.selectedVersion)
    val commit = lockedCommitOf(selection, pinned) orElse raise(unavailable)
    val tree = sourcesAt(commit, selection.selectedRepository)
-   val published = descriptorAt(selection.selectedVersion, selection.selectedRepository)
+   val descriptor = descriptorAt(selection.selectedVersion, selection.selectedRepository) orElse raise(unavailable)
 
-   foldOption(
-      raise(unavailable),
-      descriptor -> mountedPackages(selection, descriptor).map(built -> sourcesOf(tree, built)),
-      published
-   )
+   mountedPackages(selection, descriptor).map(built -> sourcesOf(tree, built))
 }
 
 /**
@@ -123,11 +117,7 @@ def mountedRoots(pinned: List[LockedVersion], selection: Selection): {PackageSou
  * the package it belongs to.
  */
 def ownRootOf(name: PackageName, project: Project): Option[Path] =
-   foldOption(
-      None,
-      built -> Some(sourcesOf(project.projectDirectory, built)),
-      packageNamed(name, project.projectDescriptor)
-   )
+   packageNamed(name, project.projectDescriptor).mapOption(built -> sourcesOf(project.projectDirectory, built))
 
 /**
  * The packages `selection` mounts of a dependency laid out by `descriptor`.
@@ -144,11 +134,7 @@ private def mountedPackages(selection: Selection, descriptor: Descriptor): List[
  * The commit `pinned` locked `selection` at, absent where it locked no such repository at that version.
  */
 private def lockedCommitOf(selection: Selection, pinned: List[LockedVersion]): Option[Commit] =
-   foldOption(
-      None,
-      locked -> Some(locked.lockedCommit),
-      pinned.find(locked -> pins(selection, locked))
-   )
+   pinned.find(locked -> pins(selection, locked)).mapOption(lockedCommit)
 
 /**
  * `true` when `locked` is the lock line of `selection`: the same repository at the same version.

@@ -60,11 +60,9 @@ data Invocation(invocationAssets: List[Asset], invocationLines: List[List[String
  *
  * The resolution is passed in rather than computed, because a build wants the roots and the invocation
  * of *one* closure — resolving twice would be two closures that merely ought to agree.
- *
- * The lines are read off one list of packages, the project's and the mounted ones together, rather than
- * by a second `flatMap` over the pairs: two `flatMap`s over `List[Pair[Selection, BuildPackage]]` with
- * different result types get one emitted `foldLeft` between them, and the other dies at run time with
- * `NoSuchMethodError` — the collision `docs/effectful-modules.md` §11.3 records, met again.
+
+ * The lines are read off one list of packages, the project's and the mounted ones together, so the
+ * project's own lines come first and the dependencies' follow in resolution order.
  *
  * ```eliot
  * val invocation = invocationOf(name, descriptor, resolve(name, descriptor))
@@ -76,9 +74,9 @@ def invocationOf(
       resolution: Resolution
    ): {PackageSource, Throw[ResolutionError], Throw[InvocationError]} Invocation = {
    val mounted = resolution.selections.flatMap(mountedBy)
-   val lines = (projectPackages(name, descriptor) ++ mounted.map(second)).flatMap(compilerLine)
+   val lines = (projectPackages(name, descriptor) ++ mounted.map(second)).filterMap(packageCompiler)
 
-   foldOption(raise(NothingToRun(name)), _ -> unit, lines.head)
+   when(lines.isEmpty) raise(NothingToRun(name))
    Invocation(mounted.flatMap(assetsOf), lines)
 }
 
@@ -87,7 +85,7 @@ def invocationOf(
  * lines run; their assets do not exist, since the project has no release to hang one off.
  */
 private def projectPackages(name: PackageName, descriptor: Descriptor): List[BuildPackage] =
-   foldOption(empty, opened -> opened, configuredPackages(name, descriptor))
+   configuredPackages(name, descriptor) orElse empty
 
 /**
  * The packages one selected dependency mounts, each paired with the selection it was mounted by — a
@@ -98,12 +96,12 @@ private def projectPackages(name: PackageName, descriptor: Descriptor): List[Bui
  * descriptor cannot be read back is `Unavailable` — the resolver's own error, the same fact under a
  * different verb, which is what `eliot.build.assemble.Assembly` says about the same read.
  */
-private def mountedBy(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Pair[Selection, BuildPackage]] =
-   foldOption(
-      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
-      descriptor -> mountedPackages(selection, descriptor).map(built -> Pair(selection, built)),
-      descriptorAt(selection.selectedVersion, selection.selectedRepository)
-   )
+private def mountedBy(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Pair[Selection, BuildPackage]] = {
+   val descriptor = descriptorAt(selection.selectedVersion, selection.selectedRepository) orElse
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
+
+   mountedPackages(selection, descriptor).map(built -> pair(selection, built))
+}
 
 private def mountedPackages(selection: Selection, descriptor: Descriptor): List[BuildPackage] =
    descriptor.packages.filter(built -> built.exported && mounts(built.packageName, selection))
@@ -112,6 +110,3 @@ private def assetsOf(entry: Pair[Selection, BuildPackage]): List[Asset] =
    entry.second.packageAssets.map(asset ->
       Asset(entry.first.selectedRepository, entry.first.selectedVersion, asset)
    )
-
-private def compilerLine(built: BuildPackage): List[List[String]] =
-   foldOption(empty, words -> singleton(words), built.packageCompiler)

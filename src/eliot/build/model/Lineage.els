@@ -41,4 +41,4 @@ implement Show[Commit] {
  * spellings apart rather than merging them wrongly.
  */
 def sameAnchor(anchor: Option[Commit], other: Option[Commit]): Bool =
-   foldOption(false, commit -> foldOption(false, otherCommit -> commit == otherCommit, other), anchor)
+   isSome(anchor) && anchor == other

@@ -47,10 +47,11 @@ def lockedVersionsOf(resolution: Resolution): {PackageSource, Throw[ResolutionEr
    resolution.selections.map(lockedVersionOf)
 
 private def lockedVersionOf(selection: Selection): {PackageSource, Throw[ResolutionError]} LockedVersion =
-   foldOption(
-      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
-      commit -> LockedVersion(selection.selectedRepository, selection.selectedVersion, commit),
-      commitAt(selection.selectedVersion, selection.selectedRepository)
+   LockedVersion(
+      selection.selectedRepository,
+      selection.selectedVersion,
+      commitAt(selection.selectedVersion, selection.selectedRepository) orElse
+         raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
    )
 
 private def lockedAssetOf(asset: Asset): {Assets} LockedAsset =

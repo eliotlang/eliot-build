@@ -68,7 +68,7 @@ def packageId(text: String): {Abort} PackageId = {
    val url = before("//", body)
    val name = orAbort(selectorOf(body))
 
-   fold(url == "", Sibling(name), Foreign(Package(Repository(canonicalUrl(url)), name)))
+   if(url == "") Sibling(name) else Foreign(Package(Repository(canonicalUrl(url)), name))
 }
 
 implement Show[Repository] {
@@ -122,14 +122,14 @@ implement Eq[PackageId] {
    def equals(a: PackageId, b: PackageId): Bool = show(a) == show(b)
 }
 
-private def withoutScheme(text: String): String = fold(contains("://", text), after("://", text), text)
+private def withoutScheme(text: String): String = if(contains("://", text)) after("://", text) else text
 
 /**
  * The name after the `//`, where there is one and it is not empty — `…/foo//` selects no more than
  * `…/foo` does.
  */
 private def selectorOf(body: String): Option[PackageName] =
-   fold(isEmpty(after("//", body)), None, Some(PackageName(after("//", body))))
+   someIf(!isEmpty(after("//", body))) PackageName(after("//", body))
 
 /**
  * The suffixes are stripped outermost first, so a URL wearing both (`…/foo.git/`) loses both.
@@ -142,4 +142,4 @@ private def canonicalUrl(url: String): String = {
 }
 
 private def withoutSuffix(suffix: String, text: String): String =
-   fold(endsWith(suffix, text), take(length(text) - length(suffix), text), text)
+   if(endsWith(suffix, text)) take(length(text) - length(suffix), text) else text

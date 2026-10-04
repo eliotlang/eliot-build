@@ -45,11 +45,8 @@ def problemIn(reason: String, clause: Clause): ClauseProblem = ClauseProblem(ren
  * `Throw` had no lift through an `Abort` carrier; under effects v6 `argument(…) else raise(…)` would
  * compile, and this keeps its shape only because the `Option` is what the caller reads.
  */
-def required(index: Int, problem: String, clause: Clause): {Throw[ClauseProblem]} String = {
-   val found: Option[String] = optional(index, clause)
-
-   foldOption(raise(problemIn(problem, clause)), text -> text, found)
-}
+def required(index: Int, problem: String, clause: Clause): {Throw[ClauseProblem]} String =
+   optional(index, clause) orElse raise(problemIn(problem, clause))
 
 /**
  * The `index`-th argument, absent where the clause carries no such argument — the shape a reader
@@ -89,20 +86,14 @@ def knownChildren(keywords: List[String], clause: Clause): {Throw[ClauseProblem]
  * stacked its `Abort` under the `Throw` and that pair had no cross-lift. Effects v6 removed the
  * constraint; the shape stays so that the `require*` helpers read alike.
  */
-def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[ClauseProblem]} Unit = {
-   val trouble: Option[String] = problemUnless(condition, problem)
-
-   foldOption(unit, message -> raise(problemIn(message, clause)), trouble)
-}
+def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[ClauseProblem]} Unit =
+   unless(condition) raise(problemIn(problem, clause))
 
 private def requireKnown(keywords: List[String], clause: Clause): {Throw[ClauseProblem]} Unit = {
    val name = clause.keyword
 
-   requireThat(keywords.any(candidate -> candidate == name), unknownReason(clause), clause)
+   requireThat(keywords.includes(name), unknownReason(clause), clause)
 }
-
-private def problemUnless(condition: Bool, problem: String): Option[String] =
-   fold(condition, None, Some(problem))
 
 /**
  * The message an unrecognised keyword gets. It names the upgrade rather than the mistake, because

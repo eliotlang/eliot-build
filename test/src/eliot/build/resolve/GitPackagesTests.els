@@ -66,16 +66,9 @@ def testCases: Test = {
    }
 }
 
-/**
- * Rendered *inside* the `provide` rather than after it, and not by preference: as of compiler `ea3e27ed`
- * two `provide[Mirrors, Option[_]]` instantiations at different element types get one `withCellInternal`
- * native between them — their JVM descriptors are identical — and the other fails at run time with
- * `NoSuchMethodError`. A `String` result sidesteps it. Undo this once the compiler emits both.
- */
-private def rendered(published: Option[Descriptor]): String =
-   foldOption("<none>", renderDescriptor, published)
+private def rendered(published: Option[Descriptor]): String = published.mapOption(renderDescriptor) orElse "<none>"
 
-private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
+private def renderedCommit(commit: Option[Commit]): String = commit.mapOption(show) orElse "<none>"
 
 private def mirrors: Mirrors =
    mirrorsOf(

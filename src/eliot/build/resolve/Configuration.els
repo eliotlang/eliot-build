@@ -42,11 +42,7 @@ import eliot.build.model.Descriptor
  * ```
  */
 def configuredPackages(name: PackageName, descriptor: Descriptor): Option[List[BuildPackage]] =
-   foldOption(
-      None,
-      start -> Some(closedOver(singleton(start), descriptor)),
-      packageNamed(name, descriptor)
-   )
+   packageNamed(name, descriptor).mapOption(start -> closedOver(singleton(start), descriptor))
 
 /**
  * The foreign requirements building `name` places on the graph: those of every package it opens.
@@ -60,10 +56,8 @@ def configuredPackages(name: PackageName, descriptor: Descriptor): Option[List[B
  * ```
  */
 def configuredDependencies(name: PackageName, descriptor: Descriptor): Option[List[Dependency]] =
-   foldOption(
-      None,
-      opened -> Some(opened.flatMap(built -> built.packageDependencies.filter(isForeign))),
-      configuredPackages(name, descriptor)
+   configuredPackages(name, descriptor).mapOption(opened ->
+      opened.flatMap(built -> built.packageDependencies.filter(isForeign))
    )
 
 private def isForeign(dependency: Dependency): Bool = dependency match {
@@ -102,11 +96,8 @@ private def withSibling(
    reached: List[BuildPackage],
    descriptor: Descriptor
 ): List[BuildPackage] =
-   fold(
-      reached.any(built -> built.packageName == name),
-      reached,
-      foldOption(reached, found -> append(reached, found), packageNamed(name, descriptor))
-   )
+   if(reached.any(built -> built.packageName == name)) reached
+   else reached ++ packageNamed(name, descriptor).toList
 
 private def siblingRounds: List[Unit] = twice(twice(twice(twice(singleton(unit)))))
 

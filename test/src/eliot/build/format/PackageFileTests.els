@@ -244,21 +244,16 @@ def testCases: Test = {
  * so both outcomes are asserted the same way.
  */
 private def parsed(text: String): String =
-   foldEither(
-      error -> show(error),
-      descriptor -> renderDescriptor(descriptor),
-      runThrow[DescriptorError](parseDescriptor(split("\n", text)))
-   )
+   catch[DescriptorError, String](renderDescriptor(parseDescriptor(split("\n", text))), error -> show(error))
 
 /**
  * Where the package called `name` says it is — the one thing the rendering cannot show, since a
  * directory that is the package's name is written as the name alone.
  */
 private def directoryOf(name: String, text: String): String =
-   foldEither(
-      error -> show(error),
-      descriptor -> foldOption("", built -> built.packageRoot, packageNamed(PackageName(name), descriptor)),
-      runThrow[DescriptorError](parseDescriptor(split("\n", text)))
+   catch[DescriptorError, String](
+      packageNamed(PackageName(name), parseDescriptor(split("\n", text))).mapOption(packageRoot) orElse "",
+      error -> show(error)
    )
 
 /**

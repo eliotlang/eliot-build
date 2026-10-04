@@ -19,11 +19,14 @@
 -- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
--- `v0.6`, everywhere. `v0.4` is the first eliot tag whose compiler has the `run` mode and picks the
+-- `v0.7`, everywhere. `v0.4` is the first eliot tag whose compiler has the `run` mode and picks the
 -- backend by it (the `compiler` lines here name none), and whose descriptor names its assets with
 -- `asset`, the only spelling this tool reads; `v0.5` is the first whose warm build over an unchanged
 -- tree stays warm rather than alternating with a slow one; `v0.6` is the first with `--progress`, which the
--- launcher passes every compiler it runs. `eliot-test v0.2` is the first with `//suite`.
+-- launcher passes every compiler it runs; `v0.7` is the first whose base has `when`/`unless`, `someIf`,
+-- `filterMap`/`findMap`, `includes`, `Eq[Option]` and `first`/`second`, which `src` is written with, and
+-- the first whose compiler emits two `if..else`s over two kinds of `Option` without one losing its
+-- `runAbort`. `eliot-test v0.2` is the first with `//suite`.
 
 -- The launcher `./eliotw` runs, and the one line of this file the wrapper reads: it greps for the first
 -- line starting `launcher `. The launcher itself accepts the line and ignores it.
@@ -31,17 +34,17 @@ launcher v0.6
 
 package root {
   at .
-  dep github.com/robertbraeutigam/eliot//stdlib v0.6
+  dep github.com/robertbraeutigam/eliot//stdlib v0.7
 }
 
 package launcher {
   dep //root
-  dep github.com/robertbraeutigam/eliot//jvm v0.6
+  dep github.com/robertbraeutigam/eliot//jvm v0.7
   compiler exe-jar -m eliot.build.Launcher
 }
 
 package test {
   dep //root
   dep github.com/eliotlang/eliot-test//suite v0.2
-  dep github.com/robertbraeutigam/eliot//jvm v0.6
+  dep github.com/robertbraeutigam/eliot//jvm v0.7
 }

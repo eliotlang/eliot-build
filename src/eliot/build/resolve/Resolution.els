@@ -69,11 +69,7 @@ def resolve(
    name: PackageName,
    descriptor: Descriptor
 ): {PackageSource, Throw[ResolutionError]} Resolution =
-   foldOption(
-      raise(NoSuchPackage(name)),
-      resolveRequirements,
-      configuredDependencies(name, descriptor)
-   )
+   resolveRequirements(configuredDependencies(name, descriptor) orElse raise(NoSuchPackage(name)))
 
 /**
  * How many rounds of expansion a closure may take before resolution gives up — one round per level
@@ -123,17 +119,10 @@ private def withDependenciesOf(
    selection: Selection,
    state: ResolutionState
 ): {PackageSource, Throw[ResolutionError]} ResolutionState = {
-   val published = descriptorAt(selection.selectedVersion, selection.selectedRepository)
+   val descriptor = descriptorAt(selection.selectedVersion, selection.selectedRepository) orElse
+      raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
 
-   foldOption(
-      raise(Unavailable(selection.selectedRepository, selection.selectedVersion)),
-      descriptor -> withRequirements(
-         Some(selection.selectedRepository),
-         mountedDependencies(selection, descriptor),
-         state
-      ),
-      published
-   )
+   withRequirements(some(selection.selectedRepository), mountedDependencies(selection, descriptor), state)
 }
 
 /**
@@ -195,14 +184,10 @@ private def withSibling(
    name: PackageName,
    state: ResolutionState
 ): ResolutionState =
-   foldOption(state, known -> wanting(name, known, state), ownerSelection(owner, state))
+   ownerSelection(owner, state).foldOption(state, known -> wanting(name, known, state))
 
 private def ownerSelection(owner: Option[Repository], state: ResolutionState): Option[Selection] =
-   foldOption(
-      None,
-      repository -> state.selected.find(selection -> selection.selectedRepository == repository),
-      owner
-   )
+   state.selected.find(selection -> some(selection.selectedRepository) == owner)
 
 private def withMinimum(
    package: Package,
@@ -212,10 +197,9 @@ private def withMinimum(
    val target = package.packageRepository
    val identity = identified(target, minimum, state)
 
-   foldOption(
+   identity.matched.foldOption(
       inserted(Selection(target, minimum, identity.anchorFound, singleton(package.selectedPackage)), state),
-      known -> merged(known, package.selectedPackage, minimum, state),
-      identity.matched
+      known -> merged(known, package.selectedPackage, minimum, state)
    )
 }
 
@@ -226,7 +210,7 @@ private def withMinimum(
 private def identified(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
    val byUrl = state.selected.find(selection -> selection.selectedRepository == target)
 
-   foldOption(byLineage(target, minimum, state), known -> Identified(Some(known), known.lineageAnchor), byUrl)
+   byUrl.foldOption(byLineage(target, minimum, state), known -> Identified(Some(known), known.lineageAnchor))
 }
 
 private def byLineage(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
@@ -246,17 +230,12 @@ private def merged(
    minimum: Version,
    state: ResolutionState
 ): {Throw[ResolutionError]} ResolutionState = {
-   val conflict = conflictBetween(known, minimum)
-
-   foldOption(upgraded(known, selector, minimum, state), error -> raise(error), conflict)
-}
-
-private def conflictBetween(known: Selection, minimum: Version): Option[ResolutionError] =
-   fold(
-      sameLine(known.selectedVersion, minimum),
-      None,
-      Some(MajorConflict(known.selectedRepository, known.selectedVersion, minimum))
+   unless(sameLine(known.selectedVersion, minimum)) raise(
+      MajorConflict(known.selectedRepository, known.selectedVersion, minimum)
    )
+
+   upgraded(known, selector, minimum, state)
+}
 
 /**
  * The known selection keeps its repository — the URL the closure reached first, which is the root's
@@ -302,14 +281,14 @@ private def wanting(selector: PackageName, known: Selection, state: ResolutionSt
  * something, and what it can learn — a higher version, one more package — only ever goes one way.
  */
 private def replacedWhenGrown(known: Selection, next: Selection, state: ResolutionState): ResolutionState =
-   fold(grew(known, next), replaced(next, state), state)
+   if(grew(known, next)) replaced(next, state) else state
 
 private def grew(known: Selection, next: Selection): Bool =
    known.selectedVersion != next.selectedVersion ||
       known.selectedPackages.size != next.selectedPackages.size
 
 private def withPackage(selector: PackageName, packages: List[PackageName]): List[PackageName] =
-   fold(packages.any(known -> known == selector), packages, append(packages, selector))
+   if(packages.includes(selector)) packages else append(packages, selector)
 
 private def inserted(selection: Selection, state: ResolutionState): ResolutionState =
    ResolutionState(append(state.selected, selection), append(state.pending, selection))
@@ -324,8 +303,11 @@ private def replaced(selection: Selection, state: ResolutionState): ResolutionSt
  * The closure once the rounds are spent: a frontier that is still not empty means the graph is deeper
  * than the declared ceiling, and a partial answer is not one of the outcomes on offer.
  */
-private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution =
-   foldOption(Resolution(state.selected.sorted), _ -> raise(TooDeep(resolutionDepthLimit)), state.pending.head)
+private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution = {
+   unless(state.pending.isEmpty) raise(TooDeep(resolutionDepthLimit))
+
+   Resolution(state.selected.sorted)
+}
 
 /**
  * The rounds a closure may take, as data: user code cannot loop, so depth is a list to fold over

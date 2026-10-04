@@ -134,9 +134,9 @@ expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `wi
 implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
 Everything else is mocked by `eliot.test.Mock`: a case declares nothing, arranges with
 `whenSpawning`/`withDirectory`/…, acts, and verifies with `wasCalledOnce`/`calls`/…
-(`eliot-test/docs/mocking.md`). Both suites that resolve render *inside* the `against`, and must: two
-`provide[Universe, _]` instantiations whose erased JVM descriptors agree get one native between them
-(§11.3), which a second resolving suite walks straight into. `FakeWorld` — 195 lines of hand-written
+(`eliot-test/docs/mocking.md`). Every suite that resolves does it through `TablePackages.against`, which
+answers one line — the case's rendering, or the error shown — so both outcomes are asserted alike (the
+§11.3 collision that once forced this is fixed in eliot `v0.7`, §21). `FakeWorld` — 195 lines of hand-written
 doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 says what that leaves
 unchecked.)
 
@@ -150,7 +150,8 @@ came from and what was deliberately left whole; §16 is what the packages under 
 `eliotw` is allowed to know, and two findings recorded rather than fixed. §17 is the verb that
 compiles: the sixth package, the toolchain read off a closure, and the three compiler workarounds the
 build verb cost — one of which is why §16's "a failed build exits 0" is now closed. §18 is the
-`compiler` line: `Toolchain` replaced by `Invocation`, and one more §11.3 collision. §19 is the lockfile:
+`compiler` line: `Toolchain` replaced by `Invocation`, and one more §11.3 collision. §21 is that collision fixed,
+and the sweep from hand-written eliminators to the base's names it unblocked. §19 is the lockfile:
 three modules, one question added to each of `PackageSource` and `Assets`, and two more launcher channels.
 §20 is the tree checked out at the commit that was locked, `<url>@<commit>`.
 
@@ -220,7 +221,7 @@ a published eliot tag.
 blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
-eliot `v0.6` and eliot-test `v0.2`. `v0.4` and `v0.2` are the first tags of each with `asset` clauses
+eliot `v0.7` (the base `src` is written with, §21) and eliot-test `v0.2`. `v0.4` and `v0.2` are the first tags of each with `asset` clauses
 and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
 `v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow, and
 `v0.6` the first with `--progress`, which `Command.compilerCommand` appends to every compiler it runs (and
@@ -294,7 +295,7 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar test   # must ex
 
 A package's `eliot.pkg` must require eliot at `v0.4` or later for this to work at all — every earlier
 tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository
-requires `v0.6` and `../eliot-test` `v0.4`. Three things to check while you are there: a failing case must
+requires `v0.7` and `../eliot-test` `v0.4`. Three things to check while you are there: a failing case must
 make `test` exit 1, a deliberate syntax error in any
 mounted source must make the build exit 1 with the compiler's own diagnostics on the terminal, and
 `nosuch` — and a bare command line, and the old `build test` — must exit 1 rather than printing a
@@ -350,8 +351,8 @@ rest.
 Two build gotchas recorded in §11.3: a rename that fails at `Git.els:1:1: Could not find '…'` with
 correct sources is the stale incremental cache — delete `target/.eliot-index-*` and
 `target/.eliot-objects-*`; and two `provide`s over one `Dep` type whose results are both `Option[_]`
-get one native between them and the other dies at run time with `NoSuchMethodError`, so the suites
-render inside every `provide`.
+got one native between them, the other dying at run time with `NoSuchMethodError` — fixed in eliot
+`v0.7` (§21), so a shape that was chosen to dodge it is a choice now, not a requirement.
 
 ### `eliot.paths` is gone
 

@@ -31,7 +31,7 @@ implement cachedPackages: PackageSource {
       } Option[Descriptor] = {
       val published = cachedDescriptorTextAt(dependency, version, target)
 
-      foldOption(None, text -> Some(parseDescriptor(split("\n", text))), published)
+      published.mapOption(text -> parseDescriptor(split("\n", text)))
    }
 
    def anchorAt(

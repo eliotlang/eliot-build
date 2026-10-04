@@ -269,12 +269,6 @@ private def anchored: String = "aaa1\trefs/tags/v1.0\nbbb2\trefs/tags/v1.4"
 private def renderedTags(refs: List[TagRef]): String =
    refs.map(ref -> show(ref.taggedVersion) ++ " " ++ show(ref.taggedCommit)).joined(", ")
 
-/**
- * Rendered *inside* the `provide` wherever an answer is an `Option`, and not by preference: as of compiler
- * `ea3e27ed` two `provide[Mirrors, Option[_]]` instantiations at different element types get one
- * `withCellInternal` native between them — their JVM descriptors are identical — and the other fails at
- * run time with `NoSuchMethodError`. A `String` result sidesteps it. Undo once the compiler emits both.
- */
-private def renderedCommit(commit: Option[Commit]): String = foldOption("<none>", found -> show(found), commit)
+private def renderedCommit(commit: Option[Commit]): String = commit.mapOption(show) orElse "<none>"
 
-private def renderedText(text: Option[String]): String = foldOption("<none>", found -> found, text)
+private def renderedText(text: Option[String]): String = text orElse "<none>"
