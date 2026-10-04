@@ -11,8 +11,8 @@ import eliot.build.model.Lock
  *
  * ```
  * package test {
- *   version github.com/robertbraeutigam/eliot v0.6 8a9f94f87d45f39289b70ce1b2de6eaae66d2491
- *   asset github.com/robertbraeutigam/eliot v0.6 eliot-jvm.zip 3b1f…
+ *   version github.com/eliotlang/eliot v0.6 8a9f94f87d45f39289b70ce1b2de6eaae66d2491
+ *   asset github.com/eliotlang/eliot v0.6 eliot-jvm.zip 3b1f…
  * }
  * ```
  *

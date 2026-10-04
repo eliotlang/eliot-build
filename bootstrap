@@ -31,7 +31,7 @@ fail() {
 }
 
 here=$(cd "$(dirname "$0")" > /dev/null && pwd -P)
-eliotRepository="github.com/robertbraeutigam/eliot"
+eliotRepository="github.com/eliotlang/eliot"
 eliotRemote="${ELIOT_BOOTSTRAP_REMOTE:-https://$eliotRepository}"
 compilerMainClass="com.vanillasource.eliot.eliotc.compiler.Main"
 launcherModule="eliot.build.Launcher"

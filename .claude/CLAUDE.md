@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`eliot.build` — is the build tool for the [Eliot language](https://github.com/robertbraeutigam/eliot),
+`eliot.build` — is the build tool for the [Eliot language](https://github.com/eliotlang/eliot),
 written *in* Eliot. 
 
 When reading or editing any `.els` file, use the `eliot-code` skill — it is the full language
@@ -307,7 +307,7 @@ the asset cache can: clone each dependency into a scratch directory, commit the 
 `git tag -a` it; write a `GIT_CONFIG_GLOBAL` file with `[url "<scratch clone>"] insteadOf =
 https://github.com/<owner>/<repo>` per repository; build the assets with eliot's
 `scripts/package-assets.sh <dir>` and unzip each into
-`<project>/target/cache/assets/github.com/robertbraeutigam/eliot@<tag>/<asset>.zip/`. The launcher then
+`<project>/target/cache/assets/github.com/eliotlang/eliot@<tag>/<asset>.zip/`. The launcher then
 resolves, checks out and builds exactly as it will against GitHub. `./bootstrap` takes the same setup plus
 `ELIOT_BOOTSTRAP_REMOTE=file://<scratch eliot clone>` with the zips at
 `<clone>/releases/download/<tag>/`. Do it in a copy of the project so the real `target/cache` never holds
