@@ -1,7 +1,10 @@
 # Publishing this repository is publishing one jar: `eliot-launcher.jar`, the tool `eliotw` fetches and
-# execs. Everything else a build needs comes from the dependency graph, so this is the one binary in the
-# system whose location is not derived from anything — which is exactly why it is pinned by hand in each
-# consumer's `launcher` line in `eliot.pkg` and why what is attached here has to be right.
+# execs. `eliotw` itself is attached beside it, so `releases/latest/download/eliotw` is a URL a new
+# project can be started from; it is version-free and byte-identical everywhere, so which release it
+# came from does not matter. Everything else a build needs comes from the dependency graph, so the
+# launcher is the one binary in the system whose location is not derived from anything — which is
+# exactly why it is pinned by hand in each consumer's `launcher` line in `eliot.pkg` and why what is
+# attached here has to be right.
 #
 # The jar is built by this tag's own source, bootstrapped. `./bootstrap` compiles the launcher from the
 # tag's `src` with the eliot toolchain its `eliot.pkg` names (stage 0), and that launcher then builds
@@ -85,6 +88,7 @@ jobs:
           ./bootstrap launcher
           mkdir -p out/release
           cp target/Launcher.jar out/release/eliot-launcher.jar
+          cp eliotw out/release/eliotw
 
       # The jar about to be published builds the suite on its own, with nothing from stage 0 left in
       # `target` to hide behind.
@@ -96,11 +100,11 @@ jobs:
       - name: The notes
         run: |
           {
-            echo "The launcher \`eliotw\` fetches, bootstrapped from this tag's own source."
+            echo "The launcher \`eliotw\` fetches, bootstrapped from this tag's own source, and \`eliotw\` itself."
             echo
             echo "| asset | sha256 |"
             echo "| --- | --- |"
-            (cd out/release && sha256sum eliot-launcher.jar |
+            (cd out/release && sha256sum eliot-launcher.jar eliotw |
                while read -r sum name; do echo "| \`$name\` | \`$sum\` |"; done)
             echo
             echo "A published asset is never replaced. A mistake in one is a new tag."
@@ -115,8 +119,8 @@ jobs:
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
              gh release edit "$TAG" --notes-file out/notes.md
-             gh release upload "$TAG" out/release/eliot-launcher.jar --clobber
+             gh release upload "$TAG" out/release/eliot-launcher.jar out/release/eliotw --clobber
           else
              gh release create "$TAG" --verify-tag --title "$TAG" --notes-file out/notes.md \
-                out/release/eliot-launcher.jar
+                out/release/eliot-launcher.jar out/release/eliotw
           fi

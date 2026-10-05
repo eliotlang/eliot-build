@@ -171,8 +171,9 @@ that. There is no `pure` any more, no capture tag and no carrier.
 A major version is a branch, a release is an **annotated** tag on it; the line is `v0`. To publish:
 fast-forward `v0` to the commit, `git tag -a v0.<n>` on it, push both. `.github/workflows/release.yml`
 then runs `./bootstrap test`, builds the jar with `./bootstrap launcher`, checks that the
-jar it is about to attach builds a green suite on its own, and attaches it as `eliot-launcher.jar` with
-its sha256 in the notes. **A release is bootstrapped from its own source**, not built by the previous
+jar it is about to attach builds a green suite on its own, and attaches it as `eliot-launcher.jar`, with
+`eliotw` beside it (so `releases/latest/download/eliotw` is where a new project downloads the wrapper
+from) and both sha256s in the notes. **A release is bootstrapped from its own source**, not built by the previous
 release: that chain broke twice (`v0.1` had nothing before it, and `v0.1`'s launcher cannot read the
 descriptor `v0.2` is spelled in), and `./bootstrap` is what replaced it.
 
