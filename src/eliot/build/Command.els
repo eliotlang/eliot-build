@@ -39,15 +39,44 @@ import eliot.build.model.PackageId
  * is *not* refused here is a package no descriptor declares: that is a fact about a descriptor this
  * function has not seen, and `unknownPackage` is what the launcher answers once it has read one.
  *
+ * The one thing that may follow the name is `--`, and everything after it is `forwarded`'s, not this
+ * function's: `eliot test -- eliot.build.resolve` names `test`.
+ *
  * ```eliot
  * val name = requested(singleton("controller-jvm"))
  * ```
  */
 def requested(commandLine: List[String]): Option[PackageName] = {
    val named = at(0, commandLine) orElse ""
+   val alone = size(commandLine) == 1 || separatedAfterName(commandLine)
 
-   someIf(size(commandLine) == 1 && named != "" && !startsWith("-", named)) PackageName(named)
+   someIf(alone && named != "" && !startsWith("-", named)) PackageName(named)
 }
+
+/**
+ * The words after the `--` that follows the package name, verbatim — for the program a line runs, not
+ * for the tool.
+ *
+ * **The tool reads none of them.** A second `--`, a word starting `-`, a word that looks like a package:
+ * each is passed on as written, because what they mean is the program's business — a test runner reads
+ * suite names, an application its own arguments — and a word the tool interpreted on the way would be a
+ * word the program never saw. Only the first `--` separates; the compiler cuts its own command line at
+ * the first `--` in the same way, which is what lets the words travel through it untouched.
+ *
+ * Nothing where the command line has no `--` right after the name, and nothing where it has one with
+ * nothing after it: forwarding no words and forwarding none at all are the same request.
+ *
+ * ```eliot
+ * val words = forwarded(split(" ", "test -- eliot.build.resolve"))   // eliot.build.resolve
+ * ```
+ */
+def forwarded(commandLine: List[String]): List[String] =
+   if(separatedAfterName(commandLine)) commandLine.tail.tail else empty
+
+/**
+ * The word that ends the tool's command line and starts the program's, spelled once.
+ */
+def argumentSeparator: String = "--"
 
 /**
  * `true` where the command line asks for the project model — `--project-model` and nothing else.
@@ -74,10 +103,10 @@ def projectModelOption: String = "--project-model"
 
 /**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
- * plugins were unpacked into, the words of the `compiler` line being run, the source roots, and where
- * the result goes.
+ * plugins were unpacked into, the words of the `compiler` line being run, the source roots, where
+ * the result goes, and the words the command line forwarded to the program.
  *
- * A record rather than five arguments, because every field here is decided somewhere else — the
+ * A record rather than six arguments, because every field here is decided somewhere else — the
  * closure says the line and the assets, the resolution says the roots, the launcher says the JVM — and
  * a record is what lets each of them be filled in by whoever knows it and read back by a test.
  */
@@ -86,7 +115,8 @@ data Compilation(
    toolchainClasspath: List[Path],
    compilerArguments: List[String],
    compiledRoots: List[Path],
-   outputDirectory: Path
+   outputDirectory: Path,
+   forwardedArguments: List[String]
 )
 
 /**
@@ -105,8 +135,15 @@ data Compilation(
  * the launcher to decide about where the build is running; stdout stays the `run` mode's program's.
  * It trails with `-o`, where the compiler's own options are read once the roots have closed the mode.
  *
+ * **Forwarded words come last, after a `--` of the launcher's own.** The compiler cuts its command line
+ * at the first `--` before it parses anything and hands the rest to the program its `run` mode starts,
+ * so nothing a user forwards can be read as a root or an option of the compiler's. Every line in the
+ * closure gets the same words: the tool does not know which line runs a program, and a line whose mode
+ * runs none — `exe-jar` — refuses them, which fails the build rather than dropping words the user meant.
+ * No words, no `--`.
+ *
  * ```eliot
- * val line = compilerCommand(Compilation("java", plugins, split(" ", "run -m Main"), roots, target))
+ * val line = compilerCommand(Compilation("java", plugins, split(" ", "run -m Main"), roots, target, empty))
  * ```
  */
 def compilerCommand(compilation: Compilation): List[String] =
@@ -115,7 +152,8 @@ def compilerCommand(compilation: Compilation): List[String] =
       .withArgument(compilerMainClass)) ++
       compilation.compilerArguments ++
       compilation.compiledRoots.map(show) ++
-      (command("--progress").withArgument("-o").withArgument(show(compilation.outputDirectory)))
+      (command("--progress").withArgument("-o").withArgument(show(compilation.outputDirectory))) ++
+      separated(compilation.forwardedArguments)
 
 /**
  * The compiler's entry point, by name.
@@ -167,8 +205,9 @@ def failed(doing: String, problem: String): List[String] = singleton("eliot: " +
  * ```
  */
 def usage(declared: Option[List[PackageName]]): List[String] =
-   singleton("usage: eliot <package>") ++
+   singleton("usage: eliot <package> [-- <argument>...]") ++
       singleton("   runs every compiler line in the package's closure over the package's sources") ++
+      singleton("   and passes the arguments after -- to the program a line runs") ++
       singleton("usage: eliot " ++ projectModelOption) ++
       singleton("   prints what every package resolves to, as JSON, from what is already fetched") ++
       (declared.mapOption(listed) orElse empty)
@@ -192,3 +231,14 @@ def unknownPackage(name: PackageName, declared: List[PackageName]): List[String]
 private def listed(declared: List[PackageName]): List[String] =
    if(isEmpty(declared)) singleton(descriptorFileName ++ " declares no packages")
    else singleton("packages in " ++ descriptorFileName ++ ":") ++ declared.map(name -> "   " ++ show(name))
+
+/**
+ * `true` where the word after the package name is the separator.
+ */
+private def separatedAfterName(commandLine: List[String]): Bool = (at(1, commandLine) orElse "") == argumentSeparator
+
+/**
+ * `words` behind the separator, or nothing where there are none.
+ */
+private def separated(words: List[String]): List[String] =
+   if(isEmpty(words)) empty else prepend(words, argumentSeparator)

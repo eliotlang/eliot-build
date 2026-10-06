@@ -41,7 +41,7 @@ than kept beside it ("What was built", below). Amended 2026-10-03: **the lockfil
 of each fetched asset, checked by every build before anything runs; the tree hash is cut as a second
 spelling of the commit ("Lockfile", below).
 
-**Where the implementation stands** (2026-10-03, 305 tests):
+**Where the implementation stands** (2026-10-06, 319 tests):
 
 | Module | What it is | State |
 |---|---|---|
@@ -57,7 +57,7 @@ spelling of the commit ("Lockfile", below).
 | `Assets` | a release asset's location, and getting one onto disk | done |
 | `Invocation` | every asset for the classpath, every `compiler` line in the closure | done |
 | `Launcher` | the `main`, the composition, the failure channels | `eliot <package>`, one run per line |
-| `Command` | what a command line names, how the compiler is spelled | done |
+| `Command` | what a command line names, how the compiler is spelled | done; `-- <words>` 2026-10-06 |
 | `eliotw` | find a JRE, read the pin, fetch the launcher, exec it | done |
 | `Lock` / `LockFile` / `Locking` | `eliot.lock`: the facts, the file, the asking | done 2026-10-03 |
 | — | the `compiler` line: every line in the closure | done 2026-09-16 |
@@ -485,6 +485,28 @@ Later the same day, **the verbs went**:
 
 Still the design's and not the tool's: the two root lists (every root is still passed positionally,
 since the compiler has no flag between them yet).
+
+**Words after `--` go to the program** (2026-10-06). `eliot test -- eliot.build.resolve` runs that suite
+and no other: the one thing that may follow the package name is `--`, and every word after it is
+appended to each compiler line behind a `--` of the launcher's own, after `-o`. The compiler cuts its
+command line at its first `--` before parsing and hands the rest to the program its `run` mode starts,
+so none of the words can be read as a root or a compiler option, and the tool reads none of them
+either — a second `--` or a word starting `-` travels as written. Three decisions in it:
+
+- **Every line gets the words.** The tool cannot tell which line runs a program — that is a mode
+  word, and the line is not looked at — so it does not guess. A line whose mode runs nothing
+  (`exe-jar`) refuses them in the compiler, which fails the build rather than dropping words the user
+  meant; a closure with a line of each kind is the case where forwarding cannot be asked for.
+- **No words, no `--`.** `eliot test --` is `eliot test`, and the compiler's command line is then
+  exactly what it was before forwarding existed.
+- **It needs a compiler with program arguments**, which eliot's `run` mode has since `192f347b` and no
+  tag of it carries yet. **Against `v0.7` forwarding is silently wrong**, checked on the platform:
+  `eliot test -- eliot.build.Command` exits 0 having run all 319 cases, because that compiler's parser
+  reads `--` as the end of its options and the words after it as more source roots, and a root that is
+  not a directory mounts nothing. A word naming a directory would be mounted. The tool cannot see the
+  compiler's version without treating eliot as special, which no package is, so the fix is the next
+  eliot tag and this repository requiring it; until then a forwarded word is a filter that does not
+  filter. Only a command line that forwards something is affected.
 
 ## Distribution: git-native
 

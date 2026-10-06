@@ -35,6 +35,35 @@ def testCases: Test = {
    "requested" should "ask for nothing on an empty command line" in {
       described(requested(empty)) shouldBe "<none>"
    }
+   "requested" should "read the package before the separator" in {
+      described(requested(words("test -- eliot.build.resolve"))) shouldBe "test"
+   }
+   "requested" should "read the package before a separator with nothing after it" in {
+      described(requested(words("test --"))) shouldBe "test"
+   }
+   "requested" should "ask for nothing where a word other than the separator follows the package" in {
+      described(requested(words("test eliot.build.resolve --"))) shouldBe "<none>"
+   }
+   "requested" should "ask for nothing where the separator comes first" in {
+      described(requested(words("-- test"))) shouldBe "<none>"
+   }
+
+   "forwarded" should "answer the words after the separator, in order" in {
+      joined(" ", forwarded(words("test -- eliot.build.resolve eliot.build.git"))) shouldBe
+         "eliot.build.resolve eliot.build.git"
+   }
+   "forwarded" should "pass a second separator and words like options on verbatim" in {
+      joined(" ", forwarded(words("test -- --format=plain -- -o x"))) shouldBe "--format=plain -- -o x"
+   }
+   "forwarded" should "answer nothing where the command line has no separator" in {
+      isEmpty(forwarded(commandLine("test"))).shouldBeTrue
+   }
+   "forwarded" should "answer nothing where nothing follows the separator" in {
+      isEmpty(forwarded(words("test --"))).shouldBeTrue
+   }
+   "forwarded" should "answer nothing where the separator does not follow a package name" in {
+      isEmpty(forwarded(words("-- test"))).shouldBeTrue
+   }
 
    "modelRequested" should "read the project-model option" in {
       modelRequested(commandLine("--project-model")).shouldBeTrue
@@ -44,6 +73,9 @@ def testCases: Test = {
    }
    "modelRequested" should "not read the option with a package after it" in {
       modelRequested(append(commandLine("--project-model"), "test")).shouldBeFalse
+   }
+   "modelRequested" should "not read the option with forwarded words after it" in {
+      modelRequested(words("--project-model -- test")).shouldBeFalse
    }
    "modelRequested" should "not read an empty command line as the option" in {
       modelRequested(empty).shouldBeFalse
@@ -58,6 +90,14 @@ def testCases: Test = {
    "compilerCommand" should "pass the line's words through untouched, whatever they say" in {
       joined(" ", compilerCommand(compilationOf("jvm exe-jar --statistics -m App")))
          .contains("compiler.Main jvm exe-jar --statistics -m App /project/src").shouldBeTrue
+   }
+   "compilerCommand" should "put forwarded words last, behind a separator of its own" in {
+      joined(" ", compilerCommand(forwarding("eliot.build.resolve", compilationOf("run -m eliot.test.Runner"))))
+         shouldBe (expectedCompilerCommand ++ " -- eliot.build.resolve")
+   }
+   "compilerCommand" should "add no separator where nothing is forwarded" in {
+      joined(" ", compilerCommand(compilationOf("run -m eliot.test.Runner"))).endsWith("-o /project/target")
+         .shouldBeTrue
    }
    "compilerCommand" should "run the java it was given rather than one it decided" in {
       joined(" ", compilerCommand(compilationOf("apidoc"))).startsWith("/opt/jdk/bin/java -cp")
@@ -92,8 +132,9 @@ def testCases: Test = {
 }
 
 private def expectedUsage: String =
-   "usage: eliot <package>/" ++
+   "usage: eliot <package> [-- <argument>...]/" ++
       "   runs every compiler line in the package's closure over the package's sources/" ++
+      "   and passes the arguments after -- to the program a line runs/" ++
       "usage: eliot --project-model/" ++
       "   prints what every package resolves to, as JSON, from what is already fetched"
 
@@ -124,7 +165,21 @@ private def compilationOf(line: String): Compilation =
       singleton(path("/cache/assets/eliot-compiler.zip")),
       split(" ", line),
       append(singleton(path("/project/src")), path("/project/test")),
-      path("/project/target")
+      path("/project/target"),
+      empty
+   )
+
+/**
+ * `compilation` with `line`'s words forwarded to the program it runs.
+ */
+private def forwarding(line: String, compilation: Compilation): Compilation =
+   Compilation(
+      compilation.javaCommand,
+      compilation.toolchainClasspath,
+      compilation.compilerArguments,
+      compilation.compiledRoots,
+      compilation.outputDirectory,
+      split(" ", line)
    )
 
 private def described(name: Option[PackageName]): String = name.mapOption(show) orElse "<none>"

@@ -112,8 +112,12 @@ model as JSON (`assemble/ProjectModel`: own root, project roots, dependency root
 `problem`), resolved **offline** through `resolve/CachedPackages` (`cachedPackages`, over `Cache`'s
 `cached*` questions, which raise `NotFetched` instead of cloning or fetching), and always exits 0. The
 LSP runs it through `./eliotw`, so it reaches an editor once a launcher release carrying it is pinned.
-Anything else — a second word, no word, or another word starting `-` — is the usage and exit
-1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
+The one thing that may follow the package is `--`, and the words after it are forwarded verbatim
+to every compiler line, after `-o` behind a `--` of the launcher's own — `eliot test --
+eliot.build.resolve` runs one suite (`docs/build-system.md`, "Words after `--` go to the program"; it
+needs an eliot whose `run` mode takes program arguments, which no tag up to `v0.7` is — `v0.7` reads the
+words as more source roots and runs everything, exit 0). Anything
+else — a second word, no word, or another word starting `-` — is the usage and exit 1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
 with that list after the error (the descriptor is read before the command line is looked at, so a
 missing or malformed one is reported first, followed by the bare usage). **Every build checks and
 records `eliot.lock`** between working out what to run and checking anything out, and checks out exactly
@@ -200,7 +204,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 307 green
+./bootstrap test                                             # compiles and runs the suite, 319 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -234,7 +238,7 @@ compiler refuses the flag, and until eliot `985b0b66` it then exited 0, making t
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 307 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 319 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
