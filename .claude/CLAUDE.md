@@ -226,7 +226,8 @@ a published eliot tag.
 blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
-eliot `v0.7` (the base `src` is written with, §21) and eliot-test `v0.2`. `v0.4` and `v0.2` are the first tags of each with `asset` clauses
+eliot `v0.7` (the base `src` is written with, §21) and eliot-test `v0.3` (`recordCall`, which `TableGit` journals
+with, and `whenSpawningWrites`, which says what a mocked `curl` leaves). `v0.4` and eliot-test's `v0.2` are the first tags of each with `asset` clauses
 and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
 `v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow, and
 `v0.6` the first with `--progress`, which `Command.compilerCommand` appends to every compiler it runs (and

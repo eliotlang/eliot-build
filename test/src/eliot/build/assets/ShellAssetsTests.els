@@ -27,29 +27,35 @@ import eliot.build.assets.ShellAssets
  */
 def testCases: Test = {
    "assetTree" should "download the asset from the tag the consumer already selected" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce(expectedDownload)
    }
    "assetTree" should "unpack it into a directory named for the asset, beside the mirrors" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce(expectedUnpacking)
    }
    "assetTree" should "answer the directory the jars were unpacked into" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
    }
    "assetTree" should "delete the archive, which nothing reads once it is unpacked" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce("delete " ++ expectedTree ++ ".download")
    }
    "assetTree" should "make the directory the archive lands in, and let unzip make the one beside it" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce("createDirectories target/cache/assets/github.com/e/eliot@v1.2")
    }
    "assetTree" should "fetch nothing at all for an asset this machine already unpacked" in mocked {
+      downloading
       withFile(path(expectedDigestFile), "beef\n")
 
       answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
@@ -57,6 +63,7 @@ def testCases: Test = {
       wasNeverCalled("curl")
    }
    "assetTree" should "fetch again an asset whose directory has no digest beside it, as a fetch that never finished" in mocked {
+      downloading
       withDirectory(path(expectedTree))
 
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
@@ -64,21 +71,25 @@ def testCases: Test = {
       wasCalledOnce(expectedDownload)
    }
    "assetTree" should "hash the archive before unpacking it" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wereCalledInOrder(append(singleton(expectedHashing), expectedUnpacking))
    }
    "assetTree" should "write the digest beside the directory only once the archive is unpacked" in mocked {
+      downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wereCalledInOrder(append(singleton(expectedUnpacking), "writeFile " ++ expectedDigestFile))
    }
    "assetDigest" should "answer the digest of the archive that was fetched" in mocked {
+      downloading
       whenSpawning("sha256sum", succeeding("beef  " ++ expectedTree ++ ".download\n"))
 
       answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
    }
    "assetDigest" should "read a cached asset's digest back without fetching or hashing it" in mocked {
+      downloading
       withFile(path(expectedDigestFile), "beef\n")
 
       answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
@@ -86,6 +97,7 @@ def testCases: Test = {
       wasNeverCalled("sha256sum")
    }
    "assetTree" should "raise what the downloader said about an asset that is not published" in mocked {
+      downloading
       whenSpawning("curl", failing(22, "The requested URL returned error: 404"))
 
       raising[AssetError](expectedRefusal, {
@@ -94,6 +106,7 @@ def testCases: Test = {
       })
    }
    "assetTree" should "raise what unzip said about an archive it could not open" in mocked {
+      downloading
       whenSpawning("unzip", failing(9, "cannot find zipfile directory"))
 
       raising[AssetError](expectedUnpackingRefusal, {
@@ -103,6 +116,7 @@ def testCases: Test = {
    }
 
    "assetTree" should "raise what the hasher said about an archive it could not read" in mocked {
+      downloading
       whenSpawning("sha256sum", failing(1, "No such file or directory"))
 
       raising[AssetError]("'" ++ expectedHashing ++ "' failed with exit code 1: No such file or directory", {
@@ -160,3 +174,8 @@ private def renderedDigest(digest: Digest): String = show(digest)
 private def answered(computation: {Dep[Path]} String): String = provide[Path, String](cacheRoot, computation)
 
 private def cacheRoot: Path = path("target/cache")
+
+/**
+ * What curl leaves behind when it succeeds: the archive, at the path the download names.
+ */
+private def downloading: {Mocking} Unit = whenSpawningWrites("curl", path(expectedTree ++ ".download"), "")

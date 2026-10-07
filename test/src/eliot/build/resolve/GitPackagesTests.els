@@ -41,7 +41,7 @@ def testCases: Test = {
 
       answered(rendered(descriptorAt(Version(Line(1), Some(2)), cached)) with gitPackages with tableGit)
 
-      lastCall shouldBe "log fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
+      lastCall shouldBe "fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
    }
    "anchorAt" should "answer the commit the line's first release names" in mocked {
       withDirectory(mirrorPath)
