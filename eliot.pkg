@@ -26,7 +26,9 @@
 -- launcher passes every compiler it runs; `v0.7` is the first whose base has `when`/`unless`, `someIf`,
 -- `filterMap`/`findMap`, `includes`, `Eq[Option]` and `first`/`second`, which `src` is written with, and
 -- the first whose compiler emits two `if..else`s over two kinds of `Option` without one losing its
--- `runAbort`. `eliot-test v0.2` is the first with `//suite`.
+-- `runAbort`. `eliot-test v0.2` is the first with `//suite`, and `v0.3` the first with `recordCall`, which
+-- `TableGit` journals its operations with, and `whenSpawningWrites`, which `ShellAssetsTests` arranges the
+-- archive a mocked `curl` leaves with — its `delete` refuses a path nothing is at, as the platform does.
 
 -- The launcher `./eliotw` runs, and the one line of this file the wrapper reads: it greps for the first
 -- line starting `launcher `. The launcher itself accepts the line and ignores it.
@@ -45,6 +47,6 @@ package launcher {
 
 package test {
   dep //root
-  dep github.com/eliotlang/eliot-test//suite v0.2
+  dep github.com/eliotlang/eliot-test//suite v0.3
   dep github.com/eliotlang/eliot//jvm v0.7
 }

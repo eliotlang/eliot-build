@@ -36,7 +36,7 @@ def testCases: Test = {
       } with tableGit)
 
       wasCalledOnce("cloneMirror")
-      wasCalledTimes(2, "log tags")
+      wasCalledTimes(2, "tags")
    }
    "publishedTags" should "not clone a mirror that was already on disk" in mocked {
       withDirectory(mirrorPath)
@@ -211,7 +211,7 @@ private def anchoredAt: Mirrors = mirrorsOf(anchored, empty)
  */
 private def expectedFirstVisit: String =
    expectedPresenceCheck ++ "; createDirectories target/cache; " ++
-      "log cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
+      "cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
       expectedListing
 
 /**
@@ -220,7 +220,7 @@ private def expectedFirstVisit: String =
  */
 private def expectedPresenceCheck: String = "isDirectory target/cache/github.com/x/foo"
 
-private def expectedListing: String = "log tags target/cache/github.com/x/foo"
+private def expectedListing: String = "tags target/cache/github.com/x/foo"
 
 /**
  * The first checkout: look for the tree, look for the mirror, make the root, clone, check out. The
@@ -230,12 +230,12 @@ private def expectedListing: String = "log tags target/cache/github.com/x/foo"
 private def expectedFirstCheckout: String =
    "isDirectory target/cache/github.com/x/foo@aaa1; " ++ expectedPresenceCheck ++
       "; createDirectories target/cache; " ++
-      "log cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
-      "log addWorktree aaa1 target/cache/github.com/x/foo@aaa1 target/cache/github.com/x/foo"
+      "cloneMirror https://github.com/x/foo target/cache/github.com/x/foo; " ++
+      "addWorktree aaa1 target/cache/github.com/x/foo@aaa1 target/cache/github.com/x/foo"
 
-private def expectedFetch: String = "log fetch target/cache/github.com/x/foo"
+private def expectedFetch: String = "fetch target/cache/github.com/x/foo"
 
-private def expectedShow: String = "log fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
+private def expectedShow: String = "fileAt v1.2:eliot.pkg target/cache/github.com/x/foo"
 
 private def refused: GitError = GitError("git ls-remote --tags target/cache/github.com/x/foo", 128, "no such repository")
 

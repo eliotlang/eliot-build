@@ -17,18 +17,16 @@ import eliot.build.git.Tags
  * takes its universe.
  *
  * **Bind it with an expression `with`, inside the mocked body, and not on a slot's type.** A clause row is
- * bound in the scope of the `with` that binds the name: written inside `mocked { … }`, this double's `Log`
- * and `Mocking` reach the framework's doubles; written on a slot's type — `computation: {Git} A with
- * tableGit`, the shape `against` uses — the scope that would cover them is the caller's, which the slot
- * cannot see, so they bind the platform's own, and the journal goes to standard output. `against` gets
- * away with it because `Dep` is discharged by a frame rather than bound by a scope.
+ * bound in the scope of the `with` that binds the name: written inside `mocked { … }`, this double's
+ * `Mocking` reaches the framework's journal and file system; written on a slot's type — `computation: {Git}
+ * A with tableGit`, the shape `against` uses — the scope that would cover it is the caller's, which the slot
+ * cannot see. `against` gets away with it because `Dep` is discharged by a frame rather than bound by a scope.
  *
- * Two things make it at home inside `mocked`. It **reports every operation through `Log`**, which the
- * framework's own double records into the one journal every verification reads — so `calls` shows a
- * cache's `isDirectory` and its `cloneMirror` in the order they happened, one line apiece, prefixed with
- * `log`. And a clone — or a checkout — **leaves its directory behind** by arranging it with
- * `withDirectory`, which is what lets a test observe "clone on the first visit, not on the second"
- * rather than seed it.
+ * Two things make it at home inside `mocked`. It **records every operation with `recordCall`** into the one
+ * journal every verification reads — so `calls` shows a cache's `isDirectory` and its `cloneMirror` in the
+ * order they happened, one line apiece, each reading like the framework's own. And a clone — or a checkout —
+ * **leaves its directory behind** by arranging it with `withDirectory`, which is what lets a test observe
+ * "clone on the first visit, not on the second" rather than seed it.
  */
 
 /**
@@ -38,33 +36,33 @@ import eliot.build.git.Tags
 data Mirrors(announcedTags: List[TagRef], heldFiles: List[Pair[String, String]], refusal: Option[GitError])
 
 implement tableGit: Git {
-   def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Mirror = {
-      log("cloneMirror " ++ remote.remoteUrl ++ " " ++ show(target))
+   def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Mocking, Throw[GitError]} Mirror = {
+      recordCall("cloneMirror", append(singleton(remote.remoteUrl), show(target)))
       withDirectory(target)
 
       unlessRefused(Mirror(target))
    }
 
-   def fetch(mirror: Mirror): {Dep[Mirrors], Log, Throw[GitError]} Unit = {
-      log("fetch " ++ show(mirror.mirrorDirectory))
+   def fetch(mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+      recordCall("fetch", singleton(show(mirror.mirrorDirectory)))
 
       unlessRefused(unit)
    }
 
-   def tags(mirror: Mirror): {Dep[Mirrors], Log, Throw[GitError]} List[TagRef] = {
-      log("tags " ++ show(mirror.mirrorDirectory))
+   def tags(mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} List[TagRef] = {
+      recordCall("tags", singleton(show(mirror.mirrorDirectory)))
 
       unlessRefused(dependency.announcedTags)
    }
 
-   def fileAt(version: Version, path: String, mirror: Mirror): {Dep[Mirrors], Log} Option[String] = {
-      log("fileAt " ++ show(version) ++ ":" ++ path ++ " " ++ show(mirror.mirrorDirectory))
+   def fileAt(version: Version, path: String, mirror: Mirror): {Dep[Mirrors], Mocking} Option[String] = {
+      recordCall("fileAt", append(singleton(show(version) ++ ":" ++ path), show(mirror.mirrorDirectory)))
 
       dependency.heldFiles.lookupOption(show(version) ++ ":" ++ path)
    }
 
-   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Dep[Mirrors], Log, Mocking, Throw[GitError]} Worktree = {
-      log("addWorktree " ++ show(commit) ++ " " ++ show(target) ++ " " ++ show(mirror.mirrorDirectory))
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} Worktree = {
+      recordCall("addWorktree", append(append(singleton(show(commit)), show(target)), show(mirror.mirrorDirectory)))
       withDirectory(target)
 
       unlessRefused(Worktree(target))

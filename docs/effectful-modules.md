@@ -508,7 +508,8 @@ The change is the one §10 left implicit: a caller that talks to git should say 
   the reason in §11.2. Neither effect has a default. A run boundary writes `with gitPackages with shellGit`
   once; a `{Git}` reaching `main` without it is a compile error naming the effect.
 - **`test/eliot/build/TableGit.els`** is the `Git` double, `tableGit`, the same shape as `tablePackages`:
-  answers from `{Dep[Mirrors]}`, reports each operation through `Log` into the framework's journal, and
+  answers from `{Dep[Mirrors]}`, reports each operation through `Log` into the framework's journal (since eliot-test
+  `v0.3`, with `recordCall`, so a call reads `tags …` rather than `log tags …`), and
   makes a clone leave its directory behind by arranging it with `withDirectory`. `CacheTests` runs on it
   and asserts on operations rather than command lines; `GitTests` binds `shellGit` and asserts on command
   lines and working directories as before. **`PackageSourceTests` is new**, and binds the git-backed source

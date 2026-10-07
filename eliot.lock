@@ -10,7 +10,7 @@ package launcher {
 
 package test {
   version github.com/eliotlang/eliot v0.7 141230fb0c3efbecb9df89547ecfaee5385a2ca1
-  version github.com/eliotlang/eliot-test v0.2 4b78ab15bf3adf48ee3eeb480cc7e7ee9fcd9eca
+  version github.com/eliotlang/eliot-test v0.3 f8457328696e76d7cfe926296538c2c81104da3c
   asset github.com/eliotlang/eliot v0.7 eliot-compiler.zip dccf8808e1159ed07bd904068c31c954ea14c965d5330a2e25ca98edd08a8b06
   asset github.com/eliotlang/eliot v0.7 eliot-stdlib.zip ddc3fe5c1c3681bac4533cca530b1fbf062bd08fdd1c918741c5cd255779587a
   asset github.com/eliotlang/eliot v0.7 eliot-jvm.zip 4dd95639feabac673079d633e0a6fb2afa2ca0eb86ff35a62dc93d3aed88ceed
