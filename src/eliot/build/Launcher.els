@@ -49,7 +49,8 @@ import eliot.build.Command
  * the plugin assets those versions ship and runs the compiler over the package's roots once per
  * `compiler` line in the closure. What that amounts to is the lines' business — `eliot test` compiles
  * this project's suite and runs it, `eliot launcher` builds the jar — so the tool has nothing to name
- * a verb after. Before anything runs, what the closure fetched is checked against `eliot.lock` and
+ * a verb after. Words after a `--` behind the name go to the program a line runs, so `eliot test --
+ * eliot.build.resolve` runs that suite and no other. Before anything runs, what the closure fetched is checked against `eliot.lock` and
  * recorded in it, so a tag that moved or an asset that changed stops the build. The one other thing it
  * answers is `eliot --project-model`, an editor's question rather than a person's: what every package
  * resolves to, from what is already fetched.
@@ -111,7 +112,7 @@ private def answered(
    else requested(commandLine).foldOption(
       reporting(usage(Some(declared))),
       named ->
-         if(isSome(packageNamed(named, descriptor))) attempted(named, descriptor, here, java)
+         if(isSome(packageNamed(named, descriptor))) attempted(named, forwarded(commandLine), descriptor, here, java)
          else reporting(unknownPackage(named, declared))
    )
 }
@@ -189,6 +190,7 @@ private def reporting(lines: List[String]): {Process} List[String] = {
  */
 private def attempted(
       name: PackageName,
+      programWords: List[String],
       descriptor: Descriptor,
       here: Path,
       java: String
@@ -201,7 +203,7 @@ private def attempted(
                   catch[InvocationError, List[String]](
                      catch[LockFileError, List[String]](
                         catch[LockConflict, List[String]](
-                           performed(name, descriptor, here, java),
+                           performed(name, programWords, descriptor, here, java),
                            problem -> reporting(failed("refusing what was fetched", show(problem)))
                         ),
                         problem -> reporting(
@@ -244,6 +246,7 @@ private def attempted(
  */
 private def performed(
       name: PackageName,
+      programWords: List[String],
       descriptor: Descriptor,
       here: Path,
       java: String
@@ -253,7 +256,7 @@ private def performed(
    } List[String] =
    provide(
       cacheRoot(here),
-      compiled(name, descriptor, here, java) with gitPackages with shellGit with shellAssets
+      compiled(name, programWords, descriptor, here, java) with gitPackages with shellGit with shellAssets
    )
 
 /**
@@ -271,13 +274,15 @@ private def performed(
  * tag is looked up a second time between the record and the mount.
  *
  * The lines run in order and the first that fails stops the rest; its code is the tool's. No line reads
- * another's output, so the order is only which failure is reported first.
+ * another's output, so the order is only which failure is reported first. Each is handed `programWords`,
+ * the words the command line forwarded after its `--`.
  *
  * It answers no lines. Everything a build has to say the compiler already said on the streams it
  * inherited, and a summary from the tool would only be a second opinion about work it did not do.
  */
 private def compiled(
       name: PackageName,
+      programWords: List[String],
       descriptor: Descriptor,
       here: Path,
       java: String
@@ -296,7 +301,7 @@ private def compiled(
    val roots = rootsOf(name, Project(here, descriptor), resolution, entry.lockedVersions)
    val exitCode = invocation.invocationLines.foldLeft(
       0,
-      line -> code -> ranAfter(code, Compilation(java, classpath, line, roots, outputRoot(here)), here)
+      line -> code -> ranAfter(code, Compilation(java, classpath, line, roots, outputRoot(here), programWords), here)
    )
 
    registerExitCode(exitCode)
