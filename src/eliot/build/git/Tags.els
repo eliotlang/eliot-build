@@ -72,6 +72,26 @@ def commitOf(version: Version, refs: List[TagRef]): Option[Commit] =
 def anchorCommit(line: Line, refs: List[TagRef]): Option[Commit] =
    commitOf(firstRelease(line), refs)
 
+/**
+ * The newest release `refs` hold on `line`, with the commit it names — absent where the line has none.
+ *
+ * Read off the numbers, as every order here is: the tags are the history of a line, and no branch is
+ * asked which of them came last.
+ */
+def latestRelease(line: Line, refs: List[TagRef]): Option[TagRef] =
+   refs.filter(ref -> ref.taggedVersion.major == line).foldLeft(none, ref -> latest -> some(newer(ref, latest)))
+
+/**
+ * The highest line `refs` hold a release on — absent where they hold none.
+ */
+def highestLine(refs: List[TagRef]): Option[Line] = refs.map(ref -> ref.taggedVersion.major).sorted.last
+
+/**
+ * `latestRelease`'s step: `ref`, unless what was already found orders after it.
+ */
+private def newer(ref: TagRef, latest: Option[TagRef]): TagRef =
+   latest.foldOption(ref, found -> if(found.taggedVersion < ref.taggedVersion) ref else found)
+
 private def withTagLine(line: String, refs: List[TagRef]): List[TagRef] =
    tagNameOf(line).foldOption(refs, name -> withTagName(name, Commit(before("\t", line)), refs))
 

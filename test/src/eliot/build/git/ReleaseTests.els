@@ -1,0 +1,198 @@
+import eliot.collection.List
+import eliot.file.Path
+import eliot.test.Assertion
+import eliot.test.Test
+import eliot.test.Mock
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.git.Git
+import eliot.build.git.Tags
+import eliot.build.git.Release
+import eliot.build.git.TableGit
+
+/**
+ * Releasing, run against a table instead of against git: which version comes next, what is refused
+ * before anything is tagged, and that the commit tagged is the commit every question was asked about.
+ *
+ * The numbering cases are pure and declare nothing. The rest bind `eliot.build.git.TableGit` inside
+ * `mocked`, so they see operations rather than command lines — what git *runs* for each is
+ * `ShellGitTests`' subject — and every one reads its outcome as one line, the tag pushed or the refusal,
+ * so a release and a refusal are asserted alike.
+ */
+def testCases: Test = {
+   "releaseAfter" should "number the next release as the next minor of the highest line" in {
+      numbered(None, "aaa1\trefs/tags/v0.4\nbbb2\trefs/tags/v0.5\nccc3\trefs/tags/v1.0") shouldBe "v1.1"
+   }
+   "releaseAfter" should "number a repository's first release v0.0" in {
+      numbered(None, "") shouldBe "v0.0"
+   }
+   "releaseAfter" should "order the releases by number, not by how the listing spells them" in {
+      numbered(None, "aaa1\trefs/tags/v0.10\nbbb2\trefs/tags/v0.9") shouldBe "v0.11"
+   }
+   "releaseAfter" should "accept the version asked for where it is the next on its line" in {
+      numbered(Some(versionOf("v0.6")), published) shouldBe "v0.6"
+   }
+   "releaseAfter" should "refuse a version that leaves a gap after the last release" in {
+      numbered(Some(versionOf("v0.7")), published) shouldBe "v0.7 is not the next release of v0, which is v0.6"
+   }
+   "releaseAfter" should "refuse a version that is already published" in {
+      numbered(Some(versionOf("v0.5")), published) shouldBe "v0.5 is not the next release of v0, which is v0.6"
+   }
+   "releaseAfter" should "start a new line at its first release" in {
+      numbered(Some(versionOf("v1.0")), published) shouldBe "v1.0"
+   }
+   "releaseAfter" should "refuse to start a line anywhere but its first release" in {
+      numbered(Some(versionOf("v1.1")), published) shouldBe "v1.1 is not the next release of v1, which is v1.0"
+   }
+   "releaseAfter" should "refuse a bare line, which names no release" in {
+      numbered(Some(versionOf("v1")), published) shouldBe "v1 is not the next release of v1, which is v1.0"
+   }
+   "releaseAfter" should "number the next release of an older line where that line is asked for" in {
+      numbered(Some(versionOf("v1.8")), maintained) shouldBe "v1.8"
+   }
+   "releaseAfter" should "refuse to start a line below one already published" in {
+      numbered(Some(versionOf("v1.0")), "aaa1\trefs/tags/v0.5\nbbb2\trefs/tags/v2.0") shouldBe
+         "v1.0 would start v1 below v2, which is already published; a new line starts above every published one"
+   }
+   "releaseAfter" should "start a repository at whichever line it is asked to" in {
+      numbered(Some(versionOf("v1.0")), "") shouldBe "v1.0"
+   }
+
+   "released" should "tag the commit checked out as the next release, and push that tag" in mocked {
+      provide(checkoutOf(published, followingRelease), attempt(released(None, checkout)) with tableGit)
+         shouldBe "v0.6 at ccc3"
+
+      calls shouldBe expectedRelease
+   }
+   "released" should "tag the version asked for, where it is the next" in mocked {
+      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v1.0")), checkout)) with tableGit)
+         shouldBe "v1.0 at ccc3"
+   }
+   "released" should "release a commit the remote branch has already moved past" in mocked {
+      provide(checkoutOf(published, behindUpstream), attempt(released(None, checkout)) with tableGit)
+         shouldBe "v0.6 at ccc3"
+   }
+   "released" should "check an older line's release against that line's last release" in mocked {
+      provide(checkoutOf(maintained, followingMaintenance), attempt(released(Some(versionOf("v1.8")), checkout)) with tableGit)
+         shouldBe "v1.8 at ccc3"
+
+      wasCalledOnce("isAncestor aaa1 ccc3")
+   }
+   "released" should "refuse a working tree with changes in it, naming them" in mocked {
+      provide(checkoutOf(published, uncommitted), attempt(released(None, checkout)) with tableGit)
+         shouldBe "the working tree has changes a release would not contain: M src/a.els, ?? notes.txt"
+
+      wasNeverCalled("tagRelease")
+   }
+   "released" should "refuse a commit the branch has not pushed" in mocked {
+      provide(checkoutOf(published, unpushed), attempt(released(None, checkout)) with tableGit)
+         shouldBe expectedUnpushed
+
+      wasNeverCalled("tagRelease")
+   }
+   "released" should "refuse a commit that does not follow the last release of its line" in mocked {
+      provide(checkoutOf(published, diverged), attempt(released(None, checkout)) with tableGit)
+         shouldBe expectedDiverged
+
+      wasNeverCalled("tagRelease")
+   }
+   "released" should "refuse the commit the line's last release already names" in mocked {
+      provide(checkoutOf(published, alreadyReleased), attempt(released(None, checkout)) with tableGit)
+         shouldBe "HEAD (bbb2) is already released, as v0.5; a second tag at the same commit would release nothing"
+
+      wasNeverCalled("tagRelease")
+   }
+   "released" should "refuse a version that is not next, before tagging anything" in mocked {
+      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v0.7")), checkout)) with tableGit)
+         shouldBe "v0.7 is not the next release of v0, which is v0.6"
+
+      wasNeverCalled("tagRelease")
+   }
+   "released" should "report what git said where git said no" in mocked {
+      provide(refusingWith(refused), attempt(released(None, checkout)) with tableGit)
+         shouldBe "'git status --porcelain' failed with exit code 128: not a git repository"
+   }
+}
+
+/**
+ * The checkout's `origin` has released `v0.4` and `v0.5`.
+ */
+private def published: String = "aaa1\trefs/tags/v0.4\nbbb2\trefs/tags/v0.5"
+
+/**
+ * An `origin` with an old line still maintained beside a newer one.
+ */
+private def maintained: String = "aaa1\trefs/tags/v1.7\nbbb2\trefs/tags/v2.0"
+
+/**
+ * Clean, pushed, and descending from `v0.5`: what a release is made of.
+ */
+private def followingRelease: Working = Working(empty, Commit("ccc3"), Commit("ccc3"), singleton(Pair(Commit("bbb2"), Commit("ccc3"))))
+
+private def followingMaintenance: Working =
+   Working(empty, Commit("ccc3"), Commit("ccc3"), singleton(Pair(Commit("aaa1"), Commit("ccc3"))))
+
+/**
+ * Pushed, and somebody has pushed more since: the commit is on the remote branch, just not at its tip.
+ */
+private def behindUpstream: Working =
+   Working(
+      empty,
+      Commit("ccc3"),
+      Commit("ddd4"),
+      append(singleton(Pair(Commit("bbb2"), Commit("ccc3"))), Pair(Commit("ccc3"), Commit("ddd4")))
+   )
+
+private def uncommitted: Working =
+   Working(append(singleton(" M src/a.els"), "?? notes.txt"), Commit("ccc3"), Commit("ccc3"), empty)
+
+/**
+ * Committed on top of `v0.5`, and the branch's remote is still at `v0.5`.
+ */
+private def unpushed: Working = Working(empty, Commit("ccc3"), Commit("bbb2"), singleton(Pair(Commit("bbb2"), Commit("ccc3"))))
+
+/**
+ * Clean and pushed, but on a history `v0.5` is not in.
+ */
+private def diverged: Working = Working(empty, Commit("ccc3"), Commit("ccc3"), empty)
+
+/**
+ * Clean and pushed, and exactly where `v0.5` is.
+ */
+private def alreadyReleased: Working = Working(empty, Commit("bbb2"), Commit("bbb2"), empty)
+
+/**
+ * Every question first, then the two writes, and both writes at the commit the questions were about.
+ */
+private def expectedRelease: String =
+   "uncommittedChanges /project; headCommit /project; upstreamCommit /project; " ++
+      "isAncestor ccc3 ccc3 /project; publishedReleases /project; isAncestor bbb2 ccc3 /project; " ++
+      "tagRelease v0.6 ccc3 /project; pushRelease v0.6 /project"
+
+private def expectedUnpushed: String =
+   "HEAD (ccc3) is not on the branch it pushes to; push it first, " ++
+      "so that what is released is what the remote, and its CI, have seen"
+
+private def expectedDiverged: String =
+   "HEAD (ccc3) does not descend from v0.5 (bbb2), the last release of v0; " ++
+      "a release follows the one before it on its line"
+
+private def refused: GitError = GitError("git status --porcelain", 128, "not a git repository")
+
+private def checkout: Checkout = Checkout(path("/project"))
+
+/**
+ * The version `releaseAfter` numbers a release over `listing`, or the refusal it raises.
+ */
+private def numbered(requested: Option[Version], listing: String): String =
+   catch[ReleaseError, String](show(releaseAfter(requested, parseTagRefs(listing))), show)
+
+/**
+ * A release's outcome as one line: the tag pushed and the commit it names, or what refused it.
+ */
+private def attempt(answer: {Throw[GitError], Throw[ReleaseError]} TagRef): String =
+   catch[GitError, String](catch[ReleaseError, String](pushedAs(answer), show), show)
+
+private def pushedAs(pushed: TagRef): String = show(pushed.taggedVersion) ++ " at " ++ show(pushed.taggedCommit)
+
+private def versionOf(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

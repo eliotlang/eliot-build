@@ -3,6 +3,8 @@ import eliot.file.Path
 import eliot.test.Assertion
 import eliot.test.Test
 import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
 import eliot.build.Command
 
 /**
@@ -84,6 +86,33 @@ def testCases: Test = {
       described(requested(commandLine("--project-model"))) shouldBe "<none>"
    }
 
+   "releaseRequested" should "read a release of the next version from the option alone" in {
+      releaseDescribed(releaseRequested(commandLine("--release"))) shouldBe "next"
+   }
+   "releaseRequested" should "read a release of the version named after the option" in {
+      releaseDescribed(releaseRequested(append(commandLine("--release"), "v1.0"))) shouldBe "v1.0"
+   }
+   "releaseRequested" should "ask for nothing where the word after the option is not a version" in {
+      releaseDescribed(releaseRequested(append(commandLine("--release"), "test"))) shouldBe "<none>"
+   }
+   "releaseRequested" should "ask for nothing where more than a version follows the option" in {
+      releaseDescribed(releaseRequested(append(append(commandLine("--release"), "v1.0"), "v1.1")))
+         shouldBe "<none>"
+   }
+   "releaseRequested" should "not read a package name as a release" in {
+      releaseDescribed(releaseRequested(commandLine("test"))) shouldBe "<none>"
+   }
+   "releaseRequested" should "ask for nothing on an empty command line" in {
+      releaseDescribed(releaseRequested(empty)) shouldBe "<none>"
+   }
+   "requested" should "not read the release option as a package" in {
+      described(requested(commandLine("--release"))) shouldBe "<none>"
+   }
+
+   "releaseReport" should "name the version a consumer would require and the commit their lock will record" in {
+      joined("/", releaseReport(Version(Line(0), Some(6)), Commit("ccc3"))) shouldBe "eliot: released v0.6 at ccc3"
+   }
+
    "compilerCommand" should "put the line's words between the entry point and the first source root" in {
       joined(" ", compilerCommand(compilationOf("run -m eliot.test.Runner"))) shouldBe expectedCompilerCommand
    }
@@ -136,7 +165,9 @@ private def expectedUsage: String =
       "   runs every compiler line in the package's closure over the package's sources/" ++
       "   and passes the arguments after -- to the program a line runs/" ++
       "usage: eliot --project-model/" ++
-      "   prints what every package resolves to, as JSON, from what is already fetched"
+      "   prints what every package resolves to, as JSON, from what is already fetched/" ++
+      "usage: eliot --release [<version>]/" ++
+      "   tags the pushed commit checked out as the next release, or as <version>, and pushes the tag"
 
 private def expectedListing: String = "/packages in eliot.pkg:/   root/   launcher/   test"
 
@@ -183,5 +214,12 @@ private def forwarding(line: String, compilation: Compilation): Compilation =
    )
 
 private def described(name: Option[PackageName]): String = name.mapOption(show) orElse "<none>"
+
+/**
+ * A release request as one word: the version it names, `next` where it names none, `<none>` where the
+ * command line asked for no release.
+ */
+private def releaseDescribed(request: Option[ReleaseRequest]): String =
+   request.mapOption(asked -> asked.requestedVersion.mapOption(show) orElse "next") orElse "<none>"
 
 private def commandLine(argument: String): List[String] = singleton(argument)

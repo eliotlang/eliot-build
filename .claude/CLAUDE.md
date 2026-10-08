@@ -50,12 +50,19 @@ the tool (`docs/effectful-modules.md` §12, §13, §15, §17, §18, §19):
 - **`git/`** — `Git` (`effect Git` — five operations over `Remote`, `Mirror` and `Worktree`, git's own
   vocabulary, reading and checking out at a `Version`; a mirror is a bare `--mirror` clone, every *question* is answered from its object
   database, and the one thing ever checked out is a worktree, because a compiler mounts
-  directories), `Tags` (`TagRef` and
-  the pure reading of a `ls-remote` listing — `Git` imports it, never the other way round), `ShellGit`
+  directories — and seven over `Checkout`, the project's own repository, which are what a release is
+  made of: five questions and the two writes, `tagRelease` and `pushRelease`, the only refs the tool
+  ever writes), `Tags` (`TagRef` and
+  the pure reading of a `ls-remote` listing, plus `latestRelease`/`highestLine` — `Git` imports it, never the other way round), `ShellGit`
   (`shellGit`, the *named* implementation that spawns and alone decides which directory each command
-  stands in; the only module naming `eliot.system.Process`), and `Cache` (mirroring repositories and
+  stands in — inside the checkout for every checkout command, since `origin` and `@{upstream}` mean
+  something only there; the only module naming `eliot.system.Process`), `Cache` (mirroring repositories and
   checking locked commits out beside them at `<url>@<commit>` — by commit, never by tag, so a
-  directory's name is proof of what is in it — on `{Git, FileSystem}`).
+  directory's name is proof of what is in it — on `{Git, FileSystem}`), and `Release` (policy over
+  `{Git}` the way `Cache` is: `released` refuses a dirty tree, an unpushed commit, a version that is not
+  next, a commit not descending from its line's last release, and that release's own commit — each a
+  `ReleaseError`, all before anything is written — then tags the commit it checked and pushes that tag;
+  the numbering, `releaseAfter`/`nextRelease`, is a pure function of `origin`'s listing).
 - **`assets/`** — the other half of what a `dep` line buys. `Assets` (`effect Assets` — two questions,
   `assetTree(asset)` and `assetDigest(asset)`, the archive's sha256 for the lock, plus `Asset` itself, the repository/version/name triple a release asset *is*, and
   `assetUrlOf`, the one concatenation its location is derived by) and `ShellAssets` (`shellAssets`, the
@@ -107,7 +114,7 @@ for it survives: `eliot test` *runs* the suite, because `eliot-test//suite` carr
 eliot.test.Runner`, the compiler's `run` mode executes the jar, and the runner exits 1 on a failing
 case; `eliot launcher` builds the jar. `resolve` and `roots` were removed on 2026-09-16 rather than kept
 as options — questions about a closure belong to the project-model query (`docs/build-system.md`, "IDE
-integration"). That query is the one option: **`eliot --project-model`** prints every declared package's
+integration"). That query is one of the two options: **`eliot --project-model`** prints every declared package's
 model as JSON (`assemble/ProjectModel`: own root, project roots, dependency roots, selections — or a
 `problem`), resolved **offline** through `resolve/CachedPackages` (`cachedPackages`, over `Cache`'s
 `cached*` questions, which raise `NotFetched` instead of cloning or fetching), and always exits 0. The
@@ -116,7 +123,11 @@ The one thing that may follow the package is `--`, and the words after it are fo
 to every compiler line, after `-o` behind a `--` of the launcher's own — `eliot test --
 eliot.build.resolve` runs one suite (`docs/build-system.md`, "Words after `--` go to the program"; it
 needs an eliot whose `run` mode takes program arguments, which no tag up to `v0.7` is — `v0.7` reads the
-words as more source roots and runs everything, exit 0). Anything
+words as more source roots and runs everything, exit 0). The other option is **`eliot --release
+[<version>]`** (2026-10-08): it tags the commit checked out as the next version — the next minor of the
+highest line `origin` publishes, `v0.0` for none; a new major only by naming it — and pushes that one
+tag to `origin`, binding `shellGit` alone (`git/Release`, "Releasing" in `docs/build-system.md`). A word
+after it that is not a version is the usage. Anything
 else — a second word, no word, or another word starting `-` — is the usage and exit 1; the usage lists the packages `eliot.pkg` declares, and a name it does not declare is refused
 with that list after the error (the descriptor is read before the command line is looked at, so a
 missing or malformed one is reported first, followed by the bare usage). **Every build checks and
@@ -145,8 +156,8 @@ doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `
 unchecked.)
 
 The design is `docs/build-system.md`; how the effectful modules are shaped and tested is
-`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15, §16, §17, §18, §19 and §20 of it first**, and read them
-before touching `Git`, `Assets`, `Cache`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
+`docs/effectful-modules.md` — **read §10, §11, §12, §13, §15, §16, §17, §18, §19, §20 and §22 of it first**, and read them
+before touching `Git`, `Assets`, `Cache`, `Release`, `PackageSource` or a double. §1–§9 are a record of the carrier era and answer the two questions
 the document exists for, but every mechanism they name (carriers, `Suspend`, capture tags, the four
 rules) was deleted by effects v6; §10 says what replaced each one, §11 says what binding an
 implementation actually does and what is now genuinely unchecked. §12, §13 and §15 are where the modules
@@ -157,7 +168,8 @@ build verb cost — one of which is why §16's "a failed build exits 0" is now c
 `compiler` line: `Toolchain` replaced by `Invocation`, and one more §11.3 collision. §21 is that collision fixed,
 and the sweep from hand-written eliminators to the base's names it unblocked. §19 is the lockfile:
 three modules, one question added to each of `PackageSource` and `Assets`, and two more launcher channels.
-§20 is the tree checked out at the commit that was locked, `<url>@<commit>`.
+§20 is the tree checked out at the commit that was locked, `<url>@<commit>`. §22 is `--release`: the
+`Checkout` subject `Git` grew, `git/Release`, and why no line is a branch.
 
 A suite declares `def testCases: Test` — the framework's row alias for
 `{Writer[List[TestResult]]} Unit`, which reaches this project now that a row alias is an ordinary name
@@ -172,8 +184,12 @@ that. There is no `pure` any more, no capture tag and no carrier.
 
 ## Releasing
 
-A major version is a branch, a release is an **annotated** tag on it; the line is `v0`. To publish:
-fast-forward `v0` to the commit, `git tag -a v0.<n>` on it, push both. `.github/workflows/release.yml`
+A release is an **annotated** tag and nothing else; the line is `v0`, and no branch is involved — a line
+is the number its tags start with (`docs/build-system.md`, "Versions"). To publish: push the commit to
+`master`, let CI go green, then `./bootstrap --release` — the working tree's own launcher, so this works
+before a release carrying the option is pinned; `./eliotw --release` once one is. It tags the commit
+checked out as the next `v0.<n>` and pushes the tag (the old `v0` branch is no longer moved; nothing
+reads it). `.github/workflows/release.yml`
 then runs `./bootstrap test`, builds the jar with `./bootstrap launcher`, checks that the
 jar it is about to attach builds a green suite on its own, and attaches it as `eliot-launcher.jar`, with
 `eliotw` beside it (so `releases/latest/download/eliotw` is where a new project downloads the wrapper
@@ -204,7 +220,7 @@ or the tag changed (a checksum stamp beside the jar, removed before compiling, s
 leaves an old jar passing for new source); a compile error exits 1 with the compiler's diagnostics.
 
 ```bash
-./bootstrap test                                             # compiles and runs the suite, 319 green
+./bootstrap test                                             # compiles and runs the suite, 368 green
 ./bootstrap launcher                                         # target/Launcher.jar, stage 1's output
 java -jar target/Launcher.jar test                           # stage 2: that jar builds and runs it too
 ```
@@ -239,7 +255,7 @@ compiler refuses the flag, and until eliot `985b0b66` it then exited 0, making t
 
 **The build dogfoods now.** `java -jar target/Launcher.jar launcher` in this repository fetches
 eliot's three plugin assets and produces the launcher jar, and that jar builds and runs this project's
-own suite — 319 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
+own suite — 368 green, no mill and no compiler checkout involved. The compiler CLI below is still how a
 change to the *compiler* is picked up, and still the faster loop while iterating, but it is no longer
 the only way this repository can be built. Compilation is driven by a sibling checkout of the Eliot
 compiler (`/home/robert/personal/eliot`), whose `examples.run`
@@ -349,7 +365,7 @@ the check has to be a program with a `main` of its own. `probe/` was that progra
 `docs/effectful-modules.md` §14).
 
 What that means for a change: **do not read a green suite as evidence the tool runs** — the suite and the
-launcher check different things, and a change to `Git`, `Cache`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Invocation`, `Locking` or
+launcher check different things, and a change to `Git`, `Cache`, `Release`, `ShellGit`, `GitPackages`, `ShellAssets`, `Assembly`, `Invocation`, `Locking` or
 the boundary is verified only when both have been run. Compiling the launcher is most of it (the platform
 instances are resolved from its `main` or not at all); running it against a real repository is the
 rest.

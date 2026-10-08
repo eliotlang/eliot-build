@@ -1,10 +1,12 @@
 /**
  * A version, and the ordering resolution selects with.
  *
- * A major version is a **branch** — an append-only compatibility line — and a version is an
- * annotated **tag** on that branch, so `v1.4` is the fourth release of the `v1` line. Both parts are
- * read as numbers rather than compared as text, which is the whole point of having a type here:
- * `v1.10` follows `v1.9`, a fact no comparison of tag *names* gets right.
+ * A version is a **tag** — `v1.4` is the fifth release of the `v1` line, a major version being an
+ * append-only compatibility line and nothing more concrete than the number every tag on it starts
+ * with. No branch is consulted: what a repository publishes is its tags, the line is read off each
+ * one, and the order is read off the numbers. Both parts are read as numbers rather than compared as
+ * text, which is the whole point of having a type here: `v1.10` follows `v1.9`, a fact no comparison
+ * of tag *names* gets right.
  *
  * The minor part is optional because a bare `v1` is what a descriptor writes to mean "anywhere on
  * the v1 line". It is kept exactly as written rather than filled in: `v1` and `v1.0` are the same
@@ -17,8 +19,8 @@
 data Version(major: Line, minor: Option[Int])
 
 /**
- * A compatibility line: the `vN` branch a major version is, and the unit the append-only signature
- * contract is made per. Two requirements on different lines of one package cannot both be satisfied,
+ * A compatibility line: the `vN` every tag of one major version starts with, and the unit the
+ * append-only signature contract is made per. Two requirements on different lines of one package cannot both be satisfied,
  * a lineage anchor is per line, and a bare `v1` in a descriptor names a line rather than a release.
  */
 data Line(majorNumber: Int)
@@ -50,10 +52,13 @@ def parseVersion(text: String): {Abort} Version = {
 def firstRelease(line: Line): Version = Version(line, Some(0))
 
 /**
- * The git branch `line` is — `v1`, `v2` — which is what a remote is asked about to discover the
- * versions available on it, and how a version renders its major part.
+ * How `line` is spelled — `v1`, `v2` — which is how a version renders its major part and how a bare
+ * `vN` in a descriptor names the line rather than a release on it.
+ *
+ * A name and not a branch: a repository may keep a branch called this for maintaining an old line once
+ * its main branch has moved to a new one, and nothing in the tool would ever look at it.
  */
-def branchName(line: Line): String = "v" ++ show(line.majorNumber)
+def lineName(line: Line): String = "v" ++ show(line.majorNumber)
 
 /**
  * `true` when both versions are releases of one compatibility line, and are therefore
@@ -74,7 +79,7 @@ def orderedMinor(version: Version): Int = version.minor orElse 0
  */
 implement Show[Version] {
    def show(value: Version): String =
-      branchName(value.major) ++ (value.minor.mapOption(part -> "." ++ show(part)) orElse "")
+      lineName(value.major) ++ (value.minor.mapOption(part -> "." ++ show(part)) orElse "")
 }
 
 implement Eq[Line] {

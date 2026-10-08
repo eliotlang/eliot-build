@@ -30,7 +30,7 @@ implement tablePackages: PackageSource {
       publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
    def anchorAt(line: Line, target: Repository): {Dep[Universe]} Option[Commit] =
-      dependency.lineages.lookupOption(show(target) ++ "@" ++ branchName(line)).mapOption(hash -> Commit(hash))
+      dependency.lineages.lookupOption(show(target) ++ "@" ++ lineName(line)).mapOption(hash -> Commit(hash))
 
    /**
     * A table has no history either, so a version it publishes is said to be at a commit named after

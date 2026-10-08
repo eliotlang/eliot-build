@@ -1,0 +1,157 @@
+import eliot.collection.List
+import eliot.build.model.Version
+import eliot.build.model.Lineage
+import eliot.build.git.Git
+import eliot.build.git.Tags
+
+/**
+ * Publishing the project's own repository: the commit checked out, tagged as the next version and
+ * pushed — which is the whole of what releasing a package is, since a package is a git repository and
+ * what its consumers select is its tags.
+ *
+ * **No branch is involved.** A version is a tag and its line is the number the tag starts with, so a
+ * project releasing from `main` tags `main`, and one patching an old line after `main` has moved to a
+ * new major tags a branch it made for that, from the old line's last tag. Neither is asked anything
+ * about the branch it is on. What *is* asked is what the tags and the history say: which version comes
+ * next, and whether the commit follows the release before it on its line.
+ *
+ * **What it refuses is what would make the tag a lie or a surprise**, and it asks before writing
+ * anything: a working tree with changes in it (the tag would name a commit that is not what the user is
+ * looking at), a commit that is not on the remote branch it pushes to (a release nobody's CI has seen),
+ * a version that does not follow the last one on its line (a gap, a repeat, or a line started below one
+ * already published), a commit that does not descend from the line's last release (two histories
+ * calling themselves one line, which is exactly what MVS's ordering assumes never happens), and the
+ * commit that release already names (a second version of nothing). Each is a `ReleaseError`, raised
+ * before the tag exists.
+ *
+ * **It decides no test and runs no build.** That is the job of whatever ran before it — CI on the push
+ * this checks for, which also fails a push whose builds had to change `eliot.lock`. A release is the
+ * one thing after "it is green": naming the commit.
+ *
+ * This module is policy over `{Git}`, the way `eliot.build.git.Cache` is: it says what to ask and what
+ * the answers mean, and `shellGit` alone knows that asking is a subprocess.
+ */
+
+/**
+ * Why a release was refused before anything was tagged.
+ */
+data ReleaseError =
+   Uncommitted(uncommittedEntries: List[String])
+   | Unpushed(unpushedCommit: Commit)
+   | NotNext(requestedRelease: Version, nextRelease: Version)
+   | BelowLine(lowerRelease: Version, publishedLine: Line)
+   | Diverged(divergedCommit: Commit, previousRelease: TagRef)
+   | Unchanged(releasedAlready: TagRef)
+
+implement Show[ReleaseError] {
+   def show(value: ReleaseError): String = value match {
+      case Uncommitted(entries) ->
+         "the working tree has changes a release would not contain: " ++ entries.map(trim).joined(", ")
+      case Unpushed(commit) ->
+         "HEAD (" ++ show(commit) ++ ") is not on the branch it pushes to; push it first, " ++
+            "so that what is released is what the remote, and its CI, have seen"
+      case NotNext(requested, next) ->
+         show(requested) ++ " is not the next release of " ++ lineName(requested.major) ++ ", which is " ++
+            show(next)
+      case BelowLine(lower, published) ->
+         show(lower) ++ " would start " ++ lineName(lower.major) ++ " below " ++ lineName(published) ++
+            ", which is already published; a new line starts above every published one"
+      case Diverged(commit, previous) ->
+         "HEAD (" ++ show(commit) ++ ") does not descend from " ++ show(previous.taggedVersion) ++ " (" ++
+            show(previous.taggedCommit) ++ "), the last release of " ++ lineName(previous.taggedVersion.major) ++
+            "; a release follows the one before it on its line"
+      case Unchanged(previous) ->
+         "HEAD (" ++ show(previous.taggedCommit) ++ ") is already released, as " ++ show(previous.taggedVersion) ++
+            "; a second tag at the same commit would release nothing"
+   }
+}
+
+/**
+ * Release what `checkout` has checked out — as `requested` where that is given, as the next version
+ * otherwise — and answer the tag that was pushed, with the commit it names.
+ *
+ * The order is the argument: everything that could refuse is asked first, in the order a user would fix
+ * it — commit, push, number, history — and the two writes come last, so a refused release leaves no tag
+ * behind. Between the two writes the tag exists only locally; a push that fails says so, and the tag it
+ * left is the user's to push or delete.
+ *
+ * ```eliot
+ * val pushed = released(None, Checkout(here)) with shellGit
+ * ```
+ */
+def released(requested: Option[Version], checkout: Checkout): {Git, Throw[GitError], Throw[ReleaseError]} TagRef = {
+   val entries = uncommittedChanges(checkout)
+   unless(isEmpty(entries)) raise(Uncommitted(entries))
+
+   val commit = headCommit(checkout)
+   unless(isAncestor(commit, upstreamCommit(checkout), checkout)) raise(Unpushed(commit))
+
+   val published = publishedReleases(checkout)
+   val version = releaseAfter(requested, published)
+   latestRelease(version.major, published).foreachOption(previous -> followed(previous, commit, checkout))
+
+   tagRelease(version, commit, checkout)
+   pushRelease(version, checkout)
+   TagRef(version, commit)
+}
+
+/**
+ * The version a release is published as, given what `published` already holds: `requested` where it is
+ * the one that comes next, and the next one where nothing was requested.
+ *
+ * Pure, because numbering is a decision about a listing and nothing else.
+ *
+ * ```eliot
+ * val version = releaseAfter(None, parseTagRefs(listing))
+ * ```
+ */
+def releaseAfter(requested: Option[Version], published: List[TagRef]): {Throw[ReleaseError]} Version =
+   requested.foldOption(nextRelease(published), version -> accepted(version, published))
+
+/**
+ * The release that comes next when nobody says which: the next minor of the highest line published, and
+ * `v0.0` where nothing is.
+ *
+ * Never a new major. Starting a line is the one decision about a version that a listing cannot make —
+ * it is the author saying the signatures changed — so it is only ever made by naming the version.
+ */
+def nextRelease(published: List[TagRef]): Version =
+   highestLine(published).foldOption(firstRelease(Line(0)), line -> nextOn(line, published))
+
+/**
+ * `requested`, where it is the next release of its line: one minor after the line's latest, or the
+ * line's first release where the line has none and is above every line that has.
+ *
+ * A bare `vN` names a line rather than a release, so it is refused even where `vN.0` is next — the tag is
+ * spelled the way it is written, and `vN` is not the spelling of a release.
+ */
+private def accepted(requested: Version, published: List[TagRef]): {Throw[ReleaseError]} Version = {
+   val next = nextOn(requested.major, published)
+   unless(isSome(requested.minor) && requested == next) raise(NotNext(requested, next))
+
+   highestLine(published).foreachOption(highest -> belowCheck(requested, highest, published))
+   requested
+}
+
+/**
+ * `accepted`'s second rule: a line with no releases may only be started above every line that has.
+ */
+private def belowCheck(requested: Version, highest: Line, published: List[TagRef]): {Throw[ReleaseError]} Unit =
+   when(requested.major < highest && isNone(latestRelease(requested.major, published))) raise(BelowLine(requested, highest))
+
+/**
+ * The release that follows the latest on `line`, or the line's first where it has none.
+ */
+private def nextOn(line: Line, published: List[TagRef]): Version =
+   latestRelease(line, published).foldOption(firstRelease(line), latest -> successor(latest.taggedVersion))
+
+private def successor(version: Version): Version = Version(version.major, Some(orderedMinor(version) + 1))
+
+/**
+ * Refuses `commit` unless it comes after `previous`, the last release of the line it is released on:
+ * a descendant of it, and not the very commit it already names.
+ */
+private def followed(previous: TagRef, commit: Commit, checkout: Checkout): {Git, Throw[GitError], Throw[ReleaseError]} Unit = {
+   when(previous.taggedCommit == commit) raise(Unchanged(previous))
+   unless(isAncestor(previous.taggedCommit, commit, checkout)) raise(Diverged(commit, previous))
+}

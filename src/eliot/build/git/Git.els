@@ -34,7 +34,9 @@ import eliot.build.git.Tags
  * hash is vocabulary before it is git's — is what a tag names. A file is read at a *version*, which git
  * is asked for by the tag it was published as; a tree is checked out at a *commit*, because a tree is
  * what a build compiles and a lockfile pins, and a tag is a ref that can move. `fetch` brings a mirror up to date
- * and touches no working tree; `pull` would merge into a branch and has no meaning in a mirror.
+ * and touches no working tree; `pull` would merge into a branch and has no meaning in a mirror. A
+ * *checkout* is the one repository this tool did not make: the project's own, cloned by whoever is
+ * working in it, and the only one it ever writes a ref into — the tag a release is.
  *
  * **Every operation's subject says where it runs.** Git resolves a relative path against *its* working
  * directory, not this program's, and the split is git's own: a command that *names* a repository —
@@ -84,15 +86,31 @@ data Mirror(mirrorDirectory: Path)
 data Worktree(worktreeDirectory: Path)
 
 /**
+ * The project's own repository, as somebody cloned it and works in it — known by the directory it is
+ * checked out in.
+ *
+ * Neither a `Mirror` nor a `Worktree`, because this tool made neither of the things those are: it did
+ * not clone it, it decides nothing about where it lives, and it asks it different questions — what is
+ * not committed yet, what is not pushed yet, what its `origin` has published. It is also the only
+ * repository the tool writes to, and only ever one ref: the tag that publishes a release.
+ */
+data Checkout(checkoutDirectory: Path)
+
+/**
  * The address git is given to reach a repository — a transport URL, scheme included, which is what a
  * canonical package URL deliberately is not. Made by `remoteOf`, the one place the scheme is decided.
  */
 data Remote(remoteUrl: String)
 
 /**
- * What the tool asks of git. Five operations, each about a remote or a mirror, and nothing about how
- * they are carried out: `shellGit` below spawns `git`, a test's double answers from a table, and a
- * caller declaring `{Git}` cannot tell them apart.
+ * What the tool asks of git, and nothing about how it is carried out: `shellGit` spawns `git`, a test's
+ * double answers from a table, and a caller declaring `{Git}` cannot tell them apart.
+ *
+ * Two groups, told apart by their subjects. Five operations are about somebody else's repository, a
+ * mirror of it and the trees checked out of that — what a build reads and mounts. Seven are about the
+ * project's own `Checkout`, and they are what a release is made of: five questions that decide whether
+ * the commit checked out may be published and under which tag, and two that publish it. Each is one git
+ * command, so each refuses on its own and a double answers each from one entry.
  *
  * The members carry `Throw[GitError]` where the operation can be refused, because a refusal is part of
  * what the operation means and a caller may want to handle one per call. `fileAt` carries none: it is
@@ -152,6 +170,55 @@ effect Git {
     * target would be read against the mirror's directory rather than against the caller's.
     */
    def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
+
+   /**
+    * What `checkout` holds that is not committed — one entry per path, tracked or not — and nothing
+    * where its tree is clean.
+    *
+    * A list and not a `Bool`, because the one caller that asks refuses on a non-empty answer and a
+    * refusal that names the files is one a user can act on without running git themselves.
+    */
+   def uncommittedChanges(checkout: Checkout): {Throw[GitError]} List[String]
+
+   /**
+    * The commit `checkout` has checked out — the one a release would tag.
+    */
+   def headCommit(checkout: Checkout): {Throw[GitError]} Commit
+
+   /**
+    * The commit `checkout`'s branch was last seen at on the remote branch it pushes to, as of the last
+    * push or fetch — which is what lets "this commit is pushed" be asked without the network. Refused
+    * where the branch pushes nowhere, and where nothing is checked out but a commit.
+    */
+   def upstreamCommit(checkout: Checkout): {Throw[GitError]} Commit
+
+   /**
+    * `true` where `ancestor` is `descendant` or is in its history, as `checkout`'s objects know it.
+    */
+   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout): {Throw[GitError]} Bool
+
+   /**
+    * The versions `checkout`'s `origin` publishes now, asked of the remote rather than of the tags the
+    * checkout happens to hold: a release is numbered after what consumers can see, and a local tag
+    * nobody pushed is not something they can.
+    */
+   def publishedReleases(checkout: Checkout): {Throw[GitError]} List[TagRef]
+
+   /**
+    * Tag `commit` as `version` in `checkout` — annotated, because an annotated tag is an object of its
+    * own carrying who made it and when, which is what a release is; a lightweight tag is only a name.
+    *
+    * At a commit and not at whatever is checked out, for the reason `addWorktree` takes one: the commit
+    * was looked up once, the questions above were asked about it, and tagging `HEAD` again would be a
+    * second lookup that the checks never saw.
+    */
+   def tagRelease(version: Version, commit: Commit, checkout: Checkout): {Throw[GitError]} Unit
+
+   /**
+    * Push the tag `version` — that one ref and nothing else — to `checkout`'s `origin`, which is the
+    * moment the release exists for anybody else.
+    */
+   def pushRelease(version: Version, checkout: Checkout): {Throw[GitError]} Unit
 }
 
 /**

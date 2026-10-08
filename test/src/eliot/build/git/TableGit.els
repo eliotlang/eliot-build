@@ -30,10 +30,28 @@ import eliot.build.git.Tags
  */
 
 /**
- * What every repository answers: the tags a listing announces, the files `fileAt` can read keyed
- * `<version>:<path>`, and the refusal — if any — every operation that can refuse raises.
+ * What every repository answers: the tags a listing announces — a mirror's and a checkout's `origin`'s
+ * alike — the files `fileAt` can read keyed `<version>:<path>`, the checkout a release is asked about,
+ * and the refusal — if any — every operation that can refuse raises.
  */
-data Mirrors(announcedTags: List[TagRef], heldFiles: List[Pair[String, String]], refusal: Option[GitError])
+data Mirrors(
+   announcedTags: List[TagRef],
+   heldFiles: List[Pair[String, String]],
+   working: Working,
+   refusal: Option[GitError]
+)
+
+/**
+ * The project's own checkout, as a release asks about it: what is not committed, the commit checked out,
+ * the commit its upstream was last seen at, and which commits descend from which — each pair an ancestor
+ * and a descendant, a commit always counting as its own.
+ */
+data Working(
+   pendingEntries: List[String],
+   checkedOutCommit: Commit,
+   pushedCommit: Commit,
+   ancestry: List[Pair[Commit, Commit]]
+)
 
 implement tableGit: Git {
    def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Mocking, Throw[GitError]} Mirror = {
@@ -67,6 +85,57 @@ implement tableGit: Git {
 
       unlessRefused(Worktree(target))
    }
+
+   def uncommittedChanges(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} List[String] = {
+      recordCall("uncommittedChanges", singleton(show(checkout.checkoutDirectory)))
+
+      unlessRefused(dependency.working.pendingEntries)
+   }
+
+   def headCommit(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Commit = {
+      recordCall("headCommit", singleton(show(checkout.checkoutDirectory)))
+
+      unlessRefused(dependency.working.checkedOutCommit)
+   }
+
+   def upstreamCommit(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Commit = {
+      recordCall("upstreamCommit", singleton(show(checkout.checkoutDirectory)))
+
+      unlessRefused(dependency.working.pushedCommit)
+   }
+
+   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Bool = {
+      recordCall(
+         "isAncestor",
+         append(append(singleton(show(ancestor)), show(descendant)), show(checkout.checkoutDirectory))
+      )
+
+      unlessRefused(
+         ancestor == descendant ||
+            dependency.working.ancestry.any(pair -> pair.first == ancestor && pair.second == descendant)
+      )
+   }
+
+   def publishedReleases(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} List[TagRef] = {
+      recordCall("publishedReleases", singleton(show(checkout.checkoutDirectory)))
+
+      unlessRefused(dependency.announcedTags)
+   }
+
+   def tagRelease(version: Version, commit: Commit, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+      recordCall(
+         "tagRelease",
+         append(append(singleton(show(version)), show(commit)), show(checkout.checkoutDirectory))
+      )
+
+      unlessRefused(unit)
+   }
+
+   def pushRelease(version: Version, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+      recordCall("pushRelease", append(singleton(show(version)), show(checkout.checkoutDirectory)))
+
+      unlessRefused(unit)
+   }
 }
 
 /**
@@ -74,12 +143,22 @@ implement tableGit: Git {
  * by the same function the shell implementation reads with — and holding `files`, keyed `<revision>:<path>`.
  */
 def mirrorsOf(listing: String, files: List[Pair[String, String]]): Mirrors =
-   Mirrors(parseTagRefs(listing), files, None)
+   Mirrors(parseTagRefs(listing), files, cleanCheckout, None)
 
 /**
  * Repositories that say no: every operation that can refuse raises `error`.
  */
-def refusingWith(error: GitError): Mirrors = Mirrors(empty, empty, Some(error))
+def refusingWith(error: GitError): Mirrors = Mirrors(empty, empty, cleanCheckout, Some(error))
+
+/**
+ * A checkout whose `origin` announces what `listing` says, and which is as `working` describes.
+ */
+def checkoutOf(listing: String, working: Working): Mirrors = Mirrors(parseTagRefs(listing), empty, working, None)
+
+/**
+ * A checkout with nothing uncommitted, at `head`, pushed, and descending from nothing but itself.
+ */
+def cleanCheckout: Working = Working(empty, Commit("head"), Commit("head"), empty)
 
 /**
  * `answer`, unless the table says every operation is refused — the one decision the three raising

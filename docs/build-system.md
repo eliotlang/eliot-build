@@ -557,32 +557,70 @@ follows:
   with a lexically identical signature silently merge — rare enough to live with; an advisory
   warning can be added later with no descriptor change.
 
-### Versions: branches are compatibility lines, tags are versions
+### Versions: tags are versions, and a line is the number they start with
 
-- A **major version is a branch** (`v1`, `v2`): an append-only compatibility contract. Breaking
-  changes start a new branch. `git ls-remote` on the branch is update discovery — no registry API.
-- **Versions are annotated tags on the branch** (`v1.4`, `v1.5`). The resolver selects tags,
-  never branch heads: a moving head names different code on different days, has no
-  human-readable version, and gives MVS nothing to order. A commit must be tagged to be
-  consumable (no Go-style pseudo-versions).
+- **Versions are annotated tags** (`v1.4`, `v1.5`). The resolver selects tags, never branch heads:
+  a moving head names different code on different days, has no human-readable version, and gives
+  MVS nothing to order. A commit must be tagged to be consumable (no Go-style pseudo-versions).
+- **A major version is a compatibility line** (`v1`, `v2`): an append-only contract, and nothing
+  more concrete than the number every tag on it starts with. Breaking changes start a new line.
+  `git ls-remote --tags` is update discovery — no registry API — and the order is read off the
+  numbers, so `v1.10` follows `v1.9` with no history consulted.
+- **No branch is required, and none is read** (amended 2026-10-08). The first draft made each line a
+  branch, borrowed from the maintenance-branch convention, and gave it four jobs: update discovery,
+  ordering by ancestry, `compat-check`'s baseline, and the place the contract lives. None survived
+  being built — discovery and ordering are the tags', the baseline is the previous *release* rather
+  than whatever a branch head holds, and the contract is per line, which a tag already names. Nothing
+  in the tool ever looked at one. So a project develops on whatever branch it likes and tags it; a
+  branch is what git needs, not what the tool needs, at exactly one moment — patching an old line
+  after the main branch has moved to a new major, which wants somewhere to commit. It can be made then,
+  from the old line's last tag (`git branch v1 v1.7`), and costs nothing by not existing earlier.
+- **What a line does need is a linear history**, and that is checked where a release is made rather
+  than assumed of a branch: `eliot --release` refuses a commit that does not descend from the last
+  release of its line ("Releasing", below). Two histories calling themselves one line are exactly what
+  MVS's ordering assumes never happens.
 - **`v0` is the line that promises nothing.** The append-only contract is what a line *is*, so a
   package whose signatures are still moving needs somewhere to be that does not claim otherwise:
-  line 0, by the same mechanics as any other (branch `v0`, tags `v0.0`, `v0.1`, and `v0.0`'s commit
-  as the lineage anchor) and with the guarantee explicitly suspended. Nothing in the resolver treats
-  it specially — MVS does not care which line it is selecting on — so this is a convention, and the
-  only one the format needs: the eliot repository itself is on it (`v0.0`, 2026-09-13), and moving to
-  `v1` is the ordinary act of starting a branch, done when the base stops changing shape and
-  `compat-check` exists to keep the promise.
-- **The guarantee has teeth**: `eliot compat-check` diffs exported signatures between the branch
-  head and a candidate tag and refuses removals/changes (Elm precedent: computed, not promised).
+  line 0, by the same mechanics as any other (tags `v0.0`, `v0.1`, and `v0.0`'s commit as the lineage
+  anchor) and with the guarantee explicitly suspended. Nothing in the resolver treats it specially —
+  MVS does not care which line it is selecting on — so this is a convention, and the only one the
+  format needs: the eliot repository itself is on it (`v0.0`, 2026-09-13), and moving to `v1` is the
+  ordinary act of tagging `v1.0`, done when the base stops changing shape and `compat-check` exists to
+  keep the promise.
+- **The guarantee has teeth**: `eliot compat-check` diffs exported signatures between the line's last
+  release and a candidate commit and refuses removals/changes (Elm precedent: computed, not promised).
   Caveat, accepted: use-site verification means a dependency's *body* change can surface new
   obligations at a consumer's call sites under an unchanged signature. This is safe because
   upgrades are explicit (lockfile): latent breakage appears only when the user opts into an
   upgrade, as an ordinary type error at a visible moment — never as silent drift.
 - **This guarantee is load-bearing for the layer ecosystem.** The abstract↔concrete merge is
   lexically exact, so a third-party platform layer built against `foo v1.4` still merges when MVS
-  selects `foo v1.6` — *only because* signatures are append-only within the branch. Git
+  selects `foo v1.6` — *only because* signatures are append-only within the line. Git
   versioning and cross-repo layers are one design, not two features.
+
+### Releasing: one command, from any branch (2026-10-08)
+
+Publishing a package is pushing a tag, so releasing is naming a commit, and `eliot --release` is the
+whole of it: the commit checked out is tagged as the next version and that one tag is pushed to
+`origin`. The next version is the next minor of the highest line `origin` publishes, and `v0.0` for a
+repository that publishes none — versions are `vM.N` with no third part, so "next" needs no argument.
+Starting a line is the one decision a listing cannot make, since it is the author saying the
+signatures changed, so it is only ever made by naming it: `eliot --release v1.0`. A named version must
+be the one that comes next — one minor after its line's latest, or the first release of a line above
+every published one — and naming an older line's next minor is how a maintenance branch releases.
+
+Before anything is written it refuses, in the order a user would fix them: a working tree with
+changes (the tag would name a commit that is not what the user is looking at), a commit not on the
+remote branch it pushes to (a release nobody's CI has seen), a version that is not next (a gap, a
+repeat, a line started below a published one), a commit that does not descend from its line's last
+release, and the commit that release already names. It runs no build and no test: that is CI's job on
+the push it checks for, and CI already fails a push whose builds had to change `eliot.lock`. Releases
+are numbered after `origin`'s tags rather than the checkout's, because a local tag nobody pushed is not
+something a consumer can select.
+
+The tag is annotated and made at the commit the checks were asked about, not at `HEAD` a second time —
+the same rule as the lockfile's checkout by commit. `Git` grew a `Checkout` subject for it, the project's
+own repository and the only one the tool writes a ref into (`docs/effectful-modules.md` §22).
 
 ### Resolution: Minimal Version Selection
 
@@ -590,7 +628,8 @@ Go's MVS, adopted as-is: a dependency declaration is a **minimum** (never a rang
 bound); resolution takes the transitive closure and picks, per package, the **maximum of the
 declared minimums** — the oldest version satisfying everyone. Deterministic without a lockfile,
 no silent upgrades (publishing changes nobody's build; only raising a minimum does), no solver.
-Ancestry on a release branch gives the version ordering almost for free.
+The version ordering is the tags' numbers, and a release refuses a commit that does not follow its
+line's last one, so the numbers and the history cannot disagree.
 
 **One major per package per program** (v1 rule): two majors of one package would collide at the
 FQN merge, so conflicting-major requirements are a resolver error. Known deferred problem —
@@ -1106,7 +1145,7 @@ descriptor to know what a platform is.
   keep one in the library's own repository (co-versioned — this is why sibling dependencies exist) or
   anyone can ship one from an unrelated repository: layer redefinition has no orphan rule, and the
   global at-most-one-implementation check keeps it coherent. Third-party layers stay viable across the
-  base library's minor upgrades precisely because of branch compat-checking (above).
+  base library's minor upgrades precisely because of per-line compat-checking (above).
 - **Test is a package** whose closure must be runnable on the build host — the framework, and a layer
   that implements what the framework needs. "The build system chooses" means: run the test packages
   whose closure can execute here. It cannot conjure platform implementations nobody declared.
@@ -1512,10 +1551,10 @@ plugins on the JVM.
 
 Two consequences:
 
-1. **The language falls under the branch-compat contract.** As an ordinary MVS'd dependency, a
-   minor tag on the eliot repo's v1 branch must be backward compatible — language and
+1. **The language falls under the line-compat contract.** As an ordinary MVS'd dependency, a
+   minor tag on the eliot repo's v1 line must be backward compatible — language and
    base-library evolution within a major is non-breaking, machine-checked by the same
-   `compat-check` as everyone else's; a breaking language change is a new major branch.
+   `compat-check` as everyone else's; a breaking language change is a new major line.
 2. **Descriptor-format evolution** is the one residual the directive used to cover (go.mod's
    `go` line also gates format features): handled by unknown-clause-is-fatal-with-hint, and a
    repo adopting a new clause commits the wrapper/launcher version that understands it —

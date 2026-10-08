@@ -64,6 +64,18 @@ def testCases: Test = {
    "anchorCommit" should "find no anchor for a line the repository does not publish" in {
       anchor(3, "aaa1\trefs/tags/v1.0") shouldBe "<none>"
    }
+   "latestRelease" should "find the newest release of a line by its number, with its commit" in {
+      latest(0, "aaa1\trefs/tags/v0.10\nbbb2\trefs/tags/v0.9\nccc3\trefs/tags/v1.0") shouldBe "v0.10 aaa1"
+   }
+   "latestRelease" should "find nothing on a line the repository has not released" in {
+      latest(2, "aaa1\trefs/tags/v0.10\nccc3\trefs/tags/v1.0") shouldBe "<none>"
+   }
+   "highestLine" should "find the highest line released, whatever order the listing has" in {
+      highest("ccc3\trefs/tags/v2.0\naaa1\trefs/tags/v0.10\nbbb2\trefs/tags/v1.3") shouldBe "v2"
+   }
+   "highestLine" should "find no line in a repository that has released nothing" in {
+      highest("") shouldBe "<none>"
+   }
 }
 
 /**
@@ -82,5 +94,10 @@ private def commit(tag: String, output: String): String =
 
 private def anchor(majorLine: Int, output: String): String =
    renderedCommit(anchorCommit(Line(majorLine), parseTagRefs(output)))
+
+private def latest(majorLine: Int, output: String): String =
+   latestRelease(Line(majorLine), parseTagRefs(output)).mapOption(ref -> renderedTags(singleton(ref))) orElse "<none>"
+
+private def highest(output: String): String = highestLine(parseTagRefs(output)).mapOption(lineName) orElse "<none>"
 
 private def version(tag: String): Version = parseVersion(tag) else Version(Line(0), None)

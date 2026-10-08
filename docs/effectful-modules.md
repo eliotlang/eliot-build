@@ -1269,3 +1269,47 @@ Two parsing facts the sweep met, both about juxtaposition binding tighter than a
 first arm `if(c) a.f` is `(if(c) a).f` (equivalent, since the `if` aborts first, but not what it reads
 as), and `someIf(c) x.f` is `(someIf(c) x).f` — a type error, so `someIf(c, x.f)`. An `if` whose arm
 does not fit on its line takes a block, since a line ending in `)` does not join the next.
+
+## 22. Revisited, 2026-10-08 — the project's own repository, and the first ref the tool writes
+
+Same compiler; framework eliot-test `v0.3` (the lock's commit — the tag is not published yet, and this
+was checked against a scratch one the way `.claude/CLAUDE.md` describes). 368 cases green, 49 of them new. `docs/build-system.md`, "Versions" and
+"Releasing", is the design: no line is a branch any more, and `eliot --release` tags and pushes the next
+version. This is what it did to the modules.
+
+**`Git` grew a subject rather than a sibling effect.** Every operation before this was about somebody
+else's repository — a `Remote`, a `Mirror` cloned from it, a `Worktree` checked out of that. A release
+is about the one repository the tool did not make, so it is a fourth type, `Checkout`, and seven
+members over it: `uncommittedChanges`, `headCommit`, `upstreamCommit`, `isAncestor` and
+`publishedReleases` ask, `tagRelease` and `pushRelease` write. A separate effect was the alternative and
+was not worth it: the clauses are one git command each, `shellGit` is already the one module that may
+spawn git, and the subject-decides-the-frame rule took a third case without changing — every checkout
+command stands inside the checkout, because `origin` and `@{upstream}` mean something only there. The
+cost is that `Cache`'s `{Git}` could now push a tag; it does not, and the import list of `git/Release`
+— not of `Cache` — is where pushing is named.
+
+**`isAncestor` is the second clause that reads an exit code.** `merge-base --is-ancestor` answers in
+its code, 0 yes and 1 no, so the clause calls `run` itself, as `fileAt` does, and refuses only the codes
+that mean git could not answer. `checked` and the new `refusal` are shared with it so a refusal reads
+the same whichever clause raised it.
+
+**`git/Release` is policy over `{Git}`, the way `Cache` is**, and its numbering is a pure function of a
+listing (`releaseAfter`, `nextRelease`), tested with no double at all. The rest runs on `tableGit`, whose
+seven new clauses journal with `recordCall` like the rest and whose `Mirrors` gained a `Working` record — what is uncommitted, the head, the upstream, and an ancestry table
+— so a case reads the operations in order and sees both writes made at the commit every question was
+about. `Tags` gained the two listing questions numbering needs, `latestRelease` and `highestLine`.
+
+**The launcher's third answer has three channels**, `ReleaseError`, `GitError` and `IoError`, and binds
+`shellGit` alone: a release asks nothing of any package source, mirror cache or asset. It is answered
+after the descriptor is read though it reads nothing of it, because a repository whose `eliot.pkg` does
+not parse is not one to publish.
+
+**`Version.branchName` is `lineName`.** Nothing in `src` called it; a double used it to spell a table
+key, and its two cases asserted "the branch a release lives on". The function was right and the noun
+was wrong.
+
+**Verified on the platform** with the stage-1 jar against a scratch repository and a bare `origin`:
+`v0.0` released and pushed as an annotated tag; the same commit, a dirty tree, an unpushed commit, a gap
+(`v0.5` after `v0.0`), a diverged branch and a detached `HEAD` each refused with exit 1 and no tag made;
+`v0.1` named and released; `v1.0` started a line; a branch made from `v0.1` released `v0.2` by name,
+while its unnamed release was refused for not following `v1.0`. Stage 2 built this suite green.

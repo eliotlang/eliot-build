@@ -96,6 +96,83 @@ def testCases: Test = {
          unit
       })
    }
+   "uncommittedChanges" should "ask for the porcelain status, standing inside the checkout" in mocked {
+      uncommittedChanges(checkout) with shellGit
+
+      calls shouldBe "/project$ git status --porcelain"
+   }
+   "uncommittedChanges" should "answer one entry per line git listed, and no empty one" in mocked {
+      whenSpawning("status", succeeding(" M src/a.els\n?? notes.txt\n"))
+
+      joined(", ", uncommittedChanges(checkout) with shellGit) shouldBe " M src/a.els, ?? notes.txt"
+   }
+   "uncommittedChanges" should "answer nothing for a clean tree" in mocked {
+      size(uncommittedChanges(checkout) with shellGit) shouldBe 0
+   }
+   "headCommit" should "read the commit HEAD names, without the line's end" in mocked {
+      whenSpawning("rev-parse HEAD", succeeding("ccc3\n"))
+
+      show(headCommit(checkout) with shellGit) shouldBe "ccc3"
+   }
+   "upstreamCommit" should "ask git for the branch's upstream by git's own spelling of it" in mocked {
+      upstreamCommit(checkout) with shellGit
+
+      calls shouldBe "/project$ git rev-parse @{upstream}"
+   }
+   "upstreamCommit" should "raise what git said about a branch that pushes nowhere" in mocked {
+      whenSpawning("rev-parse @{upstream}", failing(128, "no upstream configured for branch 'master'"))
+
+      raising[GitError]("no upstream configured", {
+         upstreamCommit(checkout) with shellGit
+         unit
+      })
+   }
+   "isAncestor" should "ask merge-base, inside the checkout" in mocked {
+      isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit
+
+      calls shouldBe "/project$ git merge-base --is-ancestor bbb2 ccc3"
+   }
+   "isAncestor" should "answer yes where git exits 0" in mocked {
+      (isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit).shouldBeTrue
+   }
+   "isAncestor" should "answer no where git exits 1, which is an answer rather than a refusal" in mocked {
+      whenSpawning("merge-base", failing(1, ""))
+
+      (isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit).shouldBeFalse
+   }
+   "isAncestor" should "raise where git could not answer at all" in mocked {
+      whenSpawning("merge-base", failing(128, "Not a valid commit name bbb2"))
+
+      raising[GitError]("failed with exit code 128: Not a valid commit name bbb2", {
+         isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit
+         unit
+      })
+   }
+   "publishedReleases" should "list origin's tags, standing in the checkout whose origin it is" in mocked {
+      publishedReleases(checkout) with shellGit
+
+      calls shouldBe "/project$ git ls-remote --tags origin"
+   }
+   "publishedReleases" should "read the versions origin publishes" in mocked {
+      whenSpawning("ls-remote", succeeding(listing))
+
+      renderedTags(publishedReleases(checkout) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
+   }
+   "tagRelease" should "make an annotated tag at the commit, named and described by its version" in mocked {
+      tagRelease(version("v0.6"), Commit("ccc3"), checkout) with shellGit
+
+      calls shouldBe "/project$ git tag --annotate --message v0.6 v0.6 ccc3"
+   }
+   "pushRelease" should "push that one tag to origin, spelled as a tag" in mocked {
+      pushRelease(version("v0.6"), checkout) with shellGit
+
+      calls shouldBe "/project$ git push origin refs/tags/v0.6"
+   }
+   "pushRelease" should "raise what git said where the remote refused the tag" in mocked {
+      whenSpawning("push", failing(1, "rejected"))
+
+      raising[GitError]("'git push origin refs/tags/v0.6' failed with exit code 1: rejected", pushRelease(version("v0.6"), checkout) with shellGit)
+   }
    "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
       cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
       fetch(mirror) with shellGit
@@ -109,6 +186,8 @@ def testCases: Test = {
 private def mirrorPath: Path = path("/cache/github.com/x/foo")
 
 private def mirror: Mirror = Mirror(mirrorPath)
+
+private def checkout: Checkout = Checkout(path("/project"))
 
 private def treePath: Path = path("/cache/github.com/x/foo@aaa1")
 

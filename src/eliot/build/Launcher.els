@@ -17,6 +17,8 @@ import eliot.build.resolve.Resolution
 import eliot.build.resolve.GitPackages
 import eliot.build.resolve.CachedPackages
 import eliot.build.git.Cache
+import eliot.build.git.Tags
+import eliot.build.git.Release
 import eliot.build.assemble.Assembly
 import eliot.build.assemble.Invocation
 import eliot.build.assemble.ProjectModel
@@ -50,10 +52,12 @@ import eliot.build.Command
  * `compiler` line in the closure. What that amounts to is the lines' business — `eliot test` compiles
  * this project's suite and runs it, `eliot launcher` builds the jar — so the tool has nothing to name
  * a verb after. Words after a `--` behind the name go to the program a line runs, so `eliot test --
- * eliot.build.resolve` runs that suite and no other. Before anything runs, what the closure fetched is checked against `eliot.lock` and
- * recorded in it, so a tag that moved or an asset that changed stops the build. The one other thing it
- * answers is `eliot --project-model`, an editor's question rather than a person's: what every package
- * resolves to, from what is already fetched.
+ * eliot.build.resolve` runs that suite and no other. Before anything runs, what the closure fetched is
+ * checked against `eliot.lock` and recorded in it, so a tag that moved or an asset that changed stops
+ * the build. The two other things it answers are options rather than packages, because neither builds:
+ * `eliot --project-model`, an editor's question rather than a person's — what every package resolves
+ * to, from what is already fetched — and `eliot --release`, which tags the commit checked out as the
+ * next version and pushes the tag.
  *
  * **What a build reports is the compiler's own output and the compiler's own exit code.** The
  * subprocess inherits this program's streams rather than being captured, because a compiler's
@@ -96,11 +100,30 @@ private def answer(commandLine: List[String], here: Path, java: String): {FileSy
    )
 
 /**
- * What the command line asks of `descriptor`: the project model where it asks for that, the usage where
- * it names no package, the usage after a refusal where it names one the descriptor does not declare,
- * and the build otherwise.
+ * What the command line asks of `descriptor`: the project model or a release where it asks for one of
+ * those, and a package's build otherwise.
+ *
+ * A release is answered after the descriptor was read, though it reads nothing of it: a repository whose
+ * `eliot.pkg` does not parse is not one to publish, and the clean tree a release insists on makes the
+ * file read here the file the tag will name.
  */
 private def answered(
+      commandLine: List[String],
+      descriptor: Descriptor,
+      here: Path,
+      java: String
+   ): {FileSystem, Process} List[String] =
+   if(modelRequested(commandLine)) modelled(descriptor, here)
+   else releaseRequested(commandLine).foldOption(
+      built(commandLine, descriptor, here, java),
+      request -> releasing(request, here)
+   )
+
+/**
+ * The build the command line names: the usage where it names no package, the usage after a refusal
+ * where it names one the descriptor does not declare, and the build otherwise.
+ */
+private def built(
       commandLine: List[String],
       descriptor: Descriptor,
       here: Path,
@@ -108,14 +131,38 @@ private def answered(
    ): {FileSystem, Process} List[String] = {
    val declared = descriptor.packages.map(packageName)
 
-   if(modelRequested(commandLine)) modelled(descriptor, here)
-   else requested(commandLine).foldOption(
+   requested(commandLine).foldOption(
       reporting(usage(Some(declared))),
       named ->
          if(isSome(packageNamed(named, descriptor))) attempted(named, forwarded(commandLine), descriptor, here, java)
          else reporting(unknownPackage(named, declared))
    )
 }
+
+/**
+ * The release `request` asks for, of the repository checked out `here`, or the line naming what refused.
+ *
+ * Three channels, each reporting as itself: a release the tags or the history refuse, which is the
+ * user's to fix in their repository; git saying no, which carries the command to run by hand; and a
+ * machine that will not run git at all. Only `shellGit` is bound — a release asks nothing of any
+ * package source, mirror or asset, because what it publishes is this repository and nobody else's.
+ */
+private def releasing(request: ReleaseRequest, here: Path): {Process} List[String] =
+   catch[IoError, List[String]](
+      catch[GitError, List[String]](
+         catch[ReleaseError, List[String]](
+            reported(released(request.requestedVersion, Checkout(here))) with shellGit,
+            problem -> reporting(failed("not releasing", show(problem)))
+         ),
+         problem -> reporting(failed("git refused", show(problem)))
+      ),
+      problem -> reporting(failed("cannot reach this machine", show(problem)))
+   )
+
+/**
+ * `releaseReport` of the tag that was pushed.
+ */
+private def reported(pushed: TagRef): List[String] = releaseReport(pushed.taggedVersion, pushed.taggedCommit)
 
 /**
  * The project model of every package `descriptor` declares, as the one JSON document an editor reads

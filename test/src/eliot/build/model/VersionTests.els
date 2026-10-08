@@ -66,8 +66,8 @@ def testCases: Test = {
    "Version" should "refuse to call two majors one line, however close their minors" in {
       oneLine("v1.9", "v2.0") shouldBe "two lines"
    }
-   "branchName" should "name the branch a release lives on" in {
-      branchName(versionOf("v1.4").major) shouldBe "v1"
+   "lineName" should "name the line a release is on" in {
+      lineName(versionOf("v1.4").major) shouldBe "v1"
    }
    "firstRelease" should "be the vN.0 that anchors a line" in {
       show(firstRelease(Line(2))) shouldBe "v2.0"
@@ -75,8 +75,8 @@ def testCases: Test = {
    "firstRelease" should "order where a bare major does" in {
       (if(firstRelease(Line(1)) == versionOf("v1")) "same" else "different") shouldBe "same"
    }
-   "branchName" should "name the branch a bare major already is" in {
-      branchName(versionOf("v2").major) shouldBe "v2"
+   "lineName" should "name the line a bare major already is" in {
+      lineName(versionOf("v2").major) shouldBe "v2"
    }
 }
 

@@ -3,6 +3,8 @@ import eliot.file.Path
 import eliot.system.Process
 import eliot.build.format.PackageFile
 import eliot.build.model.PackageId
+import eliot.build.model.Version
+import eliot.build.model.Lineage
 
 /**
  * What the tool was asked for, and what it says back.
@@ -12,8 +14,8 @@ import eliot.build.model.PackageId
  * testable without a platform beneath them while `eliot.build.Launcher` — which is the boundary, and
  * is where the implementations are bound — can never be. That is the same cut
  * `eliot.build.format.DescriptorWriter` makes against the parser, for the same reason, and the import
- * list is the argument here too: this knows what a package name is and nothing about git, the
- * filesystem or a subprocess.
+ * list is the argument here too: this knows what a package name, a version and a commit are, and
+ * nothing about git, the filesystem or a subprocess.
  *
  * **There are no verbs.** `eliot <package>` runs every `compiler` line in the package's closure, and
  * what that *does* — compile, run a suite, flash a board, render the docs — is the line's to say, so a
@@ -21,7 +23,8 @@ import eliot.build.model.PackageId
  * the two questions the tool used to answer, went with `build`: they were queries about a closure, and
  * the query a closure is actually asked by something other than a person is the IDE's project model
  * (`docs/build-system.md`, "IDE integration"), which is a machine-facing interface of its own rather
- * than a verb beside a package name.
+ * than a verb beside a package name. The other option, `--release`, is not about a closure at all: it
+ * tags the project's own commit, and builds nothing.
  *
  * **`eliot.system.Process` is imported for two pure list builders and nothing else.** A command line
  * is text — `command("java").withArgument("-cp")` is the spelling this project already uses for one —
@@ -81,10 +84,10 @@ def argumentSeparator: String = "--"
 /**
  * `true` where the command line asks for the project model — `--project-model` and nothing else.
  *
- * The one option the tool has, and an option rather than a package name because it is not a build: it
- * answers what every package resolves to, for an editor, and runs nothing (`docs/build-system.md`, "IDE
- * integration"). The leading dash `requested` keeps free is what lets it arrive without being read as a
- * package.
+ * The first of the tool's two options, and an option rather than a package name because it is not a
+ * build: it answers what every package resolves to, for an editor, and runs nothing
+ * (`docs/build-system.md`, "IDE integration"). The leading dash `requested` keeps free is what lets it
+ * arrive without being read as a package.
  *
  * ```eliot
  * val modelling = modelRequested(singleton(projectModelOption))
@@ -100,6 +103,39 @@ def modelRequested(commandLine: List[String]): Bool = {
  * The option that asks for the project model, spelled once.
  */
 def projectModelOption: String = "--project-model"
+
+/**
+ * A command line asking for a release: of the version it names, or of the next one where it names none.
+ */
+data ReleaseRequest(requestedVersion: Option[Version])
+
+/**
+ * The release the command line asks for — `--release`, optionally followed by a version — absent where
+ * it asks for anything else.
+ *
+ * The second option, and an option for the reason the first is one: it builds nothing. A word after it
+ * that is not a version makes the whole line ask for nothing, so the user gets the usage rather than a
+ * release of something they did not type.
+ *
+ * ```eliot
+ * val release = releaseRequested(append(singleton(releaseOption), "v1.0"))
+ * ```
+ */
+def releaseRequested(commandLine: List[String]): Option[ReleaseRequest] = runAbort(releaseOf(commandLine))
+
+/**
+ * The option that asks for a release, spelled once.
+ */
+def releaseOption: String = "--release"
+
+/**
+ * What a release says once its tag is pushed: the version, which is also what a consumer writes as the
+ * minimum in a `dep` line, and the commit it names, which is what their `eliot.lock` will record.
+ *
+ * Taken as the two values rather than as git's `TagRef`, so this module still names nothing of git.
+ */
+def releaseReport(version: Version, commit: Commit): List[String] =
+   singleton("eliot: released " ++ show(version) ++ " at " ++ show(commit))
 
 /**
  * Everything one run of the compiler needs, as values: the JVM to run it on, the directories its
@@ -210,6 +246,8 @@ def usage(declared: Option[List[PackageName]]): List[String] =
       singleton("   and passes the arguments after -- to the program a line runs") ++
       singleton("usage: eliot " ++ projectModelOption) ++
       singleton("   prints what every package resolves to, as JSON, from what is already fetched") ++
+      singleton("usage: eliot " ++ releaseOption ++ " [<version>]") ++
+      singleton("   tags the pushed commit checked out as the next release, or as <version>, and pushes the tag") ++
       (declared.mapOption(listed) orElse empty)
 
 /**
@@ -223,6 +261,15 @@ def usage(declared: Option[List[PackageName]]): List[String] =
 def unknownPackage(name: PackageName, declared: List[PackageName]): List[String] =
    failed("no package named '" ++ show(name) ++ "'", "not declared in " ++ descriptorFileName) ++
       usage(Some(declared))
+
+/**
+ * `releaseRequested`'s reading, aborting on anything but the option and at most one version after it.
+ */
+private def releaseOf(commandLine: List[String]): {Abort} ReleaseRequest = {
+   val version = at(1, commandLine).mapOption(parseVersion)
+
+   if((at(0, commandLine) orElse "") == releaseOption && size(commandLine) <= 2) ReleaseRequest(version)
+}
 
 /**
  * The packages a descriptor declares, one per line under a heading naming the file, or the one line
