@@ -187,7 +187,8 @@ that. There is no `pure` any more, no capture tag and no carrier.
 A release is an **annotated** tag and nothing else; the line is `v0`, and no branch is involved — a line
 is the number its tags start with (`docs/build-system.md`, "Versions"). To publish: push the commit to
 `master`, let CI go green, then `./bootstrap --release` — the working tree's own launcher, so this works
-before a release carrying the option is pinned; `./eliotw --release` once one is. It tags the commit
+before a release carrying the option is pinned; `./eliotw --release` from `v0.7`, the first that has it
+and the first release made with it. It tags the commit
 checked out as the next `v0.<n>` and pushes the tag (the old `v0` branch is no longer moved; nothing
 reads it). `.github/workflows/release.yml`
 then runs `./bootstrap test`, builds the jar with `./bootstrap launcher`, checks that the
@@ -249,7 +250,8 @@ and `compiler` lines (and eliot's the first compiler with the `run` mode and a d
 `v0.6` the first with `--progress`, which `Command.compilerCommand` appends to every compiler it runs (and
 `./bootstrap` to stage 0's): progress lines on stderr, decorated by the compiler for a terminal or a log. A
 launcher older than `v0.3` cannot read this repository's own descriptor; `v0.3`, `v0.4` and `v0.5` are published, and
-`v0.6` — the first that answers `--project-model`, which the IDE reads — is pinned (2026-09-17). From `v0.6` the
+`v0.6` is the first that answers `--project-model`, which the IDE reads; `v0.7` — the first with `--release` and
+with words after `--` — is pinned (2026-10-08). From `v0.6` the
 launcher appends `--progress` to every compiler it runs, so a project on it needs eliot `v0.6` or later: an older
 compiler refuses the flag, and until eliot `985b0b66` it then exited 0, making that refusal read as a green build.
 
@@ -285,7 +287,7 @@ package root is `test/`.
 
 There are two ways in. `./eliotw <package>` is the user's: the committed wrapper reads
 the `launcher <tag>` line of `eliot.pkg`, fetches that launcher release into `~/.cache/eliot/launcher/<tag>/` once and execs
-it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.6`; `v0.4` was the first with the
+it, so it needs no compiler checkout and no mill. The pinned launcher (`v0.7`; `v0.4` was the first with the
 verbless command line), so `./eliotw test` in a checkout holding nothing but the wrapper builds and runs
 this project's suite. It still runs the *published* launcher and never your
 working tree, which is what makes it the wrong tool for checking a change to the tool itself. `ELIOT_LAUNCHER_REPOSITORY` points
