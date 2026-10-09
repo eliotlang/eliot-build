@@ -249,8 +249,11 @@ private def ensuredMirror(root: Path, repository: Repository): Cached[Mirror] = 
 
 /**
  * The mirror of `repository`, where one is already on disk — `ensuredMirror` without the clone.
+ *
+ * It declares what it performs rather than `Offline`: looking for a directory runs no git, and a declared
+ * effect the body never performs is a compile error.
  */
-private def existingMirror(root: Path, repository: Repository): Offline[Mirror] = {
+private def existingMirror(root: Path, repository: Repository) uses FileSystem, Throw[IoError], Throw[NotFetched]: Mirror = {
    val directory = cacheDirectory(root, repository)
 
    if(isDirectory(directory)) Mirror(directory) else raise(NotFetched(repository))
