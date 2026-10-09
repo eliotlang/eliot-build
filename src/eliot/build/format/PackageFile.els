@@ -77,14 +77,14 @@ def descriptorFileName: String = "eliot.pkg"
  * val descriptor = parseDescriptor(readLines(root / "eliot.pkg"))
  * ```
  */
-def parseDescriptor(lines: List[String]): {Throw[DescriptorError]} Descriptor =
+def parseDescriptor(lines: List[String]) uses Throw[DescriptorError]: Descriptor =
    interpreted(parseClauses(lines) catch (error -> raise(Malformed(error))))
 
 /**
  * What `clauses` mean, with the reader's complaints answered as descriptor errors — the second of the
  * two channels the modules underneath raise on, and the only place either becomes a `DescriptorError`.
  */
-private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descriptor =
+private def interpreted(clauses: List[Clause]) uses Throw[DescriptorError]: Descriptor =
    interpret(clauses) catch (problem -> raise(Unreadable(problem)))
 
 /**
@@ -96,7 +96,7 @@ private def interpreted(clauses: List[Clause]): {Throw[DescriptorError]} Descrip
  * It is `knownClauses` that refuses now, up front and for all of them at once, and what is left is the
  * mapping itself.
  */
-private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor = {
+private def interpret(clauses: List[Clause]) uses Throw[ClauseProblem]: Descriptor = {
    topLevelClauses(clauses)
 
    Descriptor(clausesNamed("package", clauses).map(packageOf))
@@ -107,7 +107,7 @@ private def interpret(clauses: List[Clause]): {Throw[ClauseProblem]} Descriptor 
  * and told how a package at the repository root is spelled, because "unknown clause, upgrade" would
  * send its author looking for a newer launcher when what the line needs is a block around it.
  */
-private def topLevelClauses(clauses: List[Clause]): {Throw[ClauseProblem]} Unit = {
+private def topLevelClauses(clauses: List[Clause]) uses Throw[ClauseProblem]: Unit = {
    clauses.foreach(clause -> requireThat(!belongsInsideAPackage(clause), belongsInside(clause), clause))
    knownClauses(descriptorKeywords, clauses)
    clausesNamed("launcher", clauses).foreach(launcherClause)
@@ -118,7 +118,7 @@ private def topLevelClauses(clauses: List[Clause]): {Throw[ClauseProblem]} Unit 
  * than passing the launcher and failing only the wrapper. What it names is nobody's business but the
  * wrapper's, which has already acted on it by the time anything reads this.
  */
-private def launcherClause(clause: Clause): {Throw[ClauseProblem]} Unit = {
+private def launcherClause(clause: Clause) uses Throw[ClauseProblem]: Unit = {
    required(0, "a launcher pin needs the tag it pins", clause)
    atMostArguments(1, clause)
    knownChildren(empty, clause)
@@ -130,7 +130,7 @@ private def belongsInsideAPackage(clause: Clause): Bool =
 private def belongsInside(clause: Clause): String =
    "'" ++ clause.keyword ++ "' belongs inside a package block; a package at the repository root is written 'package root { at . ... }'"
 
-private def packageOf(clause: Clause): {Throw[ClauseProblem]} BuildPackage = {
+private def packageOf(clause: Clause) uses Throw[ClauseProblem]: BuildPackage = {
    val name = required(0, "a package needs a name", clause)
 
    atMostArguments(1, clause)
@@ -154,7 +154,7 @@ private def packageOf(clause: Clause): {Throw[ClauseProblem]} BuildPackage = {
  * consumer a directory and the rule lives in one place. Reading `at` costs the package nothing it did
  * not already spend: a repository whose layout is the convention never writes one.
  */
-private def directoryOf(name: String, clause: Clause): {Throw[ClauseProblem]} String =
+private def directoryOf(name: String, clause: Clause) uses Throw[ClauseProblem]: String =
    clause.childrenNamed("at").foldLeft(name, child -> _ -> atClause(child))
 
 /**
@@ -162,7 +162,7 @@ private def directoryOf(name: String, clause: Clause): {Throw[ClauseProblem]} St
  * point source assembly at a directory the checkout does not contain. An absolute path and a `..`
  * segment are refused for that one reason, which is why they are refused together.
  */
-private def atClause(clause: Clause): {Throw[ClauseProblem]} String = {
+private def atClause(clause: Clause) uses Throw[ClauseProblem]: String = {
    val directory = required(0, "an 'at' needs a directory", clause)
 
    atMostArguments(1, clause)
@@ -182,7 +182,7 @@ private def insideRepository(directory: String): Bool =
  * would need an order, then a way to skip one, then a name to skip it by. A package that wants two
  * things depends on two packages, and the refusal says so.
  */
-private def compilerOf(clause: Clause): {Throw[ClauseProblem]} Option[List[String]] = {
+private def compilerOf(clause: Clause) uses Throw[ClauseProblem]: Option[List[String]] = {
    val lines = clause.childrenNamed("compiler")
 
    lines.at(1).foreachOption(second -> raise(problemIn(oneCompilerLine, second)))
@@ -190,7 +190,7 @@ private def compilerOf(clause: Clause): {Throw[ClauseProblem]} Option[List[Strin
    lines.head.mapOption(compilerClause)
 }
 
-private def compilerClause(clause: Clause): {Throw[ClauseProblem]} List[String] = {
+private def compilerClause(clause: Clause) uses Throw[ClauseProblem]: List[String] = {
    required(0, "a compiler line needs the words it passes to the compiler", clause)
    knownChildren(empty, clause)
    clause.arguments
@@ -206,7 +206,7 @@ private def oneCompilerLine: String =
  * Nor any statement about what the asset is — the compiler tells its plugins apart, the launcher only
  * puts them all on one classpath.
  */
-private def assetClause(clause: Clause): {Throw[ClauseProblem]} String = {
+private def assetClause(clause: Clause) uses Throw[ClauseProblem]: String = {
    val asset = required(0, "an asset needs a release asset name", clause)
 
    atMostArguments(1, clause)

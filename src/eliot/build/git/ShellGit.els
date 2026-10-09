@@ -27,7 +27,7 @@ import eliot.build.git.Tags
  * this implementation's failure, and no caller declaring `{Git}` ever names it.
  */
 implement shellGit: Git {
-   def cloneMirror(remote: Remote, target: Path): {Process, Throw[IoError], Throw[GitError]} Mirror = {
+   def cloneMirror(remote: Remote, target: Path) uses Process, Throw[IoError], Throw[GitError]: Mirror = {
       checked(
          command("git").withArgument("clone").withArgument("--mirror")
             .withArgument(remote.remoteUrl).withArgument(show(target)),
@@ -37,7 +37,7 @@ implement shellGit: Git {
       Mirror(target)
    }
 
-   def fetch(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Unit = {
+   def fetch(mirror: Mirror) uses Process, Throw[IoError], Throw[GitError]: Unit = {
       checked(
          command("git").withArgument("fetch").withArgument("--tags").withArgument("--prune"),
          mirror.mirrorDirectory
@@ -46,14 +46,14 @@ implement shellGit: Git {
       unit
    }
 
-   def tags(mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
+   def tags(mirror: Mirror) uses Process, Throw[IoError], Throw[GitError]: List[TagRef] =
       parseTagRefs(checked(lsRemoteTags(show(mirror.mirrorDirectory)), here))
 
    /**
     * `Throw[IoError]` is a different statement from the refusal this reads, and stays: git refusing to
     * answer is what this reads, git failing to *start* is not.
     */
-   def fileAt(version: Version, path: String, mirror: Mirror): {Process, Throw[IoError]} Option[String] = {
+   def fileAt(version: Version, path: String, mirror: Mirror) uses Process, Throw[IoError]: Option[String] = {
       val shown = run(
          command("git").withArgument("show").withArgument(show(version) ++ ":" ++ path),
          mirror.mirrorDirectory
@@ -69,7 +69,7 @@ implement shellGit: Git {
     * refuses a path nothing occupies — a cache that cannot heal itself from a deleted directory would
     * be a cache a user has to know how to repair.
     */
-   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Process, Throw[IoError], Throw[GitError]} Worktree = {
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror) uses Process, Throw[IoError], Throw[GitError]: Worktree = {
       checked(
          command("git").withArgument("worktree").withArgument("add").withArgument("--detach")
             .withArgument("--force").withArgument(show(target)).withArgument(show(commit)),
@@ -79,18 +79,18 @@ implement shellGit: Git {
       Worktree(target)
    }
 
-   def uncommittedChanges(checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} List[String] =
+   def uncommittedChanges(checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: List[String] =
       split("\n", checked(command("git").withArgument("status").withArgument("--porcelain"), checkout.checkoutDirectory))
          .filter(entry -> entry != "")
 
-   def headCommit(checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Commit =
+   def headCommit(checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Commit =
       revision("HEAD", checkout)
 
    /**
     * `@{upstream}` is git's own spelling of the remote-tracking branch the checked-out branch pushes to,
     * and git refuses it — naming why — on a branch with none and on a detached `HEAD`.
     */
-   def upstreamCommit(checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Commit =
+   def upstreamCommit(checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Commit =
       revision("@{upstream}", checkout)
 
    /**
@@ -98,7 +98,7 @@ implement shellGit: Git {
     * is no. Anything else is git failing to answer — a commit this checkout has no object for, most
     * likely — and that is refused like every other operation's failure.
     */
-   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Bool = {
+   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Bool = {
       val arguments = command("git").withArgument("merge-base").withArgument("--is-ancestor")
          .withArgument(show(ancestor)).withArgument(show(descendant))
       val result = run(arguments, checkout.checkoutDirectory)
@@ -107,14 +107,14 @@ implement shellGit: Git {
       result.exitCode == 0
    }
 
-   def publishedReleases(checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} List[TagRef] =
+   def publishedReleases(checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: List[TagRef] =
       parseTagRefs(checked(lsRemoteTags(publishingRemote), checkout.checkoutDirectory))
 
    /**
     * The tag's message is its name: a release says what it is in its version, and what changed is the
     * history's to say.
     */
-   def tagRelease(version: Version, commit: Commit, checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Unit = {
+   def tagRelease(version: Version, commit: Commit, checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Unit = {
       checked(
          command("git").withArgument("tag").withArgument("--annotate").withArgument("--message")
             .withArgument(show(version)).withArgument(show(version)).withArgument(show(commit)),
@@ -127,7 +127,7 @@ implement shellGit: Git {
    /**
     * Spelled `refs/tags/<version>` so a branch that happens to share the name cannot be what is pushed.
     */
-   def pushRelease(version: Version, checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Unit = {
+   def pushRelease(version: Version, checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Unit = {
       checked(
          command("git").withArgument("push").withArgument(publishingRemote).withArgument("refs/tags/" ++ show(version)),
          checkout.checkoutDirectory
@@ -172,7 +172,7 @@ private def lsRemoteTags(target: String): List[String] =
  * read an exit code — `fileAt`, whose refusal is an absence, and `isAncestor`, whose 1 is a no — call
  * `run` themselves.
  */
-private def checked(arguments: List[String], workingDirectory: Path): {Process, Throw[IoError], Throw[GitError]} String = {
+private def checked(arguments: List[String], workingDirectory: Path) uses Process, Throw[IoError], Throw[GitError]: String = {
    val result = run(arguments, workingDirectory)
 
    unless(result.exitCode == 0) raise(refusal(arguments, result))
@@ -183,7 +183,7 @@ private def checked(arguments: List[String], workingDirectory: Path): {Process, 
  * The commit `name` resolves to in `checkout` — `rev-parse` prints it on a line of its own, and the
  * line's end is not part of the hash.
  */
-private def revision(name: String, checkout: Checkout): {Process, Throw[IoError], Throw[GitError]} Commit =
+private def revision(name: String, checkout: Checkout) uses Process, Throw[IoError], Throw[GitError]: Commit =
    Commit(trim(checked(command("git").withArgument("rev-parse").withArgument(name), checkout.checkoutDirectory)))
 
 /**

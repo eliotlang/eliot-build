@@ -166,7 +166,7 @@ private def pinnedAssembled(
       renderedRoots(rootsOf(PackageName(name), projectOf(rootText), resolve(PackageName(name), descriptorOf(rootText)), pinned))
    )
 
-private def lockedRootsOf(name: PackageName, rootText: String): {PackageSource, Throw[ResolutionError]} List[Path] = {
+private def lockedRootsOf(name: PackageName, rootText: String) uses PackageSource, Throw[ResolutionError]: List[Path] = {
    val resolution = resolve(name, descriptorOf(rootText))
 
    rootsOf(name, projectOf(rootText), resolution, lockedVersionsOf(resolution))

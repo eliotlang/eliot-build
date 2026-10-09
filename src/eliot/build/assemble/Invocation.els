@@ -72,7 +72,7 @@ def invocationOf(
       name: PackageName,
       descriptor: Descriptor,
       resolution: Resolution
-   ): {PackageSource, Throw[ResolutionError], Throw[InvocationError]} Invocation = {
+   ) uses PackageSource, Throw[ResolutionError], Throw[InvocationError]: Invocation = {
    val mounted = resolution.selections.flatMap(mountedBy)
    val lines = (projectPackages(name, descriptor) ++ mounted.map(second)).filterMap(packageCompiler)
 
@@ -96,7 +96,7 @@ private def projectPackages(name: PackageName, descriptor: Descriptor): List[Bui
  * descriptor cannot be read back is `Unavailable` — the resolver's own error, the same fact under a
  * different verb, which is what `eliot.build.assemble.Assembly` says about the same read.
  */
-private def mountedBy(selection: Selection): {PackageSource, Throw[ResolutionError]} List[Pair[Selection, BuildPackage]] = {
+private def mountedBy(selection: Selection) uses PackageSource, Throw[ResolutionError]: List[Pair[Selection, BuildPackage]] = {
    val descriptor = descriptorAt(selection.selectedVersion, selection.selectedRepository) orElse
       raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
 

@@ -35,14 +35,14 @@ implement Show[ClauseError] {
  * val clauses = parseClauses(readLines(root / "eliot.pkg"))
  * ```
  */
-def parseClauses(lines: List[String]): {Throw[ClauseError]} List[Clause] =
+def parseClauses(lines: List[String]) uses Throw[ClauseError]: List[Clause] =
    orRaise(closed(lines.foldLeft(openState, line -> state -> stepLine(line, state))))
 
 /**
  * The `index`-th argument of `clause`, aborting when it has no such argument — so a clause reader
  * answers a missing argument with `else` or lets it propagate.
  */
-def argument(index: Int, clause: Clause): {Abort} String = orAbort(clause.arguments.at(index))
+def argument(index: Int, clause: Clause) uses Abort: String = orAbort(clause.arguments.at(index))
 
 /**
  * The clauses of `clauses` whose keyword is `name` — how an interpreter reads the `dep` lines of a

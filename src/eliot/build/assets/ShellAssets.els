@@ -37,14 +37,14 @@ import eliot.build.assets.Assets
  * a directory with no digest beside it is fetched again, over itself.
  */
 implement shellAssets: Assets {
-   def assetTree(asset: Asset): {Process, FileSystem, Dep[Path], Throw[IoError], Throw[AssetError]} Path =
+   def assetTree(asset: Asset) uses Process, FileSystem, Dep[Path], Throw[IoError], Throw[AssetError]: Path =
       fetchedTree(dependency, asset)
 
    /**
     * Read back from the digest file the fetch wrote, so a cached asset answers without being hashed
     * again — and without the archive, which is gone.
     */
-   def assetDigest(asset: Asset): {Process, FileSystem, Dep[Path], Throw[IoError], Throw[AssetError]} Digest = {
+   def assetDigest(asset: Asset) uses Process, FileSystem, Dep[Path], Throw[IoError], Throw[AssetError]: Digest = {
       fetchedTree(dependency, asset)
 
       Digest(readFile(digestFile(dependency, asset)).trim)
@@ -69,7 +69,7 @@ def digestFile(root: Path, asset: Asset): Path = versionDirectory(root, asset) /
 /**
  * `asset`'s directory, fetched first unless the digest file says a fetch already finished.
  */
-private def fetchedTree(root: Path, asset: Asset): {Process, FileSystem, Throw[IoError], Throw[AssetError]} Path = {
+private def fetchedTree(root: Path, asset: Asset) uses Process, FileSystem, Throw[IoError], Throw[AssetError]: Path = {
    val directory = assetDirectory(root, asset)
 
    if(exists(digestFile(root, asset))) directory else unpacked(root, asset, directory)
@@ -94,7 +94,7 @@ private def unpacked(
       root: Path,
       asset: Asset,
       directory: Path
-   ): {Process, FileSystem, Throw[IoError], Throw[AssetError]} Path = {
+   ) uses Process, FileSystem, Throw[IoError], Throw[AssetError]: Path = {
    val archive = versionDirectory(root, asset) / (asset.assetName ++ ".download")
 
    createDirectories(versionDirectory(root, asset))
@@ -116,7 +116,7 @@ private def unpacked(
  * The fallback is on the first tool failing to *start*, for `downloaded`'s reason. Both print the digest
  * first and the file name after it, so the digest is everything before the first space.
  */
-private def hashed(archive: Path): {Process, Throw[IoError], Throw[AssetError]} String =
+private def hashed(archive: Path) uses Process, Throw[IoError], Throw[AssetError]: String =
    before(" ", catch[IoError, String](output(sha256sumHashing(archive)), _ -> output(shasumHashing(archive))))
 
 private def sha256sumHashing(archive: Path): List[String] = command("sha256sum").withArgument(show(archive))
@@ -131,7 +131,7 @@ private def shasumHashing(archive: Path): List[String] =
  * other tool". A curl that ran and refused has read the server's answer, and retrying that with a
  * second downloader would turn one honest report into two confusing ones.
  */
-private def downloaded(url: String, archive: Path): {Process, Throw[IoError], Throw[AssetError]} Unit =
+private def downloaded(url: String, archive: Path) uses Process, Throw[IoError], Throw[AssetError]: Unit =
    catch[IoError, Unit](checked(curlFetching(url, archive)), _ -> checked(wgetFetching(url, archive)))
 
 /**
@@ -162,7 +162,7 @@ private def unzipping(archive: Path, directory: Path): List[String] =
  * the obvious thing for a caller to pass — and a command launched from inside the cache would resolve
  * that same relative path a second time.
  */
-private def checked(arguments: List[String]): {Process, Throw[IoError], Throw[AssetError]} Unit = {
+private def checked(arguments: List[String]) uses Process, Throw[IoError], Throw[AssetError]: Unit = {
    output(arguments)
 
    unit
@@ -171,7 +171,7 @@ private def checked(arguments: List[String]): {Process, Throw[IoError], Throw[As
 /**
  * What `arguments` wrote, run as `checked` runs them.
  */
-private def output(arguments: List[String]): {Process, Throw[IoError], Throw[AssetError]} String = {
+private def output(arguments: List[String]) uses Process, Throw[IoError], Throw[AssetError]: String = {
    val result = run(arguments, here)
 
    unless(result.exitCode == 0) raise(AssetError(arguments.joined(" "), result.exitCode, result.standardError))

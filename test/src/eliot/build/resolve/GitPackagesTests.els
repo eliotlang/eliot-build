@@ -85,7 +85,7 @@ private def mirrorPath: Path = path("target/cache/github.com/x/foo")
  * mirrors under, and the table `tableGit` answers out of. Both type arguments are spelled because the
  * slot's row names `Dep` twice, and only the call can say which of them a `provide` supplies.
  */
-private def answered(computation: {Dep[Path], Dep[Mirrors]} String): String =
+private def answered(computation uses *, Dep[Path], Dep[Mirrors]: String): String =
    provide[Path, String](cacheRoot, provide[Mirrors, String](mirrors, computation))
 
 private def cacheRoot: Path = path("target/cache")

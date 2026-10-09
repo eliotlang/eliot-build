@@ -63,7 +63,7 @@ data ModelEntry =
  * val model = modelOf(PackageName("test"), Project(here, descriptor))
  * ```
  */
-def modelOf(name: PackageName, project: Project): {PackageSource, Throw[ResolutionError]} PackageModel = {
+def modelOf(name: PackageName, project: Project) uses PackageSource, Throw[ResolutionError]: PackageModel = {
    val resolution = resolve(name, project.projectDescriptor)
    val pinned = lockedVersionsOf(resolution)
 

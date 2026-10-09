@@ -37,7 +37,7 @@ data Line(majorNumber: Int)
  * compatibility line, and `v1.2.3` names a third component nothing orders by. A rejected token is a
  * misunderstanding worth reporting, never a token to interpret generously.
  */
-def parseVersion(text: String): {Abort} Version = {
+def parseVersion(text: String) uses Abort: Version = {
    val body = versionBody(text)
    val majorPart = natural(before(".", body))
    val minorPart = minorOf(body)
@@ -111,14 +111,14 @@ implement Compare[Version] {
 /**
  * Everything after the leading `v`, which every tag on a compatibility line carries.
  */
-private def versionBody(text: String): {Abort} String = if(startsWith("v", text)) drop(1, text)
+private def versionBody(text: String) uses Abort: String = if(startsWith("v", text)) drop(1, text)
 
 /**
  * The minor part, absent when the body names a line rather than a release on it. Mapped over the
  * `Option` rather than written as an `if..else`: `else` would discharge the `Abort` of the *parse*
  * along with the one the `if` introduces, quietly turning a malformed minor into an absent one.
  */
-private def minorOf(body: String): {Abort} Option[Int] = minorText(body).mapOption(natural)
+private def minorOf(body: String) uses Abort: Option[Int] = minorText(body).mapOption(natural)
 
 private def minorText(body: String): Option[String] = someIf(contains(".", body)) after(".", body)
 
@@ -127,7 +127,7 @@ private def minorText(body: String): Option[String] = someIf(contains(".", body)
  * no tag carries one, and a leading zero because `v1.05` and `v1.5` would be one version rendered
  * two ways — and the rendering is the tag a remote gets asked for.
  */
-private def natural(text: String): {Abort} Int =
+private def natural(text: String) uses Abort: Int =
    if(isInteger(text) && !hasSign(text) && !hasLeadingZero(text)) parseInt(text)
 
 private def hasSign(text: String): Bool = startsWith("-", text) || startsWith("+", text)

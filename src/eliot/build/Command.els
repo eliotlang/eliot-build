@@ -265,7 +265,7 @@ def unknownPackage(name: PackageName, declared: List[PackageName]): List[String]
 /**
  * `releaseRequested`'s reading, aborting on anything but the option and at most one version after it.
  */
-private def releaseOf(commandLine: List[String]): {Abort} ReleaseRequest = {
+private def releaseOf(commandLine: List[String]) uses Abort: ReleaseRequest = {
    val version = at(1, commandLine).mapOption(parseVersion)
 
    if((at(0, commandLine) orElse "") == releaseOption && size(commandLine) <= 2) ReleaseRequest(version)

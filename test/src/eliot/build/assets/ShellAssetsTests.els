@@ -171,11 +171,11 @@ private def renderedDigest(digest: Digest): String = show(digest)
  * implementation closes over nothing, so the cache root is an effect it reads and this is where the
  * test answers it.
  */
-private def answered(computation: {Dep[Path]} String): String = provide[Path, String](cacheRoot, computation)
+private def answered(computation uses *, Dep[Path]: String): String = provide[Path, String](cacheRoot, computation)
 
 private def cacheRoot: Path = path("target/cache")
 
 /**
  * What curl leaves behind when it succeeds: the archive, at the path the download names.
  */
-private def downloading: {Mocking} Unit = whenSpawningWrites("curl", path(expectedTree ++ ".download"), "")
+private def downloading uses Mocking: Unit = whenSpawningWrites("curl", path(expectedTree ++ ".download"), "")

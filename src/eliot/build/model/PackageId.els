@@ -63,7 +63,7 @@ data PackageId = Sibling(siblingPackage: PackageName) | Foreign(foreignPackage: 
  * lowercase host. The *path* keeps its case, because only the host is case-insensitive by
  * specification — lowercasing `github.com/Acme/Foo` would invent an identity no remote answers to.
  */
-def packageId(text: String): {Abort} PackageId = {
+def packageId(text: String) uses Abort: PackageId = {
    val body = withoutScheme(text)
    val url = before("//", body)
    val name = orAbort(selectorOf(body))

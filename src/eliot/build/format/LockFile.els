@@ -55,7 +55,7 @@ def lockFileName: String = "eliot.lock"
  * val previous = parseLockFile(readLines(here / lockFileName))
  * ```
  */
-def parseLockFile(lines: List[String]): {Throw[LockFileError]} Lockfile =
+def parseLockFile(lines: List[String]) uses Throw[LockFileError]: Lockfile =
    interpretedLock(parseClauses(lines) catch (error -> raise(MalformedLock(error))))
 
 /**
@@ -82,16 +82,16 @@ private def renderAsset(locked: LockedAsset): String =
    "  asset " ++ show(locked.lockedAssetRepository) ++ " " ++ show(locked.lockedAssetVersion) ++ " " ++
       locked.lockedAssetName ++ " " ++ show(locked.lockedDigest)
 
-private def interpretedLock(clauses: List[Clause]): {Throw[LockFileError]} Lockfile =
+private def interpretedLock(clauses: List[Clause]) uses Throw[LockFileError]: Lockfile =
    lockOf(clauses) catch (problem -> raise(UnreadableLock(problem)))
 
-private def lockOf(clauses: List[Clause]): {Throw[ClauseProblem]} Lockfile = {
+private def lockOf(clauses: List[Clause]) uses Throw[ClauseProblem]: Lockfile = {
    knownClauses(singleton("package"), clauses)
 
    Lockfile(clauses.map(sectionOf))
 }
 
-private def sectionOf(clause: Clause): {Throw[ClauseProblem]} LockedPackage = {
+private def sectionOf(clause: Clause) uses Throw[ClauseProblem]: LockedPackage = {
    val name = required(0, "a locked package needs its name", clause)
 
    atMostArguments(1, clause)
@@ -106,7 +106,7 @@ private def sectionOf(clause: Clause): {Throw[ClauseProblem]} LockedPackage = {
 /**
  * `version <url> <tag> <commit>`.
  */
-private def versionLine(clause: Clause): {Throw[ClauseProblem]} LockedVersion = {
+private def versionLine(clause: Clause) uses Throw[ClauseProblem]: LockedVersion = {
    val url = required(0, "a locked version needs its repository", clause)
    val tag = required(1, "a locked version needs its tag", clause)
    val commit = required(2, "a locked version needs the commit its tag named", clause)
@@ -119,7 +119,7 @@ private def versionLine(clause: Clause): {Throw[ClauseProblem]} LockedVersion = 
 /**
  * `asset <url> <tag> <asset> <sha256>`.
  */
-private def assetLine(clause: Clause): {Throw[ClauseProblem]} LockedAsset = {
+private def assetLine(clause: Clause) uses Throw[ClauseProblem]: LockedAsset = {
    val url = required(0, "a locked asset needs its repository", clause)
    val tag = required(1, "a locked asset needs its tag", clause)
    val asset = required(2, "a locked asset needs its name", clause)
@@ -130,5 +130,5 @@ private def assetLine(clause: Clause): {Throw[ClauseProblem]} LockedAsset = {
    LockedAsset(Repository(url), lockedTag(tag, clause), asset, Digest(digest))
 }
 
-private def lockedTag(tag: String, clause: Clause): {Throw[ClauseProblem]} Version =
+private def lockedTag(tag: String, clause: Clause) uses Throw[ClauseProblem]: Version =
    parseVersion(tag) else raise(problemIn("a locked tag must be a version like 'v1.3'", clause))

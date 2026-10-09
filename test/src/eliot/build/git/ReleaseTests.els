@@ -190,7 +190,7 @@ private def numbered(requested: Option[Version], listing: String): String =
 /**
  * A release's outcome as one line: the tag pushed and the commit it names, or what refused it.
  */
-private def attempt(answer: {Throw[GitError], Throw[ReleaseError]} TagRef): String =
+private def attempt(answer uses *, Throw[GitError], Throw[ReleaseError]: TagRef): String =
    catch[GitError, String](catch[ReleaseError, String](pushedAs(answer), show), show)
 
 private def pushedAs(pushed: TagRef): String = show(pushed.taggedVersion) ++ " at " ++ show(pushed.taggedCommit)

@@ -33,7 +33,7 @@ def lockedPackageOf(
       name: PackageName,
       resolution: Resolution,
       assets: List[Asset]
-   ): {Assets, PackageSource, Throw[ResolutionError]} LockedPackage =
+   ) uses Assets, PackageSource, Throw[ResolutionError]: LockedPackage =
    LockedPackage(name, lockedVersionsOf(resolution), assets.map(lockedAssetOf))
 
 /**
@@ -43,10 +43,10 @@ def lockedPackageOf(
  * same fact `Assembly` reports when the same version's descriptor cannot be read back, and for a build
  * that has just read that descriptor out of the same mirror it cannot happen.
  */
-def lockedVersionsOf(resolution: Resolution): {PackageSource, Throw[ResolutionError]} List[LockedVersion] =
+def lockedVersionsOf(resolution: Resolution) uses PackageSource, Throw[ResolutionError]: List[LockedVersion] =
    resolution.selections.map(lockedVersionOf)
 
-private def lockedVersionOf(selection: Selection): {PackageSource, Throw[ResolutionError]} LockedVersion =
+private def lockedVersionOf(selection: Selection) uses PackageSource, Throw[ResolutionError]: LockedVersion =
    LockedVersion(
       selection.selectedRepository,
       selection.selectedVersion,
@@ -54,5 +54,5 @@ private def lockedVersionOf(selection: Selection): {PackageSource, Throw[Resolut
          raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
    )
 
-private def lockedAssetOf(asset: Asset): {Assets} LockedAsset =
+private def lockedAssetOf(asset: Asset) uses Assets: LockedAsset =
    LockedAsset(asset.assetRepository, asset.assetVersion, asset.assetName, assetDigest(asset))

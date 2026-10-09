@@ -26,10 +26,10 @@ import eliot.build.resolve.Resolution
 data Universe(publications: List[Pair[String, String]], lineages: List[Pair[String, String]])
 
 implement tablePackages: PackageSource {
-   def descriptorAt(version: Version, target: Repository): {Dep[Universe]} Option[Descriptor] =
+   def descriptorAt(version: Version, target: Repository) uses Dep[Universe]: Option[Descriptor] =
       publicationIn(dependency, show(target) ++ "@" ++ show(version))
 
-   def anchorAt(line: Line, target: Repository): {Dep[Universe]} Option[Commit] =
+   def anchorAt(line: Line, target: Repository) uses Dep[Universe]: Option[Commit] =
       dependency.lineages.lookupOption(show(target) ++ "@" ++ lineName(line)).mapOption(hash -> Commit(hash))
 
    /**
@@ -37,7 +37,7 @@ implement tablePackages: PackageSource {
     * it — `github.com/x/foo@v1.2` — which is as stable as a real tag is supposed to be and lets a case
     * read which version a commit came from.
     */
-   def commitAt(version: Version, target: Repository): {Dep[Universe]} Option[Commit] =
+   def commitAt(version: Version, target: Repository) uses Dep[Universe]: Option[Commit] =
       dependency.publications.lookupOption(show(target) ++ "@" ++ show(version))
          .mapOption(_ -> Commit(show(target) ++ "@" ++ show(version)))
 
@@ -69,7 +69,7 @@ def universeOf(publications: List[Pair[String, String]], lineages: List[Pair[Str
  */
 def against(
       universe: Universe,
-      computation: {PackageSource, Throw[ResolutionError]} String with tablePackages
+      computation uses *, PackageSource with tablePackages, Throw[ResolutionError]: String
    ): String =
    provide(universe, catch[ResolutionError, String](computation, error -> show(error)))
 

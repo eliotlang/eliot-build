@@ -246,7 +246,7 @@ private def expectedRefusal: String =
  * An offline question's answer, or what it said when it refused — one string, so a case reads both
  * outcomes the same way.
  */
-private def offline(answer: {Throw[NotFetched]} String): String = catch[NotFetched, String](answer, show)
+private def offline(answer uses *, Throw[NotFetched]: String): String = catch[NotFetched, String](answer, show)
 
 private def expectedNotFetched: String =
    "github.com/x/foo is not fetched at the version this closure selects, " ++

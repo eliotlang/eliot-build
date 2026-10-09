@@ -66,7 +66,7 @@ import eliot.build.Command
  * means what a shell reads it as — and a suite whose line runs it fails the build it is in. That is `docs/effectful-modules.md` §16's one missing platform effect, which the standard
  * library grew for this.
  */
-def main: {Console, Environment, FileSystem, Process} Unit =
+def main uses Console, Environment, FileSystem, Process: Unit =
    answer(arguments, workingDirectory, javaCommandName).foreach(printLine)
 
 /**
@@ -77,7 +77,7 @@ def main: {Console, Environment, FileSystem, Process} Unit =
  * nobody asked for. So the wrapper exports its choice and this reads it; started by hand with no
  * variable set, `java` is the honest default and the same one the wrapper would have found.
  */
-private def javaCommandName: {Environment} String = environmentVariable("ELIOT_JAVA") orElse "java"
+private def javaCommandName uses Environment: String = environmentVariable("ELIOT_JAVA") orElse "java"
 
 /**
  * What the tool prints for one invocation.
@@ -90,7 +90,7 @@ private def javaCommandName: {Environment} String = environmentVariable("ELIOT_J
  * is answered with the packages it does. A descriptor that cannot be read is reported as itself and
  * followed by the usage, which is what a user who typed `eliot` in the wrong directory needs to see.
  */
-private def answer(commandLine: List[String], here: Path, java: String): {FileSystem, Process} List[String] =
+private def answer(commandLine: List[String], here: Path, java: String) uses FileSystem, Process: List[String] =
    catch[IoError, List[String]](
       catch[DescriptorError, List[String]](
          answered(commandLine, parseDescriptor(readLines(here / descriptorFileName)), here, java),
@@ -112,7 +112,7 @@ private def answered(
       descriptor: Descriptor,
       here: Path,
       java: String
-   ): {FileSystem, Process} List[String] =
+   ) uses FileSystem, Process: List[String] =
    if(modelRequested(commandLine)) modelled(descriptor, here)
    else releaseRequested(commandLine).foldOption(
       built(commandLine, descriptor, here, java),
@@ -128,7 +128,7 @@ private def built(
       descriptor: Descriptor,
       here: Path,
       java: String
-   ): {FileSystem, Process} List[String] = {
+   ) uses FileSystem, Process: List[String] = {
    val declared = descriptor.packages.map(packageName)
 
    requested(commandLine).foldOption(
@@ -147,7 +147,7 @@ private def built(
  * machine that will not run git at all. Only `shellGit` is bound — a release asks nothing of any
  * package source, mirror or asset, because what it publishes is this repository and nobody else's.
  */
-private def releasing(request: ReleaseRequest, here: Path): {Process} List[String] =
+private def releasing(request: ReleaseRequest, here: Path) uses Process: List[String] =
    catch[IoError, List[String]](
       catch[GitError, List[String]](
          catch[ReleaseError, List[String]](
@@ -173,7 +173,7 @@ private def reported(pushed: TagRef): List[String] = releaseReport(pushed.tagged
  * the network and never races a build for it. A package that cannot be modelled from disk is listed with
  * the reason, and the query itself still succeeds: the model is true about every package it could read.
  */
-private def modelled(descriptor: Descriptor, here: Path): {FileSystem, Process} List[String] =
+private def modelled(descriptor: Descriptor, here: Path) uses FileSystem, Process: List[String] =
    singleton(
       provide(
          cacheRoot(here),
@@ -186,7 +186,7 @@ private def modelled(descriptor: Descriptor, here: Path): {FileSystem, Process} 
  * not. The channels are `attempted`'s, less the two a model never meets — nothing is downloaded and
  * nothing is run — plus `NotFetched`, which is the offline cache's.
  */
-private def modelEntry(name: PackageName, project: Project): {FileSystem, Process, Dep[Path]} ModelEntry =
+private def modelEntry(name: PackageName, project: Project) uses FileSystem, Process, Dep[Path]: ModelEntry =
    catch[IoError, ModelEntry](
       catch[GitError, ModelEntry](
          catch[DescriptorError, ModelEntry](
@@ -214,7 +214,7 @@ private def modelEntry(name: PackageName, project: Project): {FileSystem, Proces
  * standard library has somewhere to put a code. One rather than the channel's own number, because a
  * shell asks whether this worked and nothing here is a program whose codes anybody enumerates.
  */
-private def reporting(lines: List[String]): {Process} List[String] = {
+private def reporting(lines: List[String]) uses Process: List[String] = {
    registerExitCode(1)
 
    lines
@@ -241,7 +241,7 @@ private def attempted(
       descriptor: Descriptor,
       here: Path,
       java: String
-   ): {FileSystem, Process} List[String] =
+   ) uses FileSystem, Process: List[String] =
    catch[IoError, List[String]](
       catch[GitError, List[String]](
          catch[AssetError, List[String]](
@@ -368,7 +368,7 @@ private def locked(
       entry: LockedPackage,
       descriptor: Descriptor,
       here: Path
-   ): {FileSystem, Throw[IoError], Throw[LockFileError], Throw[LockConflict]} Unit = {
+   ) uses FileSystem, Throw[IoError], Throw[LockFileError], Throw[LockConflict]: Unit = {
    val previous = previousLock(here)
    val text = renderLockFile(recorded(entry, descriptor.packages.map(packageName), previous))
 
@@ -378,14 +378,14 @@ private def locked(
 /**
  * What `eliot.lock` says, or the empty lockfile where there is none yet.
  */
-private def previousLock(here: Path): {FileSystem, Throw[IoError], Throw[LockFileError]} Lockfile =
+private def previousLock(here: Path) uses FileSystem, Throw[IoError], Throw[LockFileError]: Lockfile =
    if(exists(here / lockFileName)) parseLockFile(readLines(here / lockFileName)) else emptyLockfile
 
 /**
  * One line's compiler, unless an earlier one already failed — in which case that failure is the answer
  * and nothing more runs.
  */
-private def ranAfter(previous: Int, compilation: Compilation, here: Path): {Process, Throw[IoError]} Int =
+private def ranAfter(previous: Int, compilation: Compilation, here: Path) uses Process, Throw[IoError]: Int =
    if(previous != 0) previous else runInheritingIo(compilerCommand(compilation), here)
 
 /**

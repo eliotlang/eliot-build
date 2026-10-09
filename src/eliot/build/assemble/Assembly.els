@@ -75,7 +75,7 @@ def rootsOf(
    project: Project,
    resolution: Resolution,
    pinned: List[LockedVersion]
-): {PackageSource, Throw[ResolutionError]} List[Path] =
+) uses PackageSource, Throw[ResolutionError]: List[Path] =
    projectRoots(name, project) ++ resolution.selections.flatMap(mountedRoots(pinned))
 
 /**
@@ -99,7 +99,7 @@ def projectRoots(name: PackageName, project: Project): List[Path] =
  * is: both are a version the closure selected and this step cannot find again, and for pins read off the
  * same resolution neither can happen.
  */
-def mountedRoots(pinned: List[LockedVersion], selection: Selection): {PackageSource, Throw[ResolutionError]} List[Path] = {
+def mountedRoots(pinned: List[LockedVersion], selection: Selection) uses PackageSource, Throw[ResolutionError]: List[Path] = {
    val unavailable = Unavailable(selection.selectedRepository, selection.selectedVersion)
    val commit = lockedCommitOf(selection, pinned) orElse raise(unavailable)
    val tree = sourcesAt(commit, selection.selectedRepository)
