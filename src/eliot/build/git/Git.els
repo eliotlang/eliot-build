@@ -125,7 +125,7 @@ effect Git {
     * working tree would be a second copy of every source file per package, checked out at one version at
     * a time, for no question anybody asks.
     */
-   def cloneMirror(remote: Remote, target: Path): {Throw[GitError]} Mirror
+   def cloneMirror(remote: Remote, target: Path) uses Throw[GitError]: Mirror
 
    /**
     * Bring `mirror` up to date with what its remote publishes now, forgetting the tags it has withdrawn.
@@ -134,12 +134,12 @@ effect Git {
     * selecting, and a mirror that only ever accumulates would answer with releases the package has
     * withdrawn.
     */
-   def fetch(mirror: Mirror): {Throw[GitError]} Unit
+   def fetch(mirror: Mirror) uses Throw[GitError]: Unit
 
    /**
     * The versions `mirror` holds — what its remote had published as of the last fetch.
     */
-   def tags(mirror: Mirror): {Throw[GitError]} List[TagRef]
+   def tags(mirror: Mirror) uses Throw[GitError]: List[TagRef]
 
    /**
     * The content of the file at `path` inside `mirror` at `version`, straight from the object database
@@ -169,7 +169,7 @@ effect Git {
     * operation stands *inside* the mirror (it operates on the repository it is in), so a relative
     * target would be read against the mirror's directory rather than against the caller's.
     */
-   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Throw[GitError]} Worktree
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror) uses Throw[GitError]: Worktree
 
    /**
     * What `checkout` holds that is not committed — one entry per path, tracked or not — and nothing
@@ -178,31 +178,31 @@ effect Git {
     * A list and not a `Bool`, because the one caller that asks refuses on a non-empty answer and a
     * refusal that names the files is one a user can act on without running git themselves.
     */
-   def uncommittedChanges(checkout: Checkout): {Throw[GitError]} List[String]
+   def uncommittedChanges(checkout: Checkout) uses Throw[GitError]: List[String]
 
    /**
     * The commit `checkout` has checked out — the one a release would tag.
     */
-   def headCommit(checkout: Checkout): {Throw[GitError]} Commit
+   def headCommit(checkout: Checkout) uses Throw[GitError]: Commit
 
    /**
     * The commit `checkout`'s branch was last seen at on the remote branch it pushes to, as of the last
     * push or fetch — which is what lets "this commit is pushed" be asked without the network. Refused
     * where the branch pushes nowhere, and where nothing is checked out but a commit.
     */
-   def upstreamCommit(checkout: Checkout): {Throw[GitError]} Commit
+   def upstreamCommit(checkout: Checkout) uses Throw[GitError]: Commit
 
    /**
     * `true` where `ancestor` is `descendant` or is in its history, as `checkout`'s objects know it.
     */
-   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout): {Throw[GitError]} Bool
+   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout) uses Throw[GitError]: Bool
 
    /**
     * The versions `checkout`'s `origin` publishes now, asked of the remote rather than of the tags the
     * checkout happens to hold: a release is numbered after what consumers can see, and a local tag
     * nobody pushed is not something they can.
     */
-   def publishedReleases(checkout: Checkout): {Throw[GitError]} List[TagRef]
+   def publishedReleases(checkout: Checkout) uses Throw[GitError]: List[TagRef]
 
    /**
     * Tag `commit` as `version` in `checkout` — annotated, because an annotated tag is an object of its
@@ -212,13 +212,13 @@ effect Git {
     * was looked up once, the questions above were asked about it, and tagging `HEAD` again would be a
     * second lookup that the checks never saw.
     */
-   def tagRelease(version: Version, commit: Commit, checkout: Checkout): {Throw[GitError]} Unit
+   def tagRelease(version: Version, commit: Commit, checkout: Checkout) uses Throw[GitError]: Unit
 
    /**
     * Push the tag `version` — that one ref and nothing else — to `checkout`'s `origin`, which is the
     * moment the release exists for anybody else.
     */
-   def pushRelease(version: Version, checkout: Checkout): {Throw[GitError]} Unit
+   def pushRelease(version: Version, checkout: Checkout) uses Throw[GitError]: Unit
 }
 
 /**

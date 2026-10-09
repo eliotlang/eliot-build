@@ -79,7 +79,7 @@ implement Show[ReleaseError] {
  * val pushed = released(None, Checkout(here)) with shellGit
  * ```
  */
-def released(requested: Option[Version], checkout: Checkout): {Git, Throw[GitError], Throw[ReleaseError]} TagRef = {
+def released(requested: Option[Version], checkout: Checkout) uses Git, Throw[GitError], Throw[ReleaseError]: TagRef = {
    val entries = uncommittedChanges(checkout)
    unless(isEmpty(entries)) raise(Uncommitted(entries))
 
@@ -105,7 +105,7 @@ def released(requested: Option[Version], checkout: Checkout): {Git, Throw[GitErr
  * val version = releaseAfter(None, parseTagRefs(listing))
  * ```
  */
-def releaseAfter(requested: Option[Version], published: List[TagRef]): {Throw[ReleaseError]} Version =
+def releaseAfter(requested: Option[Version], published: List[TagRef]) uses Throw[ReleaseError]: Version =
    requested.foldOption(nextRelease(published), version -> accepted(version, published))
 
 /**
@@ -125,7 +125,7 @@ def nextRelease(published: List[TagRef]): Version =
  * A bare `vN` names a line rather than a release, so it is refused even where `vN.0` is next — the tag is
  * spelled the way it is written, and `vN` is not the spelling of a release.
  */
-private def accepted(requested: Version, published: List[TagRef]): {Throw[ReleaseError]} Version = {
+private def accepted(requested: Version, published: List[TagRef]) uses Throw[ReleaseError]: Version = {
    val next = nextOn(requested.major, published)
    unless(isSome(requested.minor) && requested == next) raise(NotNext(requested, next))
 
@@ -136,7 +136,7 @@ private def accepted(requested: Version, published: List[TagRef]): {Throw[Releas
 /**
  * `accepted`'s second rule: a line with no releases may only be started above every line that has.
  */
-private def belowCheck(requested: Version, highest: Line, published: List[TagRef]): {Throw[ReleaseError]} Unit =
+private def belowCheck(requested: Version, highest: Line, published: List[TagRef]) uses Throw[ReleaseError]: Unit =
    when(requested.major < highest && isNone(latestRelease(requested.major, published))) raise(BelowLine(requested, highest))
 
 /**
@@ -151,7 +151,7 @@ private def successor(version: Version): Version = Version(version.major, Some(o
  * Refuses `commit` unless it comes after `previous`, the last release of the line it is released on:
  * a descendant of it, and not the very commit it already names.
  */
-private def followed(previous: TagRef, commit: Commit, checkout: Checkout): {Git, Throw[GitError], Throw[ReleaseError]} Unit = {
+private def followed(previous: TagRef, commit: Commit, checkout: Checkout) uses Git, Throw[GitError], Throw[ReleaseError]: Unit = {
    when(previous.taggedCommit == commit) raise(Unchanged(previous))
    unless(isAncestor(previous.taggedCommit, commit, checkout)) raise(Diverged(commit, previous))
 }

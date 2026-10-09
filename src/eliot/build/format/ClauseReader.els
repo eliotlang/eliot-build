@@ -45,7 +45,7 @@ def problemIn(reason: String, clause: Clause): ClauseProblem = ClauseProblem(ren
  * `Throw` had no lift through an `Abort` carrier; under effects v6 `argument(…) else raise(…)` would
  * compile, and this keeps its shape only because the `Option` is what the caller reads.
  */
-def required(index: Int, problem: String, clause: Clause): {Throw[ClauseProblem]} String =
+def required(index: Int, problem: String, clause: Clause) uses Throw[ClauseProblem]: String =
    optional(index, clause) orElse raise(problemIn(problem, clause))
 
 /**
@@ -61,7 +61,7 @@ def optional(index: Int, clause: Clause): Option[String] = runAbort(argument(ind
  * reader does not use is a word the author expected to matter, and quietly dropping it changes the
  * build without saying so.
  */
-def atMostArguments(count: Int, clause: Clause): {Throw[ClauseProblem]} Unit =
+def atMostArguments(count: Int, clause: Clause) uses Throw[ClauseProblem]: Unit =
    requireThat(clause.arguments.size <= count, "too many arguments", clause)
 
 /**
@@ -71,13 +71,13 @@ def atMostArguments(count: Int, clause: Clause): {Throw[ClauseProblem]} Unit =
  * descriptor using a clause this launcher does not know refuses to build rather than silently
  * ignoring the line that would have changed the outcome.
  */
-def knownClauses(keywords: List[String], clauses: List[Clause]): {Throw[ClauseProblem]} Unit =
+def knownClauses(keywords: List[String], clauses: List[Clause]) uses Throw[ClauseProblem]: Unit =
    clauses.foreach(clause -> requireKnown(keywords, clause))
 
 /**
  * The same, asked of a block: every direct child of `clause` must carry a keyword the block knows.
  */
-def knownChildren(keywords: List[String], clause: Clause): {Throw[ClauseProblem]} Unit =
+def knownChildren(keywords: List[String], clause: Clause) uses Throw[ClauseProblem]: Unit =
    knownClauses(keywords, clause.children)
 
 /**
@@ -86,10 +86,10 @@ def knownChildren(keywords: List[String], clause: Clause): {Throw[ClauseProblem]
  * stacked its `Abort` under the `Throw` and that pair had no cross-lift. Effects v6 removed the
  * constraint; the shape stays so that the `require*` helpers read alike.
  */
-def requireThat(condition: Bool, problem: String, clause: Clause): {Throw[ClauseProblem]} Unit =
+def requireThat(condition: Bool, problem: String, clause: Clause) uses Throw[ClauseProblem]: Unit =
    unless(condition) raise(problemIn(problem, clause))
 
-private def requireKnown(keywords: List[String], clause: Clause): {Throw[ClauseProblem]} Unit = {
+private def requireKnown(keywords: List[String], clause: Clause) uses Throw[ClauseProblem]: Unit = {
    val name = clause.keyword
 
    requireThat(keywords.includes(name), unknownReason(clause), clause)

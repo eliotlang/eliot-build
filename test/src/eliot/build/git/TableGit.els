@@ -54,57 +54,57 @@ data Working(
 )
 
 implement tableGit: Git {
-   def cloneMirror(remote: Remote, target: Path): {Dep[Mirrors], Mocking, Throw[GitError]} Mirror = {
+   def cloneMirror(remote: Remote, target: Path) uses Dep[Mirrors], Mocking, Throw[GitError]: Mirror = {
       recordCall("cloneMirror", append(singleton(remote.remoteUrl), show(target)))
       withDirectory(target)
 
       unlessRefused(Mirror(target))
    }
 
-   def fetch(mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+   def fetch(mirror: Mirror) uses Dep[Mirrors], Mocking, Throw[GitError]: Unit = {
       recordCall("fetch", singleton(show(mirror.mirrorDirectory)))
 
       unlessRefused(unit)
    }
 
-   def tags(mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} List[TagRef] = {
+   def tags(mirror: Mirror) uses Dep[Mirrors], Mocking, Throw[GitError]: List[TagRef] = {
       recordCall("tags", singleton(show(mirror.mirrorDirectory)))
 
       unlessRefused(dependency.announcedTags)
    }
 
-   def fileAt(version: Version, path: String, mirror: Mirror): {Dep[Mirrors], Mocking} Option[String] = {
+   def fileAt(version: Version, path: String, mirror: Mirror) uses Dep[Mirrors], Mocking: Option[String] = {
       recordCall("fileAt", append(singleton(show(version) ++ ":" ++ path), show(mirror.mirrorDirectory)))
 
       dependency.heldFiles.lookupOption(show(version) ++ ":" ++ path)
    }
 
-   def addWorktree(commit: Commit, target: Path, mirror: Mirror): {Dep[Mirrors], Mocking, Throw[GitError]} Worktree = {
+   def addWorktree(commit: Commit, target: Path, mirror: Mirror) uses Dep[Mirrors], Mocking, Throw[GitError]: Worktree = {
       recordCall("addWorktree", append(append(singleton(show(commit)), show(target)), show(mirror.mirrorDirectory)))
       withDirectory(target)
 
       unlessRefused(Worktree(target))
    }
 
-   def uncommittedChanges(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} List[String] = {
+   def uncommittedChanges(checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: List[String] = {
       recordCall("uncommittedChanges", singleton(show(checkout.checkoutDirectory)))
 
       unlessRefused(dependency.working.pendingEntries)
    }
 
-   def headCommit(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Commit = {
+   def headCommit(checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: Commit = {
       recordCall("headCommit", singleton(show(checkout.checkoutDirectory)))
 
       unlessRefused(dependency.working.checkedOutCommit)
    }
 
-   def upstreamCommit(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Commit = {
+   def upstreamCommit(checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: Commit = {
       recordCall("upstreamCommit", singleton(show(checkout.checkoutDirectory)))
 
       unlessRefused(dependency.working.pushedCommit)
    }
 
-   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Bool = {
+   def isAncestor(ancestor: Commit, descendant: Commit, checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: Bool = {
       recordCall(
          "isAncestor",
          append(append(singleton(show(ancestor)), show(descendant)), show(checkout.checkoutDirectory))
@@ -116,13 +116,13 @@ implement tableGit: Git {
       )
    }
 
-   def publishedReleases(checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} List[TagRef] = {
+   def publishedReleases(checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: List[TagRef] = {
       recordCall("publishedReleases", singleton(show(checkout.checkoutDirectory)))
 
       unlessRefused(dependency.announcedTags)
    }
 
-   def tagRelease(version: Version, commit: Commit, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+   def tagRelease(version: Version, commit: Commit, checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: Unit = {
       recordCall(
          "tagRelease",
          append(append(singleton(show(version)), show(commit)), show(checkout.checkoutDirectory))
@@ -131,7 +131,7 @@ implement tableGit: Git {
       unlessRefused(unit)
    }
 
-   def pushRelease(version: Version, checkout: Checkout): {Dep[Mirrors], Mocking, Throw[GitError]} Unit = {
+   def pushRelease(version: Version, checkout: Checkout) uses Dep[Mirrors], Mocking, Throw[GitError]: Unit = {
       recordCall("pushRelease", append(singleton(show(version)), show(checkout.checkoutDirectory)))
 
       unlessRefused(unit)
@@ -164,7 +164,7 @@ def cleanCheckout: Working = Working(empty, Commit("head"), Commit("head"), empt
  * `answer`, unless the table says every operation is refused — the one decision the three raising
  * clauses share.
  */
-private def unlessRefused[A](answer: A): {Dep[Mirrors], Throw[GitError]} A = {
+private def unlessRefused[A](answer: A) uses Dep[Mirrors], Throw[GitError]: A = {
    dependency.refusal.foreachOption(error -> raise(error))
 
    answer

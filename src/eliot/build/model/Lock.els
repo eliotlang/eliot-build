@@ -110,7 +110,7 @@ def emptyLockfile: Lockfile = Lockfile(empty)
  * val locked = recorded(lockedPackageOf(name, resolution, assets), declared, previous)
  * ```
  */
-def recorded(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfile): {Throw[LockConflict]} Lockfile = {
+def recorded(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfile) uses Throw[LockConflict]: Lockfile = {
    entry.lockedVersions.foreach(fact -> agreedVersion(fact, lockfile))
    entry.lockedAssets.foreach(fact -> agreedAsset(fact, lockfile))
 
@@ -122,12 +122,12 @@ def recorded(entry: LockedPackage, declared: List[PackageName], lockfile: Lockfi
  */
 private def remedy: String = "; if the change is trusted, delete the line from eliot.lock and build again"
 
-private def agreedVersion(fact: LockedVersion, lockfile: Lockfile): {Throw[LockConflict]} Unit =
+private def agreedVersion(fact: LockedVersion, lockfile: Lockfile) uses Throw[LockConflict]: Unit =
    lockfile.lockedPackages.flatMap(lockedVersions).find(locked -> contradicts(locked, fact)).foreachOption(locked ->
       raise(MovedTag(fact.lockedRepository, fact.lockedVersion, locked.lockedCommit, fact.lockedCommit))
    )
 
-private def agreedAsset(fact: LockedAsset, lockfile: Lockfile): {Throw[LockConflict]} Unit =
+private def agreedAsset(fact: LockedAsset, lockfile: Lockfile) uses Throw[LockConflict]: Unit =
    lockfile.lockedPackages.flatMap(lockedAssets).find(locked -> assetContradicts(locked, fact)).foreachOption(locked ->
       raise(ChangedAsset(fact, locked.lockedDigest))
    )

@@ -261,7 +261,7 @@ private def directoryOf(name: String, text: String): String =
  * strongest statement available without an `Eq` for the model: every clause was understood, and
  * nothing was invented.
  */
-private def roundTrip(text: String): {Throw[AssertionError]} Unit = parsed(text) shouldBe text
+private def roundTrip(text: String) uses Throw[AssertionError]: Unit = parsed(text) shouldBe text
 
 /**
  * A package at the repository root holding `clauses` — so a case about a `dep` line says the line and

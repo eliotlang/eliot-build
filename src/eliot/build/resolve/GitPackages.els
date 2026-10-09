@@ -46,7 +46,7 @@ implement gitPackages: PackageSource {
    def descriptorAt(
          version: Version,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[DescriptorError]} Option[Descriptor] = {
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[DescriptorError]: Option[Descriptor] = {
       val published = descriptorTextAt(dependency, version, target)
 
       published.mapOption(text -> parseDescriptor(split("\n", text)))
@@ -55,18 +55,18 @@ implement gitPackages: PackageSource {
    def anchorAt(
          line: Line,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]} Option[Commit] =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]: Option[Commit] =
       anchorOf(dependency, line, target)
 
    def commitAt(
          version: Version,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]} Option[Commit] =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]: Option[Commit] =
       releaseCommitOf(dependency, version, target)
 
    def sourcesAt(
          commit: Commit,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]} Path =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError]: Path =
       sourceTreeAt(dependency, commit, target)
 }

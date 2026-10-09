@@ -37,18 +37,18 @@ implement cachedPackages: PackageSource {
    def anchorAt(
          line: Line,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Option[Commit] =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]: Option[Commit] =
       cachedAnchorOf(dependency, line, target)
 
    def commitAt(
          version: Version,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Option[Commit] =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]: Option[Commit] =
       cachedReleaseCommitOf(dependency, version, target)
 
    def sourcesAt(
          commit: Commit,
          target: Repository
-      ): {Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]} Path =
+      ) uses Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched]: Path =
       cachedSourceTreeAt(dependency, commit, target)
 }

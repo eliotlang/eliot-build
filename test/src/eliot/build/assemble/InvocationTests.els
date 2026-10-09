@@ -126,7 +126,7 @@ private def catching(
    rendering: Invocation => String,
    name: PackageName,
    descriptor: Descriptor
-): {PackageSource, Throw[ResolutionError]} String =
+) uses PackageSource, Throw[ResolutionError]: String =
    catch[InvocationError, String](
       rendering(invocationOf(name, descriptor, resolve(name, descriptor))),
       problem -> show(problem)

@@ -68,7 +68,7 @@ implement Show[ResolutionError] {
 def resolve(
    name: PackageName,
    descriptor: Descriptor
-): {PackageSource, Throw[ResolutionError]} Resolution =
+) uses PackageSource, Throw[ResolutionError]: Resolution =
    resolveRequirements(configuredDependencies(name, descriptor) orElse raise(NoSuchPackage(name)))
 
 /**
@@ -97,7 +97,7 @@ data ResolutionState(selected: List[Selection], pending: List[Selection])
  */
 data Identified(matched: Option[Selection], anchorFound: Option[Commit])
 
-private def resolveRequirements(requirements: List[Dependency]): {PackageSource, Throw[ResolutionError]} Resolution = {
+private def resolveRequirements(requirements: List[Dependency]) uses PackageSource, Throw[ResolutionError]: Resolution = {
    val seeded = withRequirements(None, requirements, emptyState)
 
    completed(rounds.foldLeft(seeded, _ -> state -> expanded(state)))
@@ -109,7 +109,7 @@ private def emptyState: ResolutionState = ResolutionState(empty, empty)
  * One round: every pending selection's own requirements folded in, and the frontier replaced by
  * whatever those requirements newly selected or raised.
  */
-private def expanded(state: ResolutionState): {PackageSource, Throw[ResolutionError]} ResolutionState = {
+private def expanded(state: ResolutionState) uses PackageSource, Throw[ResolutionError]: ResolutionState = {
    val ready = ResolutionState(state.selected, empty)
 
    state.pending.foldLeft(ready, selection -> acc -> withDependenciesOf(selection, acc))
@@ -118,7 +118,7 @@ private def expanded(state: ResolutionState): {PackageSource, Throw[ResolutionEr
 private def withDependenciesOf(
    selection: Selection,
    state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState = {
+) uses PackageSource, Throw[ResolutionError]: ResolutionState = {
    val descriptor = descriptorAt(selection.selectedVersion, selection.selectedRepository) orElse
       raise(Unavailable(selection.selectedRepository, selection.selectedVersion))
 
@@ -152,7 +152,7 @@ private def withRequirements(
    owner: Option[Repository],
    requirements: List[Dependency],
    state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState =
+) uses PackageSource, Throw[ResolutionError]: ResolutionState =
    requirements.foldLeft(state, dependency -> acc -> withRequirement(owner, dependency, acc))
 
 /**
@@ -168,7 +168,7 @@ private def withRequirement(
    owner: Option[Repository],
    dependency: Dependency,
    state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState = dependency match {
+) uses PackageSource, Throw[ResolutionError]: ResolutionState = dependency match {
    case SiblingDependency(name)       -> withSibling(owner, name, state)
    case Requirement(package, minimum) -> withMinimum(package, minimum, state)
 }
@@ -193,7 +193,7 @@ private def withMinimum(
    package: Package,
    minimum: Version,
    state: ResolutionState
-): {PackageSource, Throw[ResolutionError]} ResolutionState = {
+) uses PackageSource, Throw[ResolutionError]: ResolutionState = {
    val target = package.packageRepository
    val identity = identified(target, minimum, state)
 
@@ -207,13 +207,13 @@ private def withMinimum(
  * Identity, URL first: the canonical URL settles the common case with no source call at all, and only
  * a requirement naming an unfamiliar URL is worth a lineage lookup.
  */
-private def identified(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
+private def identified(target: Repository, minimum: Version, state: ResolutionState) uses PackageSource: Identified = {
    val byUrl = state.selected.find(selection -> selection.selectedRepository == target)
 
    byUrl.foldOption(byLineage(target, minimum, state), known -> Identified(Some(known), known.lineageAnchor))
 }
 
-private def byLineage(target: Repository, minimum: Version, state: ResolutionState): {PackageSource} Identified = {
+private def byLineage(target: Repository, minimum: Version, state: ResolutionState) uses PackageSource: Identified = {
    val anchor = anchorAt(minimum.major, target)
 
    Identified(state.selected.find(selection -> sameLineage(anchor, minimum, selection)), anchor)
@@ -229,7 +229,7 @@ private def merged(
    selector: PackageName,
    minimum: Version,
    state: ResolutionState
-): {Throw[ResolutionError]} ResolutionState = {
+) uses Throw[ResolutionError]: ResolutionState = {
    unless(sameLine(known.selectedVersion, minimum)) raise(
       MajorConflict(known.selectedRepository, known.selectedVersion, minimum)
    )
@@ -303,7 +303,7 @@ private def replaced(selection: Selection, state: ResolutionState): ResolutionSt
  * The closure once the rounds are spent: a frontier that is still not empty means the graph is deeper
  * than the declared ceiling, and a partial answer is not one of the outcomes on offer.
  */
-private def completed(state: ResolutionState): {Throw[ResolutionError]} Resolution = {
+private def completed(state: ResolutionState) uses Throw[ResolutionError]: Resolution = {
    unless(state.pending.isEmpty) raise(TooDeep(resolutionDepthLimit))
 
    Resolution(state.selected.sorted)
