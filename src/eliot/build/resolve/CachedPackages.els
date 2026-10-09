@@ -26,9 +26,9 @@ implement cachedPackages: PackageSource {
    def descriptorAt(
          version: Version,
          target: Repository
-      ): {
-         Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched], Throw[DescriptorError]
-      } Option[Descriptor] = {
+      ) uses
+         Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched], Throw[DescriptorError]:
+         Option[Descriptor] = {
       val published = cachedDescriptorTextAt(dependency, version, target)
 
       published.mapOption(text -> parseDescriptor(split("\n", text)))
