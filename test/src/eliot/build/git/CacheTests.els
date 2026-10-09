@@ -10,6 +10,7 @@ import eliot.build.git.Git
 import eliot.build.git.Tags
 import eliot.build.git.Cache
 import eliot.build.git.TableGit
+import eliot.build.git.GitFailure
 
 /**
  * Cache policy, run against a table instead of against git — where a mirror goes, when one has to be
@@ -24,12 +25,12 @@ def testCases: Test = {
    "cacheDirectory" should "give one directory per canonical URL segment" in {
       show(cacheDirectory(cacheRoot, cached)) shouldBe "target/cache/github.com/x/foo"
    }
-   "publishedTags" should "clone a mirror this build has never seen, then list what it publishes" in mocked {
+   "publishedTags" should "clone a mirror this build has never seen, then list what it publishes" in mocked { failingOnGit {
       provide(listed, publishedTags(cacheRoot, cached) with tableGit)
 
       calls shouldBe expectedFirstVisit
-   }
-   "publishedTags" should "not clone again what its own clone left on disk" in mocked {
+   } }
+   "publishedTags" should "not clone again what its own clone left on disk" in mocked { failingOnGit {
       provide(listed, {
          publishedTags(cacheRoot, cached)
          publishedTags(cacheRoot, cached)
@@ -37,98 +38,98 @@ def testCases: Test = {
 
       wasCalledOnce("cloneMirror")
       wasCalledTimes(2, "tags")
-   }
-   "publishedTags" should "not clone a mirror that was already on disk" in mocked {
+   } }
+   "publishedTags" should "not clone a mirror that was already on disk" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, publishedTags(cacheRoot, cached) with tableGit)
 
       wasNeverCalled("cloneMirror")
       calls shouldBe (expectedPresenceCheck ++ "; " ++ expectedListing)
-   }
-   "publishedTags" should "read the versions the mirror announces" in mocked {
+   } }
+   "publishedTags" should "read the versions the mirror announces" in mocked { failingOnGit {
       renderedTags(provide(listed, publishedTags(cacheRoot, cached) with tableGit)) shouldBe "v1.2 aaa1, v1.3 bbb2"
-   }
+   } }
    "publishedTags" should "raise what git said when git said no" in mocked {
       raising[GitError](expectedRefusal, provide(refusingWith(refused), {
          publishedTags(cacheRoot, cached)
          unit
       } with tableGit))
    }
-   "anchorOf" should "answer the commit the line's first release names" in mocked {
+   "anchorOf" should "answer the commit the line's first release names" in mocked { failingOnGit {
       provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, Line(1), cached)) with tableGit) shouldBe "aaa1"
-   }
-   "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked {
+   } }
+   "anchorOf" should "answer nothing for a line the mirror does not publish" in mocked { failingOnGit {
       provide(anchoredAt, renderedCommit(anchorOf(cacheRoot, Line(3), cached)) with tableGit) shouldBe "<none>"
-   }
-   "releaseCommitOf" should "answer the commit the version's tag names" in mocked {
+   } }
+   "releaseCommitOf" should "answer the commit the version's tag names" in mocked { failingOnGit {
       provide(anchoredAt, renderedCommit(releaseCommitOf(cacheRoot, Version(Line(1), Some(0)), cached)) with tableGit)
          shouldBe "aaa1"
-   }
-   "releaseCommitOf" should "answer nothing for a version the mirror holds no tag for" in mocked {
+   } }
+   "releaseCommitOf" should "answer nothing for a version the mirror holds no tag for" in mocked { failingOnGit {
       provide(anchoredAt, renderedCommit(releaseCommitOf(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
          shouldBe "<none>"
-   }
-   "refreshed" should "fetch the mirror it found" in mocked {
+   } }
+   "refreshed" should "fetch the mirror it found" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, refreshed(cacheRoot, cached) with tableGit)
 
       calls shouldBe (expectedPresenceCheck ++ "; " ++ expectedFetch)
-   }
-   "refreshed" should "clone first when the build has never seen the package" in mocked {
+   } }
+   "refreshed" should "clone first when the build has never seen the package" in mocked { failingOnGit {
       provide(listed, refreshed(cacheRoot, cached) with tableGit)
 
       wereCalledInOrder(append(singleton("cloneMirror"), "fetch "))
-   }
-   "descriptorTextAt" should "read a descriptor out of the object database" in mocked {
+   } }
+   "descriptorTextAt" should "read a descriptor out of the object database" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)) with tableGit)
          shouldBe "dep github.com/x/bar//root v1.1"
-   }
-   "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked {
+   } }
+   "descriptorTextAt" should "answer absent, not raise, where the version publishes no descriptor" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
          shouldBe "<none>"
-   }
-   "descriptorTextAt" should "fetch and ask again where the mirror has never heard of that version" in mocked {
+   } }
+   "descriptorTextAt" should "fetch and ask again where the mirror has never heard of that version" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached)) with tableGit)
 
       wasCalledOnce("fetch")
       wasCalledTimes(2, "fileAt v1.9:eliot.pkg")
-   }
-   "descriptorTextAt" should "fetch nothing for a version the mirror already holds" in mocked {
+   } }
+   "descriptorTextAt" should "fetch nothing for a version the mirror already holds" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, renderedText(descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)) with tableGit)
 
       wasNeverCalled("fetch")
-   }
+   } }
    "sourceDirectory" should "put a tree beside the mirror, named by the commit it holds" in {
       show(sourceDirectory(cacheRoot, Commit("aaa1"), cached)) shouldBe "target/cache/github.com/x/foo@aaa1"
    }
-   "sourceTreeAt" should "clone the mirror it has never seen, then check the commit out of it" in mocked {
+   "sourceTreeAt" should "clone the mirror it has never seen, then check the commit out of it" in mocked { failingOnGit {
       provide(listed, sourceTreeAt(cacheRoot, Commit("aaa1"), cached) with tableGit)
 
       calls shouldBe expectedFirstCheckout
-   }
-   "sourceTreeAt" should "answer where the tree is" in mocked {
+   } }
+   "sourceTreeAt" should "answer where the tree is" in mocked { failingOnGit {
       show(provide(listed, sourceTreeAt(cacheRoot, Commit("aaa1"), cached) with tableGit))
          shouldBe "target/cache/github.com/x/foo@aaa1"
-   }
-   "sourceTreeAt" should "not check out again what its own checkout left on disk" in mocked {
+   } }
+   "sourceTreeAt" should "not check out again what its own checkout left on disk" in mocked { failingOnGit {
       provide(listed, {
          sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
          sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
       } with tableGit)
 
       wasCalledOnce("addWorktree")
-   }
-   "sourceTreeAt" should "check out each commit into a tree of its own" in mocked {
+   } }
+   "sourceTreeAt" should "check out each commit into a tree of its own" in mocked { failingOnGit {
       provide(listed, {
          sourceTreeAt(cacheRoot, Commit("aaa1"), cached)
          sourceTreeAt(cacheRoot, Commit("bbb2"), cached)
@@ -136,54 +137,54 @@ def testCases: Test = {
 
       wasCalledTimes(2, "addWorktree")
       wasCalledOnce("cloneMirror")
-   }
-   "cachedAnchorOf" should "answer from a mirror already on disk" in mocked {
+   } }
+   "cachedAnchorOf" should "answer from a mirror already on disk" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(anchoredAt, offline(renderedCommit(cachedAnchorOf(cacheRoot, Line(1), cached))) with tableGit)
          shouldBe "aaa1"
-   }
-   "cachedAnchorOf" should "refuse rather than clone a mirror this machine never fetched" in mocked {
+   } }
+   "cachedAnchorOf" should "refuse rather than clone a mirror this machine never fetched" in mocked { failingOnGit {
       provide(anchoredAt, offline(renderedCommit(cachedAnchorOf(cacheRoot, Line(1), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("cloneMirror")
-   }
-   "cachedReleaseCommitOf" should "refuse rather than clone a mirror this machine never fetched" in mocked {
+   } }
+   "cachedReleaseCommitOf" should "refuse rather than clone a mirror this machine never fetched" in mocked { failingOnGit {
       provide(anchoredAt, offline(renderedCommit(cachedReleaseCommitOf(cacheRoot, Version(Line(1), Some(0)), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("cloneMirror")
-   }
-   "cachedDescriptorTextAt" should "read a descriptor the mirror already holds" in mocked {
+   } }
+   "cachedDescriptorTextAt" should "read a descriptor the mirror already holds" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, offline(renderedText(cachedDescriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached))) with tableGit)
          shouldBe "dep github.com/x/bar//root v1.1"
-   }
-   "cachedDescriptorTextAt" should "refuse rather than fetch a version the mirror does not hold" in mocked {
+   } }
+   "cachedDescriptorTextAt" should "refuse rather than fetch a version the mirror does not hold" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, offline(renderedText(cachedDescriptorTextAt(cacheRoot, Version(Line(1), Some(9)), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("fetch")
-   }
-   "cachedSourceTreeAt" should "check a commit out of a mirror already on disk" in mocked {
+   } }
+   "cachedSourceTreeAt" should "check a commit out of a mirror already on disk" in mocked { failingOnGit {
       withDirectory(mirrorPath)
 
       provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Commit("aaa1"), cached))) with tableGit)
          shouldBe "target/cache/github.com/x/foo@aaa1"
 
       wasCalledOnce("addWorktree")
-   }
-   "cachedSourceTreeAt" should "refuse rather than clone where there is no mirror to check out of" in mocked {
+   } }
+   "cachedSourceTreeAt" should "refuse rather than clone where there is no mirror to check out of" in mocked { failingOnGit {
       provide(listed, offline(show(cachedSourceTreeAt(cacheRoot, Commit("aaa1"), cached))) with tableGit)
          shouldBe expectedNotFetched
 
       wasNeverCalled("cloneMirror")
-   }
-   "the cache" should "clone once and read the mirror it made for every later question" in mocked {
+   } }
+   "the cache" should "clone once and read the mirror it made for every later question" in mocked { failingOnGit {
       provide(listed, {
          publishedTags(cacheRoot, cached)
          descriptorTextAt(cacheRoot, Version(Line(1), Some(2)), cached)
@@ -191,7 +192,7 @@ def testCases: Test = {
 
       wasCalledOnce("cloneMirror")
       lastCall shouldBe expectedShow
-   }
+   } }
 }
 
 /**

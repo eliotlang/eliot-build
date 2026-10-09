@@ -149,7 +149,11 @@ expression `with` inside `mocked`'s body, never on a slot's type**: a slot's `wi
 implementation's own clause effects to the platform's real ones (`docs/effectful-modules.md` §11.2).
 Everything else is mocked by `eliot.test.Mock`: a case declares nothing, arranges with
 `whenSpawning`/`withDirectory`/…, acts, and verifies with `wasCalledOnce`/`calls`/…
-(`eliot-test/docs/mocking.md`). Every suite that resolves does it through `TablePackages.against`, which
+(`eliot-test/docs/mocking.md`); a spawn fragment starts with the program, `whenSpawning("git fetch", …)`. A case that
+runs git or an asset fetch performs `Throw[GitError]`/`Throw[AssetError]`, and neither `in` nor `mocked` is that
+error's frame, so its body is wrapped — `in mocked { failingOnGit { … } }` (`git/GitFailure`, `assets/AssetFailure`),
+a refusal then failing the case in git's own words; a `with tableGit` stands *inside* the frame that covers its
+`Throw[GitError]`. The compiler checked neither until eliot's row phase bound an entry rather than an ability. Every suite that resolves does it through `TablePackages.against`, which
 answers one line — the case's rendering, or the error shown — so both outcomes are asserted alike (the
 §11.3 collision that once forced this is fixed in eliot `v0.7`, §21). `FakeWorld` — 195 lines of hand-written
 doubles — was deleted when that landed. (`probe/` was deleted on 2026-09-04; `docs/effectful-modules.md` §9.6 says what that leaves

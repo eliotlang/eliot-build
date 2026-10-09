@@ -84,8 +84,19 @@ private def mirrorPath: Path = path("target/cache/github.com/x/foo")
  * The two things the bound implementations ask for rather than take: the root `gitPackages` reads
  * mirrors under, and the table `tableGit` answers out of. Both type arguments are spelled because the
  * slot's row names `Dep` twice, and only the call can say which of them a `provide` supplies.
+ *
+ * It is also the frame of the two refusals those clauses declare, a `GitError` and a `DescriptorError`:
+ * a refusal is answered as its own text, so a case asserts it like any other answer.
  */
-private def answered(computation uses *, Dep[Path], Dep[Mirrors]: String): String =
-   provide[Path, String](cacheRoot, provide[Mirrors, String](mirrors, computation))
+private def answered(
+      computation uses *, Dep[Path], Dep[Mirrors], Throw[GitError], Throw[DescriptorError]: String
+   ): String =
+   provide[Path, String](
+      cacheRoot,
+      provide[Mirrors, String](
+         mirrors,
+         catch[GitError, String](catch[DescriptorError, String](computation, show), show)
+      )
+   )
 
 private def cacheRoot: Path = path("target/cache")
