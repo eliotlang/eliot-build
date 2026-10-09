@@ -10,6 +10,7 @@ import eliot.build.model.Lineage
 import eliot.build.git.Git
 import eliot.build.git.Tags
 import eliot.build.git.ShellGit
+import eliot.build.git.GitFailure
 
 /**
  * Talking to git, with git faked: what each operation runs, where it runs, and which refusals it
@@ -21,166 +22,166 @@ import eliot.build.git.ShellGit
  * the subject's type, and the half that has actually been wrong.
  */
 def testCases: Test = {
-   "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked {
+   "cloneMirror" should "clone without a working tree, standing where this program stands" in mocked { failingOnGit {
       cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
 
       calls shouldBe ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo"
-   }
-   "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked {
+   } }
+   "cloneMirror" should "answer the mirror it made, at the directory it was asked for" in mocked { failingOnGit {
       val made = cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
 
       show(made.mirrorDirectory) shouldBe "/cache/github.com/x/foo"
-   }
-   "fetch" should "prune, so a withdrawn tag stops being selectable" in mocked {
+   } }
+   "fetch" should "prune, so a withdrawn tag stops being selectable" in mocked { failingOnGit {
       fetch(mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
-   }
+   } }
    "fetch" should "run inside the mirror, naming nothing" in mocked {
-      whenSpawning("fetch", failing(128, "not a repository"))
+      whenSpawning("git fetch", failing(128, "not a repository"))
 
       raising[GitError]("'git fetch --tags --prune' failed with exit code 128: not a repository", fetch(mirror) with shellGit)
    }
-   "tags" should "list the mirror by naming its directory, from where this program stands" in mocked {
+   "tags" should "list the mirror by naming its directory, from where this program stands" in mocked { failingOnGit {
       tags(mirror) with shellGit
 
       calls shouldBe ".$ git ls-remote --tags /cache/github.com/x/foo"
-   }
-   "tags" should "read the versions the mirror holds" in mocked {
-      whenSpawning("ls-remote", succeeding(listing))
+   } }
+   "tags" should "read the versions the mirror holds" in mocked { failingOnGit {
+      whenSpawning("git ls-remote", succeeding(listing))
 
       renderedTags(tags(mirror) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
-   }
+   } }
    "tags" should "raise exactly what git ran and exactly what it said back" in mocked {
-      whenSpawning("ls-remote", failing(128, "no such repository"))
+      whenSpawning("git ls-remote", failing(128, "no such repository"))
 
       raising[GitError](expectedRefusal, {
          tags(mirror) with shellGit
          unit
       })
    }
-   "fileAt" should "read one file out of the object database, inside the mirror" in mocked {
+   "fileAt" should "read one file out of the object database, inside the mirror" in mocked { failingOnGit {
       fileAt(version("v1.2"), "eliot.pkg", mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git show v1.2:eliot.pkg"
-   }
-   "fileAt" should "answer what that version holds" in mocked {
-      whenSpawning("show v1.2:eliot.pkg", succeeding("dep github.com/x/bar//root v1.1"))
+   } }
+   "fileAt" should "answer what that version holds" in mocked { failingOnGit {
+      whenSpawning("git show v1.2:eliot.pkg", succeeding("dep github.com/x/bar//root v1.1"))
 
       val shown = fileAt(version("v1.2"), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "dep github.com/x/bar//root v1.1"
-   }
-   "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked {
-      whenSpawning("show v1.9:eliot.pkg", failing(128, "path does not exist"))
+   } }
+   "fileAt" should "answer absent, not raise, where the revision holds no such file" in mocked { failingOnGit {
+      whenSpawning("git show v1.9:eliot.pkg", failing(128, "path does not exist"))
 
       val shown = fileAt(version("v1.9"), "eliot.pkg", mirror) with shellGit
 
       (shown orElse "<none>") shouldBe "<none>"
-   }
-   "addWorktree" should "check out a detached tree at the commit, standing inside the mirror the objects are in" in mocked {
+   } }
+   "addWorktree" should "check out a detached tree at the commit, standing inside the mirror the objects are in" in mocked { failingOnGit {
       addWorktree(Commit("aaa1"), treePath, mirror) with shellGit
 
       calls shouldBe "/cache/github.com/x/foo$ git worktree add --detach --force /cache/github.com/x/foo@aaa1 aaa1"
-   }
-   "addWorktree" should "answer the tree it made, at the directory it was asked for" in mocked {
+   } }
+   "addWorktree" should "answer the tree it made, at the directory it was asked for" in mocked { failingOnGit {
       val made = addWorktree(Commit("aaa1"), treePath, mirror) with shellGit
 
       show(made.worktreeDirectory) shouldBe "/cache/github.com/x/foo@aaa1"
-   }
+   } }
    "addWorktree" should "raise what git said about a revision it could not check out" in mocked {
-      whenSpawning("worktree", failing(128, "invalid reference: fff9"))
+      whenSpawning("git worktree", failing(128, "invalid reference: fff9"))
 
       raising[GitError](expectedCheckoutRefusal, {
          addWorktree(Commit("fff9"), treePath, mirror) with shellGit
          unit
       })
    }
-   "uncommittedChanges" should "ask for the porcelain status, standing inside the checkout" in mocked {
+   "uncommittedChanges" should "ask for the porcelain status, standing inside the checkout" in mocked { failingOnGit {
       uncommittedChanges(checkout) with shellGit
 
       calls shouldBe "/project$ git status --porcelain"
-   }
-   "uncommittedChanges" should "answer one entry per line git listed, and no empty one" in mocked {
-      whenSpawning("status", succeeding(" M src/a.els\n?? notes.txt\n"))
+   } }
+   "uncommittedChanges" should "answer one entry per line git listed, and no empty one" in mocked { failingOnGit {
+      whenSpawning("git status", succeeding(" M src/a.els\n?? notes.txt\n"))
 
       joined(", ", uncommittedChanges(checkout) with shellGit) shouldBe " M src/a.els, ?? notes.txt"
-   }
-   "uncommittedChanges" should "answer nothing for a clean tree" in mocked {
+   } }
+   "uncommittedChanges" should "answer nothing for a clean tree" in mocked { failingOnGit {
       size(uncommittedChanges(checkout) with shellGit) shouldBe 0
-   }
-   "headCommit" should "read the commit HEAD names, without the line's end" in mocked {
-      whenSpawning("rev-parse HEAD", succeeding("ccc3\n"))
+   } }
+   "headCommit" should "read the commit HEAD names, without the line's end" in mocked { failingOnGit {
+      whenSpawning("git rev-parse HEAD", succeeding("ccc3\n"))
 
       show(headCommit(checkout) with shellGit) shouldBe "ccc3"
-   }
-   "upstreamCommit" should "ask git for the branch's upstream by git's own spelling of it" in mocked {
+   } }
+   "upstreamCommit" should "ask git for the branch's upstream by git's own spelling of it" in mocked { failingOnGit {
       upstreamCommit(checkout) with shellGit
 
       calls shouldBe "/project$ git rev-parse @{upstream}"
-   }
+   } }
    "upstreamCommit" should "raise what git said about a branch that pushes nowhere" in mocked {
-      whenSpawning("rev-parse @{upstream}", failing(128, "no upstream configured for branch 'master'"))
+      whenSpawning("git rev-parse @{upstream}", failing(128, "no upstream configured for branch 'master'"))
 
       raising[GitError]("no upstream configured", {
          upstreamCommit(checkout) with shellGit
          unit
       })
    }
-   "isAncestor" should "ask merge-base, inside the checkout" in mocked {
+   "isAncestor" should "ask merge-base, inside the checkout" in mocked { failingOnGit {
       isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit
 
       calls shouldBe "/project$ git merge-base --is-ancestor bbb2 ccc3"
-   }
-   "isAncestor" should "answer yes where git exits 0" in mocked {
+   } }
+   "isAncestor" should "answer yes where git exits 0" in mocked { failingOnGit {
       (isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit).shouldBeTrue
-   }
-   "isAncestor" should "answer no where git exits 1, which is an answer rather than a refusal" in mocked {
-      whenSpawning("merge-base", failing(1, ""))
+   } }
+   "isAncestor" should "answer no where git exits 1, which is an answer rather than a refusal" in mocked { failingOnGit {
+      whenSpawning("git merge-base", failing(1, ""))
 
       (isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit).shouldBeFalse
-   }
+   } }
    "isAncestor" should "raise where git could not answer at all" in mocked {
-      whenSpawning("merge-base", failing(128, "Not a valid commit name bbb2"))
+      whenSpawning("git merge-base", failing(128, "Not a valid commit name bbb2"))
 
       raising[GitError]("failed with exit code 128: Not a valid commit name bbb2", {
          isAncestor(Commit("bbb2"), Commit("ccc3"), checkout) with shellGit
          unit
       })
    }
-   "publishedReleases" should "list origin's tags, standing in the checkout whose origin it is" in mocked {
+   "publishedReleases" should "list origin's tags, standing in the checkout whose origin it is" in mocked { failingOnGit {
       publishedReleases(checkout) with shellGit
 
       calls shouldBe "/project$ git ls-remote --tags origin"
-   }
-   "publishedReleases" should "read the versions origin publishes" in mocked {
-      whenSpawning("ls-remote", succeeding(listing))
+   } }
+   "publishedReleases" should "read the versions origin publishes" in mocked { failingOnGit {
+      whenSpawning("git ls-remote", succeeding(listing))
 
       renderedTags(publishedReleases(checkout) with shellGit) shouldBe "v1.2 aaa1, v1.3 bbb2"
-   }
-   "tagRelease" should "make an annotated tag at the commit, named and described by its version" in mocked {
+   } }
+   "tagRelease" should "make an annotated tag at the commit, named and described by its version" in mocked { failingOnGit {
       tagRelease(version("v0.6"), Commit("ccc3"), checkout) with shellGit
 
       calls shouldBe "/project$ git tag --annotate --message v0.6 v0.6 ccc3"
-   }
-   "pushRelease" should "push that one tag to origin, spelled as a tag" in mocked {
+   } }
+   "pushRelease" should "push that one tag to origin, spelled as a tag" in mocked { failingOnGit {
       pushRelease(version("v0.6"), checkout) with shellGit
 
       calls shouldBe "/project$ git push origin refs/tags/v0.6"
-   }
+   } }
    "pushRelease" should "raise what git said where the remote refused the tag" in mocked {
-      whenSpawning("push", failing(1, "rejected"))
+      whenSpawning("git push", failing(1, "rejected"))
 
       raising[GitError]("'git push origin refs/tags/v0.6' failed with exit code 1: rejected", pushRelease(version("v0.6"), checkout) with shellGit)
    }
-   "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked {
+   "git" should "name a repository from this program's frame and stand in the one it fetches into" in mocked { failingOnGit {
       cloneMirror(remoteOf(Repository("github.com/x/foo")), mirrorPath) with shellGit
       fetch(mirror) with shellGit
 
       calls shouldBe (
          ".$ git clone --mirror https://github.com/x/foo /cache/github.com/x/foo; " ++
             "/cache/github.com/x/foo$ git fetch --tags --prune")
-   }
+   } }
 }
 
 private def mirrorPath: Path = path("/cache/github.com/x/foo")

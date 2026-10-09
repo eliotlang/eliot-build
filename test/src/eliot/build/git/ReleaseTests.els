@@ -59,57 +59,57 @@ def testCases: Test = {
    }
 
    "released" should "tag the commit checked out as the next release, and push that tag" in mocked {
-      provide(checkoutOf(published, followingRelease), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, followingRelease), attempt(released(None, checkout) with tableGit))
          shouldBe "v0.6 at ccc3"
 
       calls shouldBe expectedRelease
    }
    "released" should "tag the version asked for, where it is the next" in mocked {
-      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v1.0")), checkout)) with tableGit)
+      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v1.0")), checkout) with tableGit))
          shouldBe "v1.0 at ccc3"
    }
    "released" should "release a commit the remote branch has already moved past" in mocked {
-      provide(checkoutOf(published, behindUpstream), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, behindUpstream), attempt(released(None, checkout) with tableGit))
          shouldBe "v0.6 at ccc3"
    }
    "released" should "check an older line's release against that line's last release" in mocked {
-      provide(checkoutOf(maintained, followingMaintenance), attempt(released(Some(versionOf("v1.8")), checkout)) with tableGit)
+      provide(checkoutOf(maintained, followingMaintenance), attempt(released(Some(versionOf("v1.8")), checkout) with tableGit))
          shouldBe "v1.8 at ccc3"
 
       wasCalledOnce("isAncestor aaa1 ccc3")
    }
    "released" should "refuse a working tree with changes in it, naming them" in mocked {
-      provide(checkoutOf(published, uncommitted), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, uncommitted), attempt(released(None, checkout) with tableGit))
          shouldBe "the working tree has changes a release would not contain: M src/a.els, ?? notes.txt"
 
       wasNeverCalled("tagRelease")
    }
    "released" should "refuse a commit the branch has not pushed" in mocked {
-      provide(checkoutOf(published, unpushed), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, unpushed), attempt(released(None, checkout) with tableGit))
          shouldBe expectedUnpushed
 
       wasNeverCalled("tagRelease")
    }
    "released" should "refuse a commit that does not follow the last release of its line" in mocked {
-      provide(checkoutOf(published, diverged), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, diverged), attempt(released(None, checkout) with tableGit))
          shouldBe expectedDiverged
 
       wasNeverCalled("tagRelease")
    }
    "released" should "refuse the commit the line's last release already names" in mocked {
-      provide(checkoutOf(published, alreadyReleased), attempt(released(None, checkout)) with tableGit)
+      provide(checkoutOf(published, alreadyReleased), attempt(released(None, checkout) with tableGit))
          shouldBe "HEAD (bbb2) is already released, as v0.5; a second tag at the same commit would release nothing"
 
       wasNeverCalled("tagRelease")
    }
    "released" should "refuse a version that is not next, before tagging anything" in mocked {
-      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v0.7")), checkout)) with tableGit)
+      provide(checkoutOf(published, followingRelease), attempt(released(Some(versionOf("v0.7")), checkout) with tableGit))
          shouldBe "v0.7 is not the next release of v0, which is v0.6"
 
       wasNeverCalled("tagRelease")
    }
    "released" should "report what git said where git said no" in mocked {
-      provide(refusingWith(refused), attempt(released(None, checkout)) with tableGit)
+      provide(refusingWith(refused), attempt(released(None, checkout) with tableGit))
          shouldBe "'git status --porcelain' failed with exit code 128: not a git repository"
    }
 }

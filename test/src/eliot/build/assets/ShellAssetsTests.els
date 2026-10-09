@@ -10,6 +10,7 @@ import eliot.build.model.Version
 import eliot.build.model.Lock
 import eliot.build.assets.Assets
 import eliot.build.assets.ShellAssets
+import eliot.build.assets.AssetFailure
 
 /**
  * Going and getting a release asset, with the network faked: what is downloaded, where it is unpacked,
@@ -26,76 +27,76 @@ import eliot.build.assets.ShellAssets
  * refused is an `AssetError` rather than a reason to try the other one.
  */
 def testCases: Test = {
-   "assetTree" should "download the asset from the tag the consumer already selected" in mocked {
+   "assetTree" should "download the asset from the tag the consumer already selected" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce(expectedDownload)
-   }
-   "assetTree" should "unpack it into a directory named for the asset, beside the mirrors" in mocked {
+   } }
+   "assetTree" should "unpack it into a directory named for the asset, beside the mirrors" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce(expectedUnpacking)
-   }
-   "assetTree" should "answer the directory the jars were unpacked into" in mocked {
+   } }
+   "assetTree" should "answer the directory the jars were unpacked into" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
-   }
-   "assetTree" should "delete the archive, which nothing reads once it is unpacked" in mocked {
+   } }
+   "assetTree" should "delete the archive, which nothing reads once it is unpacked" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce("delete " ++ expectedTree ++ ".download")
-   }
-   "assetTree" should "make the directory the archive lands in, and let unzip make the one beside it" in mocked {
+   } }
+   "assetTree" should "make the directory the archive lands in, and let unzip make the one beside it" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce("createDirectories target/cache/assets/github.com/e/eliot@v1.2")
-   }
-   "assetTree" should "fetch nothing at all for an asset this machine already unpacked" in mocked {
+   } }
+   "assetTree" should "fetch nothing at all for an asset this machine already unpacked" in mocked { failingOnAsset {
       downloading
       withFile(path(expectedDigestFile), "beef\n")
 
       answered(rendered(assetTree(jvmAsset)) with shellAssets) shouldBe expectedTree
 
       wasNeverCalled("curl")
-   }
-   "assetTree" should "fetch again an asset whose directory has no digest beside it, as a fetch that never finished" in mocked {
+   } }
+   "assetTree" should "fetch again an asset whose directory has no digest beside it, as a fetch that never finished" in mocked { failingOnAsset {
       downloading
       withDirectory(path(expectedTree))
 
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wasCalledOnce(expectedDownload)
-   }
-   "assetTree" should "hash the archive before unpacking it" in mocked {
+   } }
+   "assetTree" should "hash the archive before unpacking it" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wereCalledInOrder(append(singleton(expectedHashing), expectedUnpacking))
-   }
-   "assetTree" should "write the digest beside the directory only once the archive is unpacked" in mocked {
+   } }
+   "assetTree" should "write the digest beside the directory only once the archive is unpacked" in mocked { failingOnAsset {
       downloading
       answered(rendered(assetTree(jvmAsset)) with shellAssets)
 
       wereCalledInOrder(append(singleton(expectedUnpacking), "writeFile " ++ expectedDigestFile))
-   }
-   "assetDigest" should "answer the digest of the archive that was fetched" in mocked {
+   } }
+   "assetDigest" should "answer the digest of the archive that was fetched" in mocked { failingOnAsset {
       downloading
       whenSpawning("sha256sum", succeeding("beef  " ++ expectedTree ++ ".download\n"))
 
       answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
-   }
-   "assetDigest" should "read a cached asset's digest back without fetching or hashing it" in mocked {
+   } }
+   "assetDigest" should "read a cached asset's digest back without fetching or hashing it" in mocked { failingOnAsset {
       downloading
       withFile(path(expectedDigestFile), "beef\n")
 
       answered(renderedDigest(assetDigest(jvmAsset)) with shellAssets) shouldBe "beef"
 
       wasNeverCalled("sha256sum")
-   }
+   } }
    "assetTree" should "raise what the downloader said about an asset that is not published" in mocked {
       downloading
       whenSpawning("curl", failing(22, "The requested URL returned error: 404"))

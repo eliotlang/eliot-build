@@ -1,0 +1,21 @@
+import eliot.test.Assertion
+import eliot.build.git.Git
+
+/**
+ * Run a case's `body`, where a `GitError` fails the case instead of escaping it.
+ *
+ * A case that runs git through a double — `fetch(mirror) with shellGit`, `provide(listed, … with tableGit)` —
+ * performs `Throw[GitError]`, and neither `in` nor `mocked` is its frame: `in` discharges `AssertionError` and
+ * `mocked` `IoError`. Inside this word's slot one is, so the double's refusal reads as a failure with git's own
+ * words, and a case that expects one still asserts it with `raising[GitError]` inside.
+ *
+ * ```eliot
+ * "fetch" should "prune" in mocked { failingOnGit {
+ *    fetch(mirror) with shellGit
+ *
+ *    calls shouldBe "/cache/github.com/x/foo$ git fetch --tags --prune"
+ * } }
+ * ```
+ */
+def failingOnGit[A](body uses *, Throw[GitError]: A) uses Throw[AssertionError]: A =
+   catch[GitError, A](body, error -> raise(Failed("unexpected git failure: " ++ show(error))))

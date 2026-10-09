@@ -1,0 +1,12 @@
+import eliot.test.Assertion
+import eliot.build.assets.Assets
+
+/**
+ * Run a case's `body`, where an `AssetError` fails the case instead of escaping it.
+ *
+ * `shellAssets` raises `Throw[AssetError]` where a download or an unpacking refuses, and neither `in` nor `mocked`
+ * is that error's frame. Inside this word's slot one is, so a case that expects a refusal still asserts it with
+ * `raising[AssetError]` inside, and one that does not fails with the refusal's own words.
+ */
+def failingOnAsset[A](body uses *, Throw[AssetError]: A) uses Throw[AssertionError]: A =
+   catch[AssetError, A](body, error -> raise(Failed("unexpected asset failure: " ++ show(error))))
