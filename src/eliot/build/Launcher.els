@@ -297,10 +297,9 @@ private def performed(
       descriptor: Descriptor,
       here: Path,
       java: String
-   ): {
+   ) uses
       FileSystem, Process, Throw[IoError], Throw[GitError], Throw[AssetError], Throw[DescriptorError],
-      Throw[ResolutionError], Throw[InvocationError], Throw[LockFileError], Throw[LockConflict]
-   } List[String] =
+      Throw[ResolutionError], Throw[InvocationError], Throw[LockFileError], Throw[LockConflict]: List[String] =
    provide(
       cacheRoot(here),
       compiled(name, programWords, descriptor, here, java) with gitPackages with shellGit with shellAssets
@@ -333,10 +332,9 @@ private def compiled(
       descriptor: Descriptor,
       here: Path,
       java: String
-   ): {
+   ) uses
       Assets, PackageSource, FileSystem, Process, Throw[IoError], Throw[ResolutionError], Throw[InvocationError],
-      Throw[LockFileError], Throw[LockConflict]
-   } List[String] = {
+      Throw[LockFileError], Throw[LockConflict]: List[String] = {
    val resolution = resolve(name, descriptor)
    val invocation = invocationOf(name, descriptor, resolution)
 

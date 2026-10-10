@@ -183,7 +183,7 @@ resolved through import scope rather than matched by spelling within one file.
 assert and nothing else — a `printLine` in one is a compile error at the reference, verified. `in`
 supplies `Throw[AssertionError]` per case and is transparent to everything else, so a case wanting
 doubles writes `in mocked { … }` and they are bound by `mocked`'s own slot; a suite whose cases must
-*really* perform composes the alias with a written-out row, `{Console} Test`. No suite here needs
+*really* perform composes the alias with a clause, `def testCases uses Console: Test`. No suite here needs
 that. There is no `pure` any more, no capture tag and no carrier.
 
 ## Releasing
@@ -241,6 +241,10 @@ The compiler CLI below is still how a change to the *compiler* is picked up, sin
 a published eliot tag.
 
 ## Building and running (compiler CLI)
+
+**The sources are written in eliot's `uses` surface (D21), which no eliot release carries yet** — `v0.7`
+rejects it — so until the next tag `./bootstrap` and the published-tag checks below cannot build `src`; build
+with a compiler checkout (below), and move the `dep` lines when the tag exists.
 
 **The launcher reads one descriptor format and no other**, mirrors included: package blocks, every
 `dep` naming a package. Nothing is compatible with the spellings from before 2026-09-16 (`module`
@@ -365,7 +369,7 @@ Note the source roots: the launcher needs `src` alone (no framework, no `test`).
 A green suite still says nothing about whether the effectful modules have an interpretation **on the
 platform**: `mocked` binds the doubles by name and `shellGit` is only ever bound under it, so a suite
 never resolves the platform's own `Process` and `FileSystem`. `eliot.test.Runner` cannot close that —
-it caps at `{Console}` by design, so a case that performs `Process` does not typecheck — which is why
+it caps at `uses Console` by design, so a case that performs `Process` does not typecheck — which is why
 the check has to be a program with a `main` of its own. `probe/` was that program until 2026-09-04 and
 `RealWorldTests.els` until the v6 port; **`eliot.build.Launcher` is that program now** (2026-09-13,
 `docs/effectful-modules.md` §14).
