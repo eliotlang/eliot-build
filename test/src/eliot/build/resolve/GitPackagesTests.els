@@ -90,7 +90,7 @@ private def mirrorPath: Path = path("target/cache/github.com/x/foo")
  */
 private def answered(
       computation uses *, Dep[Path], Dep[Mirrors], Throw[GitError], Throw[DescriptorError]: String
-   ): String =
+   ) uses *: String =
    provide[Path, String](
       cacheRoot,
       provide[Mirrors, String](

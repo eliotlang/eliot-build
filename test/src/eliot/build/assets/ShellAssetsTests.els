@@ -172,7 +172,7 @@ private def renderedDigest(digest: Digest): String = show(digest)
  * implementation closes over nothing, so the cache root is an effect it reads and this is where the
  * test answers it.
  */
-private def answered(computation uses *, Dep[Path]: String): String = provide[Path, String](cacheRoot, computation)
+private def answered(computation uses *, Dep[Path]: String) uses *: String = provide[Path, String](cacheRoot, computation)
 
 private def cacheRoot: Path = path("target/cache")
 

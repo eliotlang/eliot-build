@@ -17,5 +17,5 @@ import eliot.build.git.Git
  * } }
  * ```
  */
-def failingOnGit[A](body uses *, Throw[GitError]: A) uses Throw[AssertionError]: A =
+def failingOnGit[A](body uses *, Throw[GitError]: A) uses *, Throw[AssertionError]: A =
    catch[GitError, A](body, error -> raise(Failed("unexpected git failure: " ++ show(error))))

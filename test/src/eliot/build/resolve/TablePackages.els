@@ -70,7 +70,7 @@ def universeOf(publications: List[Pair[String, String]], lineages: List[Pair[Str
 def against(
       universe: Universe,
       computation uses *, PackageSource with tablePackages, Throw[ResolutionError]: String
-   ): String =
+   ) uses *: String =
    provide(universe, catch[ResolutionError, String](computation, error -> show(error)))
 
 /**

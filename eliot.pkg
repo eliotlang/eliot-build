@@ -19,8 +19,10 @@
 -- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
--- `v0.10`, everywhere: eliot `v0.9` is the first tag with the `uses` surface `src` and `test` are written in,
--- and `v0.10` the first whose compiler compiles eliot-test `v0.4`, whose doubles raise `IoError` on `mocked`'s
+-- `v0.11`, everywhere, with eliot-test `v0.5`: the first eliot tag that reads `uses *` on a definition taking
+-- `uses *` code (D24), which `test` writes, and the first eliot-test tag written that way. Eliot `v0.9` is the
+-- first tag with the `uses` surface `src` and `test` are written in, and `v0.10` the first whose compiler compiles
+-- eliot-test `v0.4`, whose doubles raise `IoError` on `mocked`'s
 -- slot; eliot-test `v0.4` is also the first written in `uses`. `v0.4` is the first eliot tag whose compiler has the `run` mode and picks the
 -- backend by it (the `compiler` lines here name none), and whose descriptor names its assets with
 -- `asset`, the only spelling this tool reads; `v0.5` is the first whose warm build over an unchanged
@@ -38,17 +40,17 @@ launcher v0.7
 
 package root {
   at .
-  dep github.com/eliotlang/eliot//stdlib v0.10
+  dep github.com/eliotlang/eliot//stdlib v0.11
 }
 
 package launcher {
   dep //root
-  dep github.com/eliotlang/eliot//jvm v0.10
+  dep github.com/eliotlang/eliot//jvm v0.11
   compiler exe-jar -m eliot.build.Launcher
 }
 
 package test {
   dep //root
-  dep github.com/eliotlang/eliot-test//suite v0.4
-  dep github.com/eliotlang/eliot//jvm v0.10
+  dep github.com/eliotlang/eliot-test//suite v0.5
+  dep github.com/eliotlang/eliot//jvm v0.11
 }
