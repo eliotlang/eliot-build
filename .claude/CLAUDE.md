@@ -122,7 +122,7 @@ LSP runs it through `./eliotw`, so it reaches an editor once a launcher release 
 The one thing that may follow the package is `--`, and the words after it are forwarded verbatim
 to every compiler line, after `-o` behind a `--` of the launcher's own — `eliot test --
 eliot.build.resolve` runs one suite (`docs/build-system.md`, "Words after `--` go to the program"; it
-needs an eliot whose `run` mode takes program arguments, which no tag up to `v0.7` is — `v0.7` reads the
+needs an eliot whose `run` mode takes program arguments, which `v0.8` is the first tag to do — `v0.7` reads the
 words as more source roots and runs everything, exit 0). The other option is **`eliot --release
 [<version>]`** (2026-10-08): it tags the commit checked out as the next version — the next minor of the
 highest line `origin` publishes, `v0.0` for none; a new major only by naming it — and pushes that one
@@ -242,17 +242,18 @@ a published eliot tag.
 
 ## Building and running (compiler CLI)
 
-**The sources are written in eliot's `uses` surface (D21), which no eliot release carries yet** — `v0.7`
-rejects it — so until the next tag `./bootstrap` and the published-tag checks below cannot build `src`; build
-with a compiler checkout (below), and move the `dep` lines when the tag exists.
+**The sources are written in eliot's `uses` surface (D21)**, which eliot `v0.9` is the first tag to carry; the `dep`
+lines name `v0.10`, the first whose compiler compiles eliot-test `v0.4` (its doubles raise `IoError` on `mocked`'s
+slot), and eliot-test `v0.4`.
 
 **The launcher reads one descriptor format and no other**, mirrors included: package blocks, every
 `dep` naming a package. Nothing is compatible with the spellings from before 2026-09-16 (`module`
 blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
-eliot `v0.7` (the base `src` is written with, §21) and eliot-test `v0.3` (`recordCall`, which `TableGit` journals
-with, and `whenSpawningWrites`, which says what a mocked `curl` leaves). `v0.4` and eliot-test's `v0.2` are the first tags of each with `asset` clauses
+eliot `v0.10` and eliot-test `v0.4` (above); eliot `v0.7` was the first with the base `src` is written with (§21), and
+eliot-test `v0.3` the first with `recordCall`, which `TableGit` journals with, and `whenSpawningWrites`, which says
+what a mocked `curl` leaves. `v0.4` and eliot-test's `v0.2` are the first tags of each with `asset` clauses
 and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
 `v0.5` is the first whose incremental cache does not alternate a warm build between fast and slow, and
 `v0.6` the first with `--progress`, which `Command.compilerCommand` appends to every compiler it runs (and
@@ -327,7 +328,7 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar test   # must ex
 
 A package's `eliot.pkg` must require eliot at `v0.4` or later for this to work at all — every earlier
 tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository
-requires `v0.7` and `../eliot-test` `v0.4`. Three things to check while you are there: a failing case must
+requires `v0.10` and `../eliot-test` `v0.4`. Three things to check while you are there: a failing case must
 make `test` exit 1, a deliberate syntax error in any
 mounted source must make the build exit 1 with the compiler's own diagnostics on the terminal, and
 `nosuch` — and a bare command line, and the old `build test` — must exit 1 rather than printing a
