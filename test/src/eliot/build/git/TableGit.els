@@ -16,11 +16,9 @@ import eliot.build.git.Tags
  * declared by the clauses that read it and supplied by that `provide`, the way `eliot.build.resolve.TablePackages`
  * takes its universe.
  *
- * **Bind it with an expression `with`, inside the mocked body, and not on a slot's type.** A clause row is
- * bound in the scope of the `with` that binds the name: written inside `mocked { … }`, this double's
- * `Mocking` reaches the framework's journal and file system; written on a slot's type — `computation: {Git}
- * A with tableGit`, the shape `against` uses — the scope that would cover it is the caller's, which the slot
- * cannot see. `against` gets away with it because `Dep` is discharged by a frame rather than bound by a scope.
+ * **Bind it with a `with` inside the mocked body.** A clause row is bound in the scope of the `with` that
+ * binds the name: written inside `mocked { … }`, this double's `Mocking` reaches the framework's journal and
+ * file system, which a `with` outside it has nothing to reach.
  *
  * Two things make it at home inside `mocked`. It **records every operation with `recordCall`** into the one
  * journal every verification reads — so `calls` shows a cache's `isDirectory` and its `cloneMirror` in the

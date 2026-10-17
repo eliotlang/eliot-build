@@ -63,15 +63,16 @@ def universeOf(publications: List[Pair[String, String]], lineages: List[Pair[Str
  * resolution raised, shown — so both outcomes are asserted the same way, as one line.
  *
  * The one place the test source is chosen, and the one place its table is supplied: `with
- * tablePackages` binds the slot's `PackageSource`, and `provide` answers the `Dep[Universe]` those
- * clauses declare. Production code inside `computation` names neither. The `catch`'s type arguments are
- * spelled because the computation is a parameter, whose declaration cannot say which `Throw` it raises.
+ * tablePackages` around the run binds the `PackageSource` the parameter's clause lists, and `provide`
+ * answers the `Dep[Universe]` those clauses declare. Production code inside `computation` names
+ * neither. The `catch`'s type arguments are spelled because the computation is a parameter, whose
+ * declaration cannot say which `Throw` it raises.
  */
 def against(
       universe: Universe,
-      computation uses *, PackageSource with tablePackages, Throw[ResolutionError]: String
+      computation uses *, PackageSource, Throw[ResolutionError]: String
    ) uses *: String =
-   provide(universe, catch[ResolutionError, String](computation, error -> show(error)))
+   provide(universe, catch[ResolutionError, String](computation with tablePackages, error -> show(error)))
 
 /**
  * The descriptor `text` spells, read as a mirror's is, and taken as empty where it spells nothing
