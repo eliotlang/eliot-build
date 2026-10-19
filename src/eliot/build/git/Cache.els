@@ -193,8 +193,12 @@ def cachedReleaseCommitOf(root: Path, version: Version, repository: Repository):
 /**
  * `descriptorTextAt`, answered from disk alone: a version the mirror does not hold is `NotFetched`,
  * never absent, because only a fetch could say that the repository really publishes nothing there.
+ *
+ * Its clause is `Offline` written out without `Throw[GitError]`: reading a file out of a mirror asks git
+ * nothing it could refuse, and a declared effect the body never performs is an error.
  */
-def cachedDescriptorTextAt(root: Path, version: Version, repository: Repository): Offline[Option[String]] =
+def cachedDescriptorTextAt(root: Path, version: Version, repository: Repository)
+   uses Git, FileSystem, Throw[IoError], Throw[NotFetched]: Option[String] =
    some(existingMirror(root, repository).fileAt(version, descriptorFileName) orElse raise(NotFetched(repository)))
 
 /**

@@ -27,7 +27,7 @@ implement cachedPackages: PackageSource {
          version: Version,
          target: Repository
       ) uses
-         Git, FileSystem, Dep[Path], Throw[IoError], Throw[GitError], Throw[NotFetched], Throw[DescriptorError]:
+         Git, FileSystem, Dep[Path], Throw[IoError], Throw[NotFetched], Throw[DescriptorError]:
          Option[Descriptor] = {
       val published = cachedDescriptorTextAt(dependency, version, target)
 
