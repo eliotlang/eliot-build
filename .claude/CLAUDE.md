@@ -243,7 +243,7 @@ a published eliot tag.
 ## Building and running (compiler CLI)
 
 **The sources are written in eliot's `uses` surface (D21)**, which eliot `v0.9` is the first tag to carry; the `dep`
-lines name `v0.19` — capability passing (D36, `v0.17`) with handles erased (`v0.18`), compiled in parallel — and eliot-test `v0.7`, the tag on it; `v0.6` was the first whose
+lines name `v0.20` — capability passing (D36, `v0.17`) with handles erased (`v0.18`), compiled in parallel (`v0.19`, its warm rebuilds fixed in `v0.20`) — and eliot-test `v0.8`, the tag on it; `v0.6` was the first whose
 `mocked` binds its doubles with a `with` around its run (eliot `v0.15`+ refuse one on a slot). D36 reads a row alias's
 entries exactly, so a definition performing fewer than an alias names writes its clause out (`cachedDescriptorTextAt`).
 `v0.11` was the first that reads `uses *` on a definition taking `uses *` code (D24), and eliot-test `v0.5` the first
@@ -255,7 +255,7 @@ written that way; `v0.10` was the first whose compiler compiles eliot-test `v0.4
 blocks, a bare top level, `test`/`artifact` blocks, a `dep` with no `//name`) — they were never a
 release anyone depends on, so the reader for them was deleted rather than kept. What that asks of
 dependencies is that their tags are spelled the current way, which is why this repository requires
-eliot `v0.19` and eliot-test `v0.7` (above); eliot `v0.7` was the first with the base `src` is written with (§21), and
+eliot `v0.20` and eliot-test `v0.8` (above); eliot `v0.7` was the first with the base `src` is written with (§21), and
 eliot-test `v0.3` the first with `recordCall`, which `TableGit` journals with, and `whenSpawningWrites`, which says
 what a mocked `curl` leaves. `v0.4` and eliot-test's `v0.2` are the first tags of each with `asset` clauses
 and `compiler` lines (and eliot's the first compiler with the `run` mode and a default backend); eliot
@@ -332,7 +332,7 @@ java -jar /home/robert/personal/eliot-build/target/Launcher.jar test   # must ex
 
 A package's `eliot.pkg` must require eliot at `v0.4` or later for this to work at all — every earlier
 tag names its assets with `plugin` blocks, which the launcher no longer reads. This repository
-requires `v0.19` and `../eliot-test` `v0.7`. Three things to check while you are there: a failing case must
+requires `v0.20` and `../eliot-test` `v0.8`. Three things to check while you are there: a failing case must
 make `test` exit 1, a deliberate syntax error in any
 mounted source must make the build exit 1 with the compiler's own diagnostics on the terminal, and
 `nosuch` — and a bare command line, and the old `build test` — must exit 1 rather than printing a

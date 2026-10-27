@@ -19,9 +19,10 @@
 -- repository's own descriptor says `package stdlib { dep //lang }` — and a dependency this package
 -- does not import is not this package's to declare.
 --
--- `v0.19`, everywhere, with eliot-test `v0.7`, the eliot-test tag on it: eliot's capability passing (D36, `v0.17`)
--- with its handles erased (`v0.18`), compiled in parallel. eliot-test `v0.6` was the first tag whose `mocked` binds
--- its doubles with a `with` around its run of the code rather than on its slot, which eliot `v0.15` and later require.
+-- `v0.20`, everywhere, with eliot-test `v0.8`, the eliot-test tag on it: eliot's capability passing (D36, `v0.17`)
+-- with its handles erased (`v0.18`), compiled in parallel (`v0.19`, whose warm rebuilds `v0.20` fixes). eliot-test
+-- `v0.6` was the first tag whose `mocked` binds its doubles with a `with` around its run of the code rather than on its
+-- slot, which eliot `v0.15` and later require.
 -- D36's scope check reads a row alias's entries exactly, so a definition that performs fewer than an alias names
 -- writes its clause out (`cachedDescriptorTextAt`).
 -- `v0.11` with eliot-test `v0.5` was the pin as the first eliot tag that reads `uses *` on a definition taking
@@ -45,17 +46,17 @@ launcher v0.7
 
 package root {
   at .
-  dep github.com/eliotlang/eliot//stdlib v0.19
+  dep github.com/eliotlang/eliot//stdlib v0.20
 }
 
 package launcher {
   dep //root
-  dep github.com/eliotlang/eliot//jvm v0.19
+  dep github.com/eliotlang/eliot//jvm v0.20
   compiler exe-jar -m eliot.build.Launcher
 }
 
 package test {
   dep //root
-  dep github.com/eliotlang/eliot-test//suite v0.7
-  dep github.com/eliotlang/eliot//jvm v0.19
+  dep github.com/eliotlang/eliot-test//suite v0.8
+  dep github.com/eliotlang/eliot//jvm v0.20
 }
